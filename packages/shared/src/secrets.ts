@@ -26,7 +26,7 @@ class SecretRedactor {
       if (result.includes(value)) result = result.split(value).join('[REDACTED]');
     }
     // Common bearer token shapes, in case a provider echoes a header back.
-    return result.replace(/(Bearer\s+)[A-Za-z0-9._\-]{12,}/g, '$1[REDACTED]');
+    return result.replace(/(Bearer\s+)[A-Za-z0-9._-]{12,}/g, '$1[REDACTED]');
   }
 
   redactDeep<T>(value: T): T {

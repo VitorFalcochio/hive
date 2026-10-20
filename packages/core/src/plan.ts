@@ -10,16 +10,25 @@ export function checkPlanGraph(plan: Plan, knownWorkerIds?: ReadonlySet<string>)
   const issues: PlanIssue[] = [];
   const keys = new Set<string>();
   plan.tasks.forEach((task, index) => {
-    if (keys.has(task.key)) issues.push({ path: `tasks.${index}.key`, message: `Duplicate key "${task.key}".` });
+    if (keys.has(task.key))
+      issues.push({ path: `tasks.${index}.key`, message: `Duplicate key "${task.key}".` });
     keys.add(task.key);
     if (task.workerId && knownWorkerIds && !knownWorkerIds.has(task.workerId)) {
-      issues.push({ path: `tasks.${index}.workerId`, message: `Unknown worker "${task.workerId}".` });
+      issues.push({
+        path: `tasks.${index}.workerId`,
+        message: `Unknown worker "${task.workerId}".`,
+      });
     }
   });
   plan.tasks.forEach((task, index) => {
     for (const dep of task.dependsOn) {
-      if (dep === task.key) issues.push({ path: `tasks.${index}.dependsOn`, message: 'A task cannot depend on itself.' });
-      else if (!keys.has(dep)) issues.push({ path: `tasks.${index}.dependsOn`, message: `Unknown dependency "${dep}".` });
+      if (dep === task.key)
+        issues.push({
+          path: `tasks.${index}.dependsOn`,
+          message: 'A task cannot depend on itself.',
+        });
+      else if (!keys.has(dep))
+        issues.push({ path: `tasks.${index}.dependsOn`, message: `Unknown dependency "${dep}".` });
     }
   });
   const cycle = findCycle(plan.tasks);
@@ -82,7 +91,12 @@ export function isBlockedByFailure(task: Task, tasks: Task[]): boolean {
   const byKey = new Map(tasks.map((item) => [item.key, item]));
   return task.dependsOn.some((dep) => {
     const found = byKey.get(dep);
-    return !found || found.status === 'failed' || found.status === 'cancelled' || found.status === 'rejected';
+    return (
+      !found ||
+      found.status === 'failed' ||
+      found.status === 'cancelled' ||
+      found.status === 'rejected'
+    );
   });
 }
 

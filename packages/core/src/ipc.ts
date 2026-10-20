@@ -82,6 +82,13 @@ export interface DashboardSummary {
   workers: number;
 }
 
+export interface RecommendedSetup {
+  /** One entry per agent; `modelId` is null when no catalog model answered. */
+  assignments: { workerId: string; workerName: string; modelId: string | null }[];
+  /** Models that are listed by the provider but failed the test call. */
+  unavailable: { modelId: string; message: string }[];
+}
+
 export interface WorkerHistoryItem {
   task: Task;
   runId: string;
@@ -125,13 +132,24 @@ export const ipcContract = {
     }),
   ),
   'provider.delete': channel<void>()(id),
-  'provider.setKey': channel<ProviderConfig>()(z.object({ providerId: id, key: z.string().min(1).max(500) })),
+  'provider.setKey': channel<ProviderConfig>()(
+    z.object({ providerId: id, key: z.string().min(1).max(500) }),
+  ),
   'provider.clearKey': channel<ProviderConfig>()(id),
   'provider.test': channel<ConnectionTest>()(id),
   'provider.models': channel<ModelInfo[]>()(z.object({ providerId: id, refresh: z.boolean() })),
-  'provider.probeTools': channel<ModelInfo>()(z.object({ providerId: id, modelId: z.string().min(1).max(200) })),
+  'provider.probeTools': channel<ModelInfo>()(
+    z.object({ providerId: id, modelId: z.string().min(1).max(200) }),
+  ),
+
+  'provider.testModel': channel<ConnectionTest>()(
+    z.object({ providerId: id, modelId: z.string().min(1).max(200) }),
+  ),
 
   'worker.list': channel<Worker[]>()(none),
+  'worker.applyRecommended': channel<RecommendedSetup>()(z.object({ providerId: id })),
+  /** Picks, tests and saves the best model of one provider for one agent's role. */
+  'worker.autoConfigure': channel<RecommendedSetup>()(z.object({ workerId: id, providerId: id })),
   'worker.save': channel<Worker>()(workerInputSchema),
   'worker.delete': channel<void>()(id),
   'worker.history': channel<WorkerHistoryItem[]>()(id),
@@ -139,25 +157,29 @@ export const ipcContract = {
 
   'skill.pickCatalog': channel<Settings>()(none),
   'skill.list': channel<SkillSummary[]>()(none),
-  'skill.get': channel<SkillDetail>()(z.object({ name: z.string().min(1).max(64), source: z.enum(['skillforge', 'local']) })),
-  'skill.validate': channel<SkillValidation>()(z.object({ name: z.string().min(1).max(64), source: z.enum(['skillforge', 'local']) })),
+  'skill.get': channel<SkillDetail>()(
+    z.object({ name: z.string().min(1).max(64), source: z.enum(['skillforge', 'local']) }),
+  ),
+  'skill.validate': channel<SkillValidation>()(
+    z.object({ name: z.string().min(1).max(64), source: z.enum(['skillforge', 'local']) }),
+  ),
   'skill.validateDraft': channel<SkillValidation>()(z.string().max(200_000)),
   'skill.install': channel<SkillSummary>()(z.string().min(1).max(64)),
-  'skill.saveLocal': channel<SkillSummary>()(z.object({ raw: z.string().min(1).max(200_000), originalName: z.string().max(64).optional() })),
+  'skill.saveLocal': channel<SkillSummary>()(
+    z.object({ raw: z.string().min(1).max(200_000), originalName: z.string().max(64).optional() }),
+  ),
   'skill.deleteLocal': channel<void>()(z.string().min(1).max(64)),
 
   'mission.list': channel<(Mission & { lastRunStatus: Run['status'] | null })[]>()(none),
-  'mission.create': channel<MissionDetail & { runId: string }>()(z.object({ title: z.string().min(1).max(140), objective: z.string().min(1).max(10_000) })),
+  'mission.create': channel<MissionDetail & { runId: string }>()(
+    z.object({ title: z.string().min(1).max(140), objective: z.string().min(1).max(10_000) }),
+  ),
   'mission.get': channel<MissionDetail>()(id),
   'mission.delete': channel<void>()(id),
 
   'run.get': channel<RunDetail>()(id),
-  'run.plan': channel<RunDetail>()(
-    z.object({ runId: id, queenWorkerId: id }),
-  ),
-  'run.setPlan': channel<RunDetail>()(
-    z.object({ runId: id, plan: planSchema }),
-  ),
+  'run.plan': channel<RunDetail>()(z.object({ runId: id, queenWorkerId: id })),
+  'run.setPlan': channel<RunDetail>()(z.object({ runId: id, plan: planSchema })),
   'run.start': channel<RunDetail>()(id),
   'run.cancel': channel<RunDetail>()(id),
 
@@ -166,16 +188,15 @@ export const ipcContract = {
   'task.approve': channel<Task>()(id),
   'task.reject': channel<Task>()(id),
   'task.diff': channel<TaskDiff>()(id),
-  'task.list': channel<(Task & { missionTitle: string })[]>()(
-    z.object({ runId: id.optional() }),
-  ),
+  'task.list': channel<(Task & { missionTitle: string })[]>()(z.object({ runId: id.optional() })),
 
-  'approval.resolve': channel<void>()(z.object({ approvalId: id, approve: z.boolean(), remember: z.boolean() })),
+  'approval.resolve': channel<void>()(
+    z.object({ approvalId: id, approve: z.boolean(), remember: z.boolean() }),
+  ),
   'approval.pending': channel<Approval[]>()(none),
 
   'events.query': channel<AgentEvent[]>()(eventQuerySchema),
   'dashboard.summary': channel<DashboardSummary>()(none),
-
 } as const;
 
 export type IpcContract = typeof ipcContract;
@@ -188,13 +209,27 @@ export const ipcChannels = Object.keys(ipcContract) as IpcChannel[];
 /** Push notifications from the main process to the renderer. */
 export type HivePush =
   | { kind: 'event'; event: AgentEvent }
-  | { kind: 'changed'; entity: 'run' | 'task' | 'mission' | 'approval' | 'worker' | 'provider' | 'skill' | 'workspace' | 'settings'; id: string | null };
+  | {
+      kind: 'changed';
+      entity:
+        | 'run'
+        | 'task'
+        | 'mission'
+        | 'approval'
+        | 'worker'
+        | 'provider'
+        | 'skill'
+        | 'workspace'
+        | 'settings';
+      id: string | null;
+    };
 
 export const PUSH_CHANNEL = 'hive:push';
 export const INVOKE_CHANNEL = 'hive:invoke';
 
 /** Serialisable result envelope so errors cross IPC with a stable shape. */
-export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
+export type IpcResult<T> =
+  { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
 export interface HiveBridge {
   invoke<C extends IpcChannel>(

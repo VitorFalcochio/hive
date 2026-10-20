@@ -1,6 +1,11 @@
 import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { commandMatchesAllowList, type CommandEvidence, type ToolName, type Worker } from '@hive/core';
+import {
+  commandMatchesAllowList,
+  type CommandEvidence,
+  type ToolName,
+  type Worker,
+} from '@hive/core';
 import type { ToolDefinition } from '@hive/providers';
 import type { ResolvedSkill } from '@hive/skills';
 import { HiveError, resolveInside, toPosixRelative } from '@hive/shared';
@@ -9,7 +14,17 @@ import type { RuntimeEvent } from './runtime';
 
 const MAX_TOOL_OUTPUT = 24_000;
 const MAX_READ_BYTES = 512 * 1024;
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'out', 'build', 'coverage', '.next', '.venv', '__pycache__']);
+const SKIP_DIRS = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'out',
+  'build',
+  'coverage',
+  '.next',
+  '.venv',
+  '__pycache__',
+]);
 
 export interface ToolContext {
   root: string;
@@ -57,11 +72,15 @@ export const toolDefinitions: Record<ToolName | 'finish', ToolDefinition> = {
     type: 'function',
     function: {
       name: 'list_dir',
-      description: 'List files and folders. Paths are relative to the project root. Skips .git and node_modules.',
+      description:
+        'List files and folders. Paths are relative to the project root. Skips .git and node_modules.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Directory relative to the project root. Default "."' },
+          path: {
+            type: 'string',
+            description: 'Directory relative to the project root. Default "."',
+          },
           recursive: { type: 'boolean', description: 'List up to 3 levels deep.' },
         },
       },
@@ -87,10 +106,14 @@ export const toolDefinitions: Record<ToolName | 'finish', ToolDefinition> = {
     type: 'function',
     function: {
       name: 'search',
-      description: 'Search for a literal, case-insensitive string in project files. Returns path:line: text.',
+      description:
+        'Search for a literal, case-insensitive string in project files. Returns path:line: text.',
       parameters: {
         type: 'object',
-        properties: { query: { type: 'string' }, path: { type: 'string', description: 'Directory to search. Default "."' } },
+        properties: {
+          query: { type: 'string' },
+          path: { type: 'string', description: 'Directory to search. Default "."' },
+        },
         required: ['query'],
       },
     },
@@ -99,7 +122,8 @@ export const toolDefinitions: Record<ToolName | 'finish', ToolDefinition> = {
     type: 'function',
     function: {
       name: 'write_file',
-      description: 'Create or overwrite a file with the full content given. Creates parent folders.',
+      description:
+        'Create or overwrite a file with the full content given. Creates parent folders.',
       parameters: {
         type: 'object',
         properties: { path: { type: 'string' }, content: { type: 'string' } },
@@ -131,7 +155,11 @@ export const toolDefinitions: Record<ToolName | 'finish', ToolDefinition> = {
       name: 'run_command',
       description:
         'Run a shell command in the project root (for example tests or a build). The user may need to approve it. Do not use it to commit, push or modify git history.',
-      parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },
+      parameters: {
+        type: 'object',
+        properties: { command: { type: 'string' } },
+        required: ['command'],
+      },
     },
   },
   read_skill_resource: {
@@ -170,7 +198,9 @@ async function listDir(ctx: ToolContext, args: Record<string, unknown>): Promise
   const lines: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (lines.length >= 400) return;
-    const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
+    const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
     for (const entry of entries) {
       if (lines.length >= 400) break;
       const full = path.join(dir, entry.name);
@@ -223,14 +253,18 @@ async function searchTool(ctx: ToolContext, args: Record<string, unknown>): Prom
         const lines = (await readFile(full, 'utf8')).split(/\r?\n/);
         lines.forEach((line, index) => {
           if (results.length < 100 && line.toLowerCase().includes(query)) {
-            results.push(`${toPosixRelative(ctx.root, full)}:${index + 1}: ${line.trim().slice(0, 200)}`);
+            results.push(
+              `${toPosixRelative(ctx.root, full)}:${index + 1}: ${line.trim().slice(0, 200)}`,
+            );
           }
         });
       }
     }
   };
   await walk(base);
-  return results.length ? results.join('\n') + (results.length >= 100 ? '\n[first 100 matches]' : '') : 'No matches.';
+  return results.length
+    ? results.join('\n') + (results.length >= 100 ? '\n[first 100 matches]' : '')
+    : 'No matches.';
 }
 
 async function writeTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
@@ -238,11 +272,23 @@ async function writeTool(ctx: ToolContext, args: Record<string, unknown>): Promi
   guardGit(requested);
   const file = await resolveInside(ctx.root, requested);
   const content = str(args, 'content');
-  const existed = await lstat(file).then(() => true, () => false);
+  const existed = await lstat(file).then(
+    () => true,
+    () => false,
+  );
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, content, 'utf8');
   const rel = toPosixRelative(ctx.root, file);
-  ctx.emit({ type: 'file.changed', level: 'info', message: `${existed ? 'Updated' : 'Created'} ${rel}`, data: { path: rel, action: existed ? 'modified' : 'created', bytes: Buffer.byteLength(content) } });
+  ctx.emit({
+    type: 'file.changed',
+    level: 'info',
+    message: `${existed ? 'Updated' : 'Created'} ${rel}`,
+    data: {
+      path: rel,
+      action: existed ? 'modified' : 'created',
+      bytes: Buffer.byteLength(content),
+    },
+  });
   return `${existed ? 'Updated' : 'Created'} ${rel} (${content.split('\n').length} lines).`;
 }
 
@@ -252,21 +298,40 @@ async function replaceTool(ctx: ToolContext, args: Record<string, unknown>): Pro
   const file = await resolveInside(ctx.root, requested);
   const oldString = str(args, 'old_string');
   const newString = str(args, 'new_string');
-  if (!oldString) throw new HiveError('VALIDATION', 'old_string must not be empty. Use write_file to create files.');
+  if (!oldString)
+    throw new HiveError(
+      'VALIDATION',
+      'old_string must not be empty. Use write_file to create files.',
+    );
   const original = await readFile(file, 'utf8');
   // Models usually send \n; match files that use \r\n too.
   const crlf = original.includes('\r\n') && !oldString.includes('\r\n');
   const needle = crlf ? oldString.replace(/\n/g, '\r\n') : oldString;
   const replacement = crlf ? newString.replace(/\n/g, '\r\n') : newString;
   const count = original.split(needle).length - 1;
-  if (count === 0) throw new HiveError('VALIDATION', 'old_string was not found. Read the file again and copy the text exactly.');
+  if (count === 0)
+    throw new HiveError(
+      'VALIDATION',
+      'old_string was not found. Read the file again and copy the text exactly.',
+    );
   if (count > 1 && args.replace_all !== true) {
-    throw new HiveError('VALIDATION', `old_string appears ${count} times. Add surrounding lines to make it unique, or set replace_all.`);
+    throw new HiveError(
+      'VALIDATION',
+      `old_string appears ${count} times. Add surrounding lines to make it unique, or set replace_all.`,
+    );
   }
-  const updated = args.replace_all === true ? original.split(needle).join(replacement) : original.replace(needle, () => replacement);
+  const updated =
+    args.replace_all === true
+      ? original.split(needle).join(replacement)
+      : original.replace(needle, () => replacement);
   await writeFile(file, updated, 'utf8');
   const rel = toPosixRelative(ctx.root, file);
-  ctx.emit({ type: 'file.changed', level: 'info', message: `Edited ${rel}`, data: { path: rel, action: 'modified', replacements: args.replace_all === true ? count : 1 } });
+  ctx.emit({
+    type: 'file.changed',
+    level: 'info',
+    message: `Edited ${rel}`,
+    data: { path: rel, action: 'modified', replacements: args.replace_all === true ? count : 1 },
+  });
   return `Edited ${rel} (${args.replace_all === true ? count : 1} replacement${count > 1 && args.replace_all === true ? 's' : ''}).`;
 }
 
@@ -277,33 +342,69 @@ async function commandTool(ctx: ToolContext, args: Record<string, unknown>): Pro
   const autoApproved = commandMatchesAllowList(command, ctx.worker.autoApproveCommands);
   if (!autoApproved) {
     const approved = await ctx.requestApproval({ command });
-    if (!approved) return { output: 'The user denied this command. Do not retry it; continue without it or explain in finish.', isError: true };
+    if (!approved)
+      return {
+        output:
+          'The user denied this command. Do not retry it; continue without it or explain in finish.',
+        isError: true,
+      };
   }
-  ctx.emit({ type: 'command.started', level: 'info', message: command, data: { command, autoApproved } });
-  const result = await runCommand(command, { cwd: ctx.root, timeoutMs: ctx.commandTimeoutMs, signal: ctx.signal });
+  ctx.emit({
+    type: 'command.started',
+    level: 'info',
+    message: command,
+    data: { command, autoApproved },
+  });
+  const result = await runCommand(command, {
+    cwd: ctx.root,
+    timeoutMs: ctx.commandTimeoutMs,
+    signal: ctx.signal,
+  });
   const tail = result.output.slice(-4000);
-  ctx.commands.push({ command, exitCode: result.exitCode, durationMs: result.durationMs, timedOut: result.timedOut, outputTail: tail });
+  ctx.commands.push({
+    command,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    timedOut: result.timedOut,
+    outputTail: tail,
+  });
   ctx.emit({
     type: 'command.finished',
     level: result.exitCode === 0 ? 'info' : 'warn',
     message: `${command} → ${result.timedOut ? 'timed out' : result.cancelled ? 'cancelled' : `exit ${result.exitCode}`} (${(result.durationMs / 1000).toFixed(1)}s)`,
-    data: { command, exitCode: result.exitCode, timedOut: result.timedOut, durationMs: result.durationMs, outputTail: tail },
+    data: {
+      command,
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      durationMs: result.durationMs,
+      outputTail: tail,
+    },
   });
   if (result.cancelled) throw new HiveError('CANCELLED', 'Cancelled.');
-  const status = result.timedOut ? `timed out after ${Math.round(ctx.commandTimeoutMs / 1000)}s` : `exit code ${result.exitCode}`;
-  return { output: `$ ${command}\n(${status})\n${truncate(result.output) || '(no output)'}`, isError: result.exitCode !== 0 };
+  const status = result.timedOut
+    ? `timed out after ${Math.round(ctx.commandTimeoutMs / 1000)}s`
+    : `exit code ${result.exitCode}`;
+  return {
+    output: `$ ${command}\n(${status})\n${truncate(result.output) || '(no output)'}`,
+    isError: result.exitCode !== 0,
+  };
 }
 
 async function skillResourceTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
   const skill = ctx.skills.find((item) => item.name === str(args, 'skill'));
-  if (!skill) throw new HiveError('NOT_FOUND', `Skill "${String(args.skill)}" is not assigned to you.`);
+  if (!skill)
+    throw new HiveError('NOT_FOUND', `Skill "${String(args.skill)}" is not assigned to you.`);
   const file = await resolveInside(skill.directory, str(args, 'path'));
   if (await isBinary(file)) return '(binary file — not shown)';
   return readFile(file, 'utf8');
 }
 
 /** Execute one tool call. Errors become tool output so the model can recover. */
-export async function executeTool(ctx: ToolContext, name: ToolName, args: Record<string, unknown>): Promise<ToolOutcome> {
+export async function executeTool(
+  ctx: ToolContext,
+  name: ToolName,
+  args: Record<string, unknown>,
+): Promise<ToolOutcome> {
   try {
     switch (name) {
       case 'list_dir':

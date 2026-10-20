@@ -37,10 +37,18 @@ export async function inspectRepository(folder: string): Promise<RepoInfo> {
   const info = await stat(folder).catch(() => null);
   if (!info?.isDirectory()) throw new HiveError('NOT_FOUND', `Folder not found: ${folder}`);
   const top = await git(folder, ['rev-parse', '--show-toplevel'], { allowFailure: true });
-  if (top.code !== 0) throw new HiveError('NOT_A_GIT_REPO', 'This folder is not inside a Git repository. Run `git init` first.');
+  if (top.code !== 0)
+    throw new HiveError(
+      'NOT_A_GIT_REPO',
+      'This folder is not inside a Git repository. Run `git init` first.',
+    );
   const root = path.resolve(top.stdout.trim());
-  const branch = await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD'], { allowFailure: true });
-  const head = await git(root, ['rev-parse', '--verify', '--quiet', 'HEAD'], { allowFailure: true });
+  const branch = await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+    allowFailure: true,
+  });
+  const head = await git(root, ['rev-parse', '--verify', '--quiet', 'HEAD'], {
+    allowFailure: true,
+  });
   return {
     root,
     branch: branch.code === 0 ? branch.stdout.trim() : null,
@@ -65,7 +73,8 @@ export async function listWorktrees(root: string): Promise<WorktreeEntry[]> {
       if (current) entries.push(current);
       current = { path: path.resolve(line.slice(9)), head: null, branch: null };
     } else if (current && line.startsWith('HEAD ')) current.head = line.slice(5);
-    else if (current && line.startsWith('branch ')) current.branch = line.slice(7).replace(/^refs\/heads\//, '');
+    else if (current && line.startsWith('branch '))
+      current.branch = line.slice(7).replace(/^refs\/heads\//, '');
   }
   if (current) entries.push(current);
   return entries;
@@ -76,7 +85,11 @@ export function isHiveBranch(branch: string): boolean {
 }
 
 export function taskBranchName(runId: string, taskKey: string, attempt: number): string {
-  const safeKey = taskKey.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'task';
+  const safeKey =
+    taskKey
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'task';
   return `${HIVE_BRANCH_PREFIX}${runId.replace(/^run_/, '').slice(0, 8)}/${safeKey}-a${attempt}`;
 }
 
@@ -94,17 +107,23 @@ export class WorktreeManager {
   private assertOwned(target: string): void {
     const relative = path.relative(this.worktreeRoot, path.resolve(target));
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new HiveError('FORBIDDEN_PATH', `Refusing to touch a worktree outside Hive's directory: ${target}`);
+      throw new HiveError(
+        'FORBIDDEN_PATH',
+        `Refusing to touch a worktree outside Hive's directory: ${target}`,
+      );
     }
   }
 
   async create(name: string, branch: string, startPoint: string): Promise<string> {
-    if (!isHiveBranch(branch)) throw new HiveError('GIT', `Task branches must start with ${HIVE_BRANCH_PREFIX}`);
+    if (!isHiveBranch(branch))
+      throw new HiveError('GIT', `Task branches must start with ${HIVE_BRANCH_PREFIX}`);
     const target = path.join(this.worktreeRoot, name);
     this.assertOwned(target);
     await mkdir(this.worktreeRoot, { recursive: true });
     await this.remove(target, branch).catch(() => undefined);
-    await git(this.repoRoot, ['worktree', 'add', '-b', branch, target, startPoint], { timeoutMs: 180_000 });
+    await git(this.repoRoot, ['worktree', 'add', '-b', branch, target, startPoint], {
+      timeoutMs: 180_000,
+    });
     return target;
   }
 
@@ -113,7 +132,8 @@ export class WorktreeManager {
     await git(this.repoRoot, ['worktree', 'remove', '--force', target], { allowFailure: true });
     await rm(target, { recursive: true, force: true });
     await git(this.repoRoot, ['worktree', 'prune'], { allowFailure: true });
-    if (branch && isHiveBranch(branch)) await git(this.repoRoot, ['branch', '-D', branch], { allowFailure: true });
+    if (branch && isHiveBranch(branch))
+      await git(this.repoRoot, ['branch', '-D', branch], { allowFailure: true });
   }
 
   /**
@@ -133,27 +153,43 @@ export class WorktreeManager {
   /** Bring a dependency's branch into a task worktree. Conflicts abort the merge and throw. */
   async mergeBranch(worktree: string, branch: string): Promise<void> {
     this.assertOwned(worktree);
-    const result = await git(worktree, [...hiveCommitFlags, 'merge', '--no-edit', '--no-ff', branch], { allowFailure: true });
+    const result = await git(
+      worktree,
+      [...hiveCommitFlags, 'merge', '--no-edit', '--no-ff', branch],
+      { allowFailure: true },
+    );
     if (result.code !== 0) {
       await git(worktree, ['merge', '--abort'], { allowFailure: true });
-      throw new HiveError('CONFLICT', `Could not merge ${branch} into the task worktree: ${result.stdout || result.stderr}`.trim());
+      throw new HiveError(
+        'CONFLICT',
+        `Could not merge ${branch} into the task worktree: ${result.stdout || result.stderr}`.trim(),
+      );
     }
   }
 
   async headOf(ref: string): Promise<string | null> {
-    const result = await git(this.repoRoot, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { allowFailure: true });
+    const result = await git(
+      this.repoRoot,
+      ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`],
+      { allowFailure: true },
+    );
     return result.code === 0 ? result.stdout.trim() : null;
   }
 }
 
 /** Diff between two refs (or a ref and a working tree when `cwd` is a worktree and `to` is null). */
-export async function diffRefs(cwd: string, from: string, to: string | null, maxPatchBytes = 400_000): Promise<DiffResult> {
+export async function diffRefs(
+  cwd: string,
+  from: string,
+  to: string | null,
+  maxPatchBytes = 400_000,
+): Promise<DiffResult> {
   const range = to ? [`${from}`, to] : [from];
   const numstat = await git(cwd, ['diff', '--numstat', '-z', '--find-renames', ...range]);
   const nameStatus = await git(cwd, ['diff', '--name-status', '-z', '--find-renames', ...range]);
   const statuses = new Map<string, string>();
   const parts = nameStatus.stdout.split('\0').filter((part) => part !== '');
-  for (let i = 0; i < parts.length; ) {
+  for (let i = 0; i < parts.length;) {
     const status = parts[i++]!;
     if (status.startsWith('R') || status.startsWith('C')) {
       i++; // old path

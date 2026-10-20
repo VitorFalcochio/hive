@@ -6,12 +6,20 @@ import { knownMetadataKeys, parseSkillMarkdown, SkillParseError, type ParsedSkil
 const MAX_BODY_LINES = 500;
 const linkPattern = /!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
 
-function diag(severity: SkillDiagnostic['severity'], code: string, message: string, file: string | null = 'SKILL.md'): SkillDiagnostic {
+function diag(
+  severity: SkillDiagnostic['severity'],
+  code: string,
+  message: string,
+  file: string | null = 'SKILL.md',
+): SkillDiagnostic {
   return { severity, code, message, file };
 }
 
 /** Checks that need only the SKILL.md text (used for drafts in the editor, too). */
-export function validateSkillText(raw: string, expectedName: string | null): { parsed: ParsedSkill | null; diagnostics: SkillDiagnostic[] } {
+export function validateSkillText(
+  raw: string,
+  expectedName: string | null,
+): { parsed: ParsedSkill | null; diagnostics: SkillDiagnostic[] } {
   const diagnostics: SkillDiagnostic[] = [];
   let parsed: ParsedSkill;
   try {
@@ -22,23 +30,48 @@ export function validateSkillText(raw: string, expectedName: string | null): { p
     return { parsed: null, diagnostics };
   }
   if (expectedName && parsed.metadata.name !== expectedName) {
-    diagnostics.push(diag('error', 'NAME_MISMATCH', `Skill name "${parsed.metadata.name}" must match its folder "${expectedName}".`));
+    diagnostics.push(
+      diag(
+        'error',
+        'NAME_MISMATCH',
+        `Skill name "${parsed.metadata.name}" must match its folder "${expectedName}".`,
+      ),
+    );
   }
   for (const key of Object.keys(parsed.metadata)) {
     if (!knownMetadataKeys.has(key)) {
-      diagnostics.push(diag('warning', 'UNSUPPORTED_FIELD', `Frontmatter field "${key}" is not part of the portable format.`));
+      diagnostics.push(
+        diag(
+          'warning',
+          'UNSUPPORTED_FIELD',
+          `Frontmatter field "${key}" is not part of the portable format.`,
+        ),
+      );
     }
   }
   if (parsed.metadata['allowed-tools']) {
     diagnostics.push(
-      diag('warning', 'EXPERIMENTAL_TOOLS', '`allowed-tools` is experimental. Hive enforces tool permissions per worker, not per skill.'),
+      diag(
+        'warning',
+        'EXPERIMENTAL_TOOLS',
+        '`allowed-tools` is experimental. Hive enforces tool permissions per worker, not per skill.',
+      ),
     );
   }
   const body = parsed.body.trim();
-  if (!body) diagnostics.push(diag('warning', 'EMPTY_BODY', 'The skill has no instructions after the frontmatter.'));
+  if (!body)
+    diagnostics.push(
+      diag('warning', 'EMPTY_BODY', 'The skill has no instructions after the frontmatter.'),
+    );
   const lines = parsed.body.split('\n').length;
   if (lines > MAX_BODY_LINES) {
-    diagnostics.push(diag('warning', 'LONG_BODY', `Body has ${lines} lines; move detail into references/ (limit ${MAX_BODY_LINES}).`));
+    diagnostics.push(
+      diag(
+        'warning',
+        'LONG_BODY',
+        `Body has ${lines} lines; move detail into references/ (limit ${MAX_BODY_LINES}).`,
+      ),
+    );
   }
   return { parsed, diagnostics };
 }
@@ -50,7 +83,7 @@ export async function validateSkillDirectory(directory: string): Promise<SkillDi
   if (!(await exists(skillFile))) {
     return [diag('error', 'MISSING_SKILL_MD', 'Directory has no SKILL.md.', null)];
   }
-  let files: { relative: string }[] = [];
+  let files: { relative: string }[];
   try {
     files = await listSkillFiles(directory);
   } catch (error) {
@@ -61,7 +94,12 @@ export async function validateSkillDirectory(directory: string): Promise<SkillDi
   diagnostics.push(...text.diagnostics);
   if (files.some((file) => file.relative.startsWith('scripts/'))) {
     diagnostics.push(
-      diag('warning', 'SCRIPTS_PRESENT', 'This skill ships scripts. Hive never executes skill scripts; agents only read them.', 'scripts/'),
+      diag(
+        'warning',
+        'SCRIPTS_PRESENT',
+        'This skill ships scripts. Hive never executes skill scripts; agents only read them.',
+        'scripts/',
+      ),
     );
   }
   if (text.parsed) {
@@ -71,14 +109,20 @@ export async function validateSkillDirectory(directory: string): Promise<SkillDi
       const target = decodeURIComponent(reference.split('#')[0]!);
       if (!target) continue;
       if (path.isAbsolute(target) || /^[a-z]:/i.test(target)) {
-        diagnostics.push(diag('error', 'ABSOLUTE_REFERENCE', `Use a relative path inside the skill: ${reference}`));
+        diagnostics.push(
+          diag('error', 'ABSOLUTE_REFERENCE', `Use a relative path inside the skill: ${reference}`),
+        );
         continue;
       }
       const resolved = path.resolve(directory, target);
       if (!isWithin(directory, resolved)) {
-        diagnostics.push(diag('error', 'REFERENCE_ESCAPES', `Reference escapes the skill directory: ${reference}`));
+        diagnostics.push(
+          diag('error', 'REFERENCE_ESCAPES', `Reference escapes the skill directory: ${reference}`),
+        );
       } else if (!(await exists(resolved))) {
-        diagnostics.push(diag('error', 'BROKEN_REFERENCE', `Referenced file does not exist: ${reference}`));
+        diagnostics.push(
+          diag('error', 'BROKEN_REFERENCE', `Referenced file does not exist: ${reference}`),
+        );
       }
     }
   }

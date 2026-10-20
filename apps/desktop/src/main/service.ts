@@ -1,0 +1,703 @@
+import { app, dialog, safeStorage, shell } from 'electron';
+import path from 'node:path';
+import {
+  ipcContract,
+  rolePresets,
+  defaultLimits,
+  recommendedModelCandidates,
+  type DashboardSummary,
+  type RecommendedSetup,
+  type HivePush,
+  type IpcChannel,
+  type IpcInput,
+  type RunDetail,
+  type WorkerRole,
+} from '@hive/core';
+import { HiveDatabase, Repositories } from '@hive/persistence';
+import { OpenAICompatibleClient, workerCompatibilityIssues } from '@hive/providers';
+import { newId, nowIso, maskSecret, secretRedactor, HiveError, errorMessage } from '@hive/shared';
+import { inspectRepository, listWorktrees, statusPorcelain } from '@hive/workspace';
+import { Scheduler, planMission, validatePlan } from '@hive/orchestrator';
+import { NativeAgentRuntime, type AgentRuntime } from '@hive/agents';
+import { SkillForgeAdapter } from '@hive/skills';
+
+export class DesktopService {
+  readonly repos: Repositories;
+  readonly scheduler: Scheduler;
+  private readonly planning = new Set<string>();
+
+  constructor(
+    database: HiveDatabase,
+    private readonly dataDir: string,
+    private readonly push: (push: HivePush) => void,
+    runtime: AgentRuntime = new NativeAgentRuntime(),
+  ) {
+    this.repos = new Repositories(database);
+    this.scheduler = new Scheduler({
+      repos: this.repos,
+      runtime,
+      chatFor: (providerId) => this.client(providerId),
+      resolveSkills: (names) => this.skills().resolve(names),
+      // Outside the user's repository, on the same drive as Hive's data.
+      worktreeRoot: (workspace) => path.join(this.dataDir, 'worktrees', workspace.id),
+      onEvent: (event) => this.push({ kind: 'event', event }),
+      onChange: (entity, id) => this.changed(entity, id),
+    });
+    if (this.repos.getValue('seeded') !== '1') {
+      for (const role of [
+        'queen',
+        'architect',
+        'frontend',
+        'backend',
+        'qa',
+        'reviewer',
+      ] as WorkerRole[]) {
+        const preset = rolePresets[role];
+        this.repos.workers.put({
+          id: newId('worker'),
+          name: preset.label,
+          role,
+          description: preset.description,
+          providerId: null,
+          modelId: null,
+          skills: [],
+          tools: preset.tools,
+          autoApproveCommands: [],
+          systemPrompt: preset.systemPrompt,
+          limits: { ...defaultLimits },
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        });
+      }
+      this.repos.setValue('seeded', '1');
+    }
+    this.detachWorkers();
+    // A process interruption must not leave a plan marked as running indefinitely.
+    for (const run of this.repos.runs.list()) {
+      if (run.status === 'planning')
+        this.repos.runs.put({
+          ...run,
+          status: 'failed',
+          error: 'O aplicativo fechou durante o planejamento. Gere o plano novamente.',
+        });
+    }
+    this.scheduler.recover();
+  }
+
+  private changed(
+    entity: Extract<HivePush, { kind: 'changed' }>['entity'],
+    id: string | null = null,
+  ) {
+    this.push({ kind: 'changed', entity, id });
+  }
+
+  private active() {
+    const id = this.repos.getValue('activeWorkspace');
+    return id ? this.repos.workspaces.get(id) : null;
+  }
+
+  private skills() {
+    const settings = this.repos.getSettings();
+    return new SkillForgeAdapter({
+      catalogPath: settings.skillforgeCatalogPath,
+      libraryDir: path.join(this.dataDir, 'skills'),
+      cliValidation: settings.skillforgeCliValidation,
+      nodeCommand: {
+        command: process.execPath,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      },
+    });
+  }
+
+  private client(providerId: string) {
+    const provider = this.repos.providers.require(providerId, 'Provedor');
+    if (!provider.enabled) throw new HiveError('PROVIDER', 'O provedor está desativado.');
+    const secret = this.repos.getSecret(providerId);
+    const apiKey = secret ? safeStorage.decryptString(Buffer.from(secret.ciphertext)) : null;
+    return new OpenAICompatibleClient({
+      providerId,
+      kind: provider.kind,
+      baseUrl: provider.baseUrl,
+      apiKey,
+    });
+  }
+
+  private runDetail(id: string): RunDetail {
+    const run = this.repos.runs.require(id, 'Execução');
+    return {
+      run,
+      mission: this.repos.missions.require(run.missionId, 'Missão'),
+      tasks: this.repos.tasks.list('run_id = ?', id),
+      approvals: this.repos.approvals.list('run_id = ?', id),
+    };
+  }
+
+  private setPlan(runId: string, value: IpcInput<'run.setPlan'>['plan']) {
+    const detail = this.runDetail(runId);
+    const { plan, errors } = validatePlan(
+      value,
+      new Set(this.repos.workers.list().map((worker) => worker.id)),
+    );
+    if (!plan) throw new HiveError('VALIDATION', errors.join('\n'));
+    this.repos.transaction(() => {
+      for (const task of detail.tasks) this.repos.tasks.delete(task.id);
+      for (const task of plan.tasks)
+        this.repos.tasks.put({
+          ...task,
+          id: newId('task'),
+          runId,
+          status: 'pending',
+          workerState: 'idle',
+          attempt: 0,
+          branch: null,
+          startCommit: null,
+          worktreePath: null,
+          result: null,
+          error: null,
+          createdAt: nowIso(),
+          startedAt: null,
+          finishedAt: null,
+        });
+      this.repos.runs.put({
+        ...detail.run,
+        status: 'awaiting_plan_approval',
+        planNotes: plan.notes,
+        error: null,
+      });
+    });
+    this.changed('run', runId);
+    return this.runDetail(runId);
+  }
+
+  async invoke(channel: IpcChannel, input: unknown): Promise<unknown> {
+    const parse = <C extends IpcChannel>(key: C) =>
+      ipcContract[key].input.parse(input) as IpcInput<C>;
+    switch (channel) {
+      case 'app.info':
+        return {
+          version: app.getVersion(),
+          platform: process.platform,
+          electron: process.versions.electron,
+          node: process.versions.node,
+          dataDir: this.dataDir,
+          secretStorage: {
+            available: safeStorage.isEncryptionAvailable(),
+            backend:
+              process.platform === 'linux'
+                ? safeStorage.getSelectedStorageBackend()
+                : process.platform,
+          },
+        };
+      case 'app.openExternal': {
+        const url = new URL(parse(channel));
+        if (!['https:', 'http:'].includes(url.protocol))
+          throw new HiveError('VALIDATION', 'Use um endereço HTTP ou HTTPS.');
+        return shell.openExternal(url.toString());
+      }
+      case 'settings.get':
+        return this.repos.getSettings();
+      case 'settings.update': {
+        const result = this.repos.saveSettings({ ...this.repos.getSettings(), ...parse(channel) });
+        this.changed('settings');
+        return result;
+      }
+      case 'workspace.list':
+        return this.repos.workspaces.list();
+      case 'workspace.active':
+        return this.active();
+      case 'workspace.pick': {
+        const selected = await dialog.showOpenDialog({
+          title: 'Selecionar repositório Git',
+          properties: ['openDirectory'],
+        });
+        if (selected.canceled || !selected.filePaths[0]) return null;
+        const repo = await inspectRepository(selected.filePaths[0]);
+        const previous = this.repos.workspaces.list().find((item) => item.path === repo.root);
+        const workspace = this.repos.workspaces.put({
+          id: previous?.id ?? newId('ws'),
+          name: path.basename(repo.root),
+          path: repo.root,
+          defaultBranch: repo.branch ?? 'main',
+          createdAt: previous?.createdAt ?? nowIso(),
+          lastOpenedAt: nowIso(),
+        });
+        this.repos.setValue('activeWorkspace', workspace.id);
+        this.changed('workspace', workspace.id);
+        return workspace;
+      }
+      case 'workspace.activate': {
+        const workspace = this.repos.workspaces.require(parse(channel), 'Workspace');
+        await inspectRepository(workspace.path);
+        this.repos.setValue('activeWorkspace', workspace.id);
+        this.changed('workspace', workspace.id);
+        return workspace;
+      }
+      case 'workspace.remove': {
+        const id = parse(channel);
+        this.repos.workspaces.delete(id);
+        if (this.repos.getValue('activeWorkspace') === id)
+          this.repos.setValue('activeWorkspace', null);
+        this.changed('workspace', id);
+        return;
+      }
+      case 'workspace.status': {
+        const workspace = this.repos.workspaces.require(parse(channel), 'Workspace');
+        const [repo, changed, worktrees] = await Promise.all([
+          inspectRepository(workspace.path),
+          statusPorcelain(workspace.path),
+          listWorktrees(workspace.path),
+        ]);
+        return {
+          workspace,
+          branch: repo.branch,
+          head: repo.head,
+          clean: changed.length === 0,
+          changedFiles: changed.length,
+          worktrees,
+        };
+      }
+      case 'provider.list':
+        return this.repos.providers.list();
+      case 'provider.save': {
+        const value = parse(channel);
+        const previous = value.id ? this.repos.providers.require(value.id, 'Provedor') : null;
+        const result = this.repos.providers.put({
+          ...value,
+          id: previous?.id ?? newId('provider'),
+          hasCredential: previous?.hasCredential ?? false,
+          credentialHint: previous?.credentialHint ?? null,
+          lastTest: null,
+          modelsFetchedAt: null,
+          createdAt: previous?.createdAt ?? nowIso(),
+        });
+        this.repos.deleteModels(result.id);
+        this.changed('provider', result.id);
+        return result;
+      }
+      case 'provider.delete': {
+        const id = parse(channel);
+        this.repos.providers.delete(id);
+        this.repos.deleteSecret(id);
+        this.repos.deleteModels(id);
+        this.detachWorkers();
+        this.changed('provider', id);
+        this.changed('worker');
+        return;
+      }
+      case 'provider.setKey': {
+        const { providerId, key } = parse(channel);
+        if (!safeStorage.isEncryptionAvailable())
+          throw new HiveError(
+            'SECRET_STORE',
+            'O armazenamento seguro do sistema não está disponível.',
+          );
+        const provider = this.repos.providers.require(providerId, 'Provedor');
+        secretRedactor.register(key);
+        const hint = maskSecret(key);
+        this.repos.putSecret(providerId, safeStorage.encryptString(key), hint);
+        const result = this.repos.providers.put({
+          ...provider,
+          hasCredential: true,
+          credentialHint: hint,
+          lastTest: null,
+        });
+        this.changed('provider', providerId);
+        return result;
+      }
+      case 'provider.clearKey': {
+        const id = parse(channel);
+        const provider = this.repos.providers.require(id, 'Provedor');
+        this.repos.deleteSecret(id);
+        const result = this.repos.providers.put({
+          ...provider,
+          hasCredential: false,
+          credentialHint: null,
+          lastTest: null,
+        });
+        this.changed('provider', id);
+        return result;
+      }
+      case 'provider.models': {
+        const { providerId, refresh } = parse(channel);
+        if (!refresh) return this.repos.listModels(providerId);
+        const models = await this.client(providerId).listModels();
+        this.repos.replaceModels(providerId, models);
+        this.repos.providers.put({
+          ...this.repos.providers.require(providerId, 'Provedor'),
+          modelsFetchedAt: nowIso(),
+        });
+        this.changed('provider', providerId);
+        return models;
+      }
+      case 'provider.test': {
+        const id = parse(channel);
+        let result;
+        try {
+          const test = await this.client(id).testConnection();
+          result = {
+            ok: true,
+            message: `${test.modelCount} modelos disponíveis.`,
+            at: nowIso(),
+            latencyMs: test.latencyMs,
+          };
+        } catch (error) {
+          result = {
+            ok: false,
+            message: secretRedactor.redact(errorMessage(error)),
+            at: nowIso(),
+            latencyMs: null,
+          };
+        }
+        this.repos.providers.put({
+          ...this.repos.providers.require(id, 'Provedor'),
+          lastTest: result,
+        });
+        this.changed('provider', id);
+        return result;
+      }
+      case 'provider.testModel': {
+        const { providerId, modelId } = parse(channel);
+        try {
+          const test = await this.client(providerId).testModel(modelId);
+          return {
+            ok: true,
+            message: `${modelId} respondeu em ${test.latencyMs} ms.`,
+            at: nowIso(),
+            latencyMs: test.latencyMs,
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            message: this.modelFailure(modelId, error),
+            at: nowIso(),
+            latencyMs: null,
+          };
+        }
+      }
+      case 'worker.list':
+        return this.repos.workers.list();
+      case 'worker.applyRecommended':
+        return this.applyRecommended(parse(channel).providerId);
+      case 'worker.autoConfigure': {
+        const { workerId, providerId } = parse(channel);
+        return this.applyRecommended(providerId, [workerId]);
+      }
+      case 'worker.save': {
+        const value = parse(channel);
+        const previous = value.id ? this.repos.workers.require(value.id, 'Agente') : null;
+        if (value.providerId) this.repos.providers.require(value.providerId, 'Provedor');
+        const result = this.repos.workers.put({
+          ...value,
+          id: previous?.id ?? newId('worker'),
+          createdAt: previous?.createdAt ?? nowIso(),
+          updatedAt: nowIso(),
+        });
+        this.changed('worker', result.id);
+        return result;
+      }
+      case 'worker.delete': {
+        const id = parse(channel);
+        this.repos.workers.delete(id);
+        this.changed('worker', id);
+        return;
+      }
+      case 'worker.compatibility': {
+        const worker = this.repos.workers.require(parse(channel), 'Agente');
+        return workerCompatibilityIssues(
+          worker,
+          worker.providerId ? this.repos.providers.get(worker.providerId) : null,
+          worker.providerId && worker.modelId
+            ? this.repos.getModel(worker.providerId, worker.modelId)
+            : null,
+        );
+      }
+      case 'skill.list':
+        return this.skills().list();
+      case 'skill.get': {
+        const value = parse(channel);
+        return this.skills().get(value.name, value.source);
+      }
+      case 'skill.validate': {
+        const value = parse(channel);
+        return this.skills().validate(value.name, value.source);
+      }
+      case 'skill.validateDraft':
+        return this.skills().validateDraft(parse(channel));
+      case 'skill.install': {
+        const result = await this.skills().install(parse(channel));
+        this.changed('skill');
+        return result;
+      }
+      case 'skill.pickCatalog': {
+        const selected = await dialog.showOpenDialog({
+          title: 'Catálogo SkillForge',
+          properties: ['openDirectory'],
+        });
+        if (selected.canceled) return this.repos.getSettings();
+        const result = this.repos.saveSettings({
+          ...this.repos.getSettings(),
+          skillforgeCatalogPath: selected.filePaths[0] ?? null,
+        });
+        this.changed('skill');
+        return result;
+      }
+      case 'mission.list':
+        return this.missionList();
+      case 'mission.create': {
+        const value = parse(channel);
+        const workspace = this.active();
+        if (!workspace) throw new HiveError('VALIDATION', 'Selecione um repositório primeiro.');
+        const repo = await inspectRepository(workspace.path);
+        if (!repo.head)
+          throw new HiveError(
+            'GIT',
+            'Crie o primeiro commit do repositório antes de criar uma missão.',
+          );
+        const mission = {
+          ...value,
+          id: newId('mission'),
+          workspaceId: workspace.id,
+          createdAt: nowIso(),
+        };
+        const run = {
+          id: newId('run'),
+          missionId: mission.id,
+          workspaceId: workspace.id,
+          status: 'draft' as const,
+          baseBranch: repo.branch ?? workspace.defaultBranch,
+          baseCommit: repo.head,
+          queenWorkerId: null,
+          planNotes: null,
+          report: null,
+          error: null,
+          createdAt: nowIso(),
+          finishedAt: null,
+        };
+        this.repos.transaction(() => {
+          this.repos.missions.put(mission);
+          this.repos.runs.put(run);
+        });
+        this.changed('mission', mission.id);
+        return { mission, runs: [run], runId: run.id };
+      }
+      case 'mission.get': {
+        const id = parse(channel);
+        return {
+          mission: this.repos.missions.require(id, 'Missão'),
+          runs: this.repos.runs.list('mission_id = ?', id),
+        };
+      }
+      case 'run.get':
+        return this.runDetail(parse(channel));
+      case 'run.setPlan': {
+        const value = parse(channel);
+        if (this.planning.has(value.runId))
+          throw new HiveError('CONFLICT', 'Aguarde o planejamento atual.');
+        if (this.repos.runs.require(value.runId, 'Execução').status === 'running')
+          throw new HiveError('CONFLICT', 'Cancele a execução antes de alterar o plano.');
+        return this.setPlan(value.runId, value.plan);
+      }
+      case 'run.plan': {
+        const { runId, queenWorkerId } = parse(channel);
+        if (this.planning.has(runId))
+          throw new HiveError('CONFLICT', 'Esta execução já está sendo planejada.');
+        const { run, mission } = this.runDetail(runId);
+        if (run.status === 'running')
+          throw new HiveError('CONFLICT', 'Cancele a execução antes de gerar um novo plano.');
+        const queen = this.repos.workers.require(queenWorkerId, 'Queen');
+        if (queen.role !== 'queen' || !queen.providerId || !queen.modelId)
+          throw new HiveError(
+            'VALIDATION',
+            'Configure um provedor e modelo para a Queen na aba Agentes.',
+          );
+        const workspace = this.repos.workspaces.require(run.workspaceId, 'Workspace');
+        this.planning.add(runId);
+        this.repos.runs.put({ ...run, status: 'planning', queenWorkerId, error: null });
+        this.changed('run', runId);
+        try {
+          const result = await planMission({
+            title: mission.title,
+            objective: mission.objective,
+            workers: this.repos.workers.list(),
+            projectContext: `Repository: ${workspace.name}\nBranch: ${run.baseBranch}`,
+            queen,
+            model: queen.modelId,
+            chat: this.client(queen.providerId),
+            signal: AbortSignal.timeout(180_000),
+          });
+          return this.setPlan(runId, result.plan);
+        } catch (error) {
+          const failure = this.modelFailure(queen.modelId, error);
+          this.repos.runs.put({ ...run, queenWorkerId, status: 'failed', error: failure });
+          this.changed('run', runId);
+          throw error instanceof HiveError ? new HiveError(error.code, failure) : error;
+        } finally {
+          this.planning.delete(runId);
+        }
+      }
+      case 'run.start':
+        this.scheduler.start(parse(channel));
+        return this.runDetail(parse(channel));
+      case 'run.cancel':
+        this.scheduler.cancelRun(parse(channel));
+        return this.runDetail(parse(channel));
+      case 'task.cancel':
+        return this.scheduler.cancelTask(parse(channel));
+      case 'task.retry':
+        return this.scheduler.retry(parse(channel));
+      case 'task.approve':
+        return this.scheduler.approve(parse(channel));
+      case 'task.reject':
+        return this.scheduler.reject(parse(channel));
+      case 'task.diff': {
+        const id = parse(channel);
+        const task = this.repos.tasks.require(id, 'Tarefa');
+        const { base, result } = await this.scheduler.diff(id);
+        return {
+          taskId: id,
+          branch: task.branch,
+          base,
+          files: result?.files ?? [],
+          patch: result?.patch ?? '',
+          truncated: result?.truncated ?? false,
+        };
+      }
+      case 'task.list': {
+        const { runId } = parse(channel);
+        return (runId ? this.repos.tasks.list('run_id = ?', runId) : this.repos.tasks.list()).map(
+          (task) => ({
+            ...task,
+            missionTitle:
+              this.repos.missions.get(this.repos.runs.get(task.runId)?.missionId ?? '')?.title ??
+              '',
+          }),
+        );
+      }
+      case 'approval.resolve': {
+        const { approvalId, approve, remember } = parse(channel);
+        return this.scheduler.resolveApproval(approvalId, approve, remember);
+      }
+      case 'approval.pending':
+        return this.repos.approvals.list("status = 'pending'");
+      case 'events.query':
+        return this.repos.queryEvents(parse(channel));
+      case 'dashboard.summary': {
+        const workspace = this.active();
+        const recentMissions = this.missionList().slice(0, 8);
+        const runs = workspace ? this.repos.runs.list('workspace_id = ?', workspace.id) : [];
+        const summary: DashboardSummary = {
+          workspace,
+          recentMissions,
+          activeTasks: runs
+            .flatMap((run) => this.repos.tasks.list('run_id = ?', run.id))
+            .filter((task) => task.status === 'running' || task.status === 'waiting_approval')
+            .map((task) => ({
+              ...task,
+              workerName: this.repos.workers.get(task.workerId ?? '')?.name ?? null,
+            })),
+          pendingApprovals: this.repos.approvals.list("status = 'pending'"),
+          providers: this.repos.providers.list(),
+          recentRuns: runs.slice(0, 8).map((run) => ({
+            ...run,
+            missionTitle: this.repos.missions.get(run.missionId)?.title ?? run.missionId,
+          })),
+          workers: this.repos.workers.list().length,
+          usage: this.repos.usageTotals(workspace?.id ?? null),
+        };
+        return summary;
+      }
+      default:
+        throw new HiveError(
+          'VALIDATION',
+          `O recurso ${channel} ainda não foi implementado nesta versão.`,
+        );
+    }
+  }
+
+  /** Agents pointing at a removed provider would keep a model they can no longer call. */
+  private detachWorkers() {
+    const providers = new Set(this.repos.providers.list().map((provider) => provider.id));
+    for (const worker of this.repos.workers.list())
+      if (worker.providerId && !providers.has(worker.providerId))
+        this.repos.workers.put({ ...worker, providerId: null, modelId: null, updatedAt: nowIso() });
+  }
+
+  /** Provider errors explained for the user; a 404 almost always means a retired model. */
+  private modelFailure(modelId: string, error: unknown) {
+    const detail = secretRedactor.redact(errorMessage(error));
+    if (!detail.includes('(404)')) return detail;
+    return `O modelo "${modelId}" não está disponível neste provedor (provavelmente foi descontinuado, mesmo aparecendo na lista). Na aba Agentes, use "Aplicar configuração recomendada" ou escolha outro modelo. Detalhe: ${detail}`;
+  }
+
+  /**
+   * Assigns a tested model to every agent. Each candidate costs one tiny chat call and
+   * results are shared between agents, so a full team usually needs only a few calls.
+   */
+  private async applyRecommended(
+    providerId: string,
+    workerIds: string[] | null = null,
+  ): Promise<RecommendedSetup> {
+    const provider = this.repos.providers.require(providerId, 'Provedor');
+    const client = this.client(providerId);
+    let catalog = this.repos.listModels(providerId);
+    if (!catalog.length) {
+      catalog = await client.listModels();
+      this.repos.replaceModels(providerId, catalog);
+      this.repos.providers.put({ ...provider, modelsFetchedAt: nowIso() });
+    }
+    const ids = catalog.map((model) => model.id);
+    const free = catalog
+      .filter(
+        (model) =>
+          model.pricing?.inputPerMTok === 0 &&
+          model.pricing.outputPerMTok === 0 &&
+          model.capabilities.tools !== 'no',
+      )
+      .map((model) => model.id);
+    const tested = new Map<string, Promise<string | null>>();
+    const works = (modelId: string) => {
+      if (!tested.has(modelId))
+        tested.set(
+          modelId,
+          client.testModel(modelId).then(
+            () => null,
+            (error: unknown) => this.modelFailure(modelId, error),
+          ),
+        );
+      return tested.get(modelId)!;
+    };
+    const result: RecommendedSetup = { assignments: [], unavailable: [] };
+    const workers = this.repos.workers
+      .list()
+      .filter((worker) => !workerIds || workerIds.includes(worker.id));
+    if (workerIds && workers.length !== workerIds.length)
+      throw new HiveError('NOT_FOUND', 'Agente não encontrado.');
+    for (const worker of workers) {
+      let modelId: string | null = null;
+      for (const candidate of recommendedModelCandidates(provider.kind, worker.role, ids, free)) {
+        if ((await works(candidate)) === null) {
+          modelId = candidate;
+          break;
+        }
+      }
+      // Without a working model the provider is still recorded, so the card shows the problem.
+      this.repos.workers.put({ ...worker, providerId, modelId, updatedAt: nowIso() });
+      result.assignments.push({ workerId: worker.id, workerName: worker.name, modelId });
+    }
+    for (const [modelId, outcome] of tested) {
+      const message = await outcome;
+      if (message) result.unavailable.push({ modelId, message });
+    }
+    this.changed('worker');
+    return result;
+  }
+
+  private missionList() {
+    const workspace = this.active();
+    if (!workspace) return [];
+    return this.repos.missions.list('workspace_id = ?', workspace.id).map((mission) => ({
+      ...mission,
+      lastRunStatus: this.repos.runs.list('mission_id = ?', mission.id)[0]?.status ?? null,
+    }));
+  }
+}

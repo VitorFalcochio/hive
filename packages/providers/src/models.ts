@@ -33,7 +33,8 @@ export function modelFamily(id: string): string | null {
 }
 
 /** Models that are clearly not chat models are hidden from the picker. */
-const nonChat = /(embed|whisper|tts|dall-e|image|moderation|rerank|guard|transcri|audio|speech|clip|vision-only)/i;
+const nonChat =
+  /(embed|whisper|tts|dall-e|image|moderation|rerank|guard|transcri|audio|speech|clip|vision-only)/i;
 
 function positiveInt(value: unknown): number | null {
   const n = typeof value === 'string' ? Number(value) : value;
@@ -56,8 +57,11 @@ export function normalizeModels(endpoint: ProviderEndpoint, body: unknown): Mode
   for (const raw of list as RawModel[]) {
     if (typeof raw?.id !== 'string' || !raw.id || nonChat.test(raw.id)) continue;
     if (raw.active === false) continue;
-    const supported = Array.isArray(raw.supported_parameters) ? (raw.supported_parameters as string[]) : null;
-    const fromList = (names: string[]): Capability => (supported ? (names.some((n) => supported.includes(n)) ? 'yes' : 'no') : 'unknown');
+    const supported = Array.isArray(raw.supported_parameters)
+      ? (raw.supported_parameters as string[])
+      : null;
+    const fromList = (names: string[]): Capability =>
+      supported ? (names.some((n) => supported.includes(n)) ? 'yes' : 'no') : 'unknown';
     const input = perMillion(raw.pricing?.prompt);
     const output = perMillion(raw.pricing?.completion);
     models.push({
@@ -72,7 +76,8 @@ export function normalizeModels(endpoint: ProviderEndpoint, body: unknown): Mode
         reasoning: fromList(['reasoning', 'include_reasoning']),
       },
       capabilitySource: supported ? 'provider-metadata' : 'unverified',
-      pricing: input !== null && output !== null ? { inputPerMTok: input, outputPerMTok: output } : null,
+      pricing:
+        input !== null && output !== null ? { inputPerMTok: input, outputPerMTok: output } : null,
     });
   }
   return models.sort((a, b) => a.id.localeCompare(b.id));

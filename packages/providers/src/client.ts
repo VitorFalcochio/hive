@@ -23,22 +23,41 @@ export class OpenAICompatibleClient implements ChatClient {
   }
 
   private headers(): Record<string, string> {
-    const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json' };
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      accept: 'application/json',
+    };
     if (this.endpoint.apiKey) headers.authorization = `Bearer ${this.endpoint.apiKey}`;
     if (this.endpoint.kind === 'openrouter') headers['x-title'] = 'Hive';
     return headers;
   }
 
-  private async request(pathname: string, init: RequestInit, signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  private async request(
+    pathname: string,
+    init: RequestInit,
+    signal?: AbortSignal,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+  ) {
     const timeout = AbortSignal.timeout(timeoutMs);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
     let response: Response;
     try {
-      response = await this.fetchImpl(this.url(pathname), { ...init, headers: this.headers(), signal: combined });
+      response = await this.fetchImpl(this.url(pathname), {
+        ...init,
+        headers: this.headers(),
+        signal: combined,
+      });
     } catch (error) {
       if (signal?.aborted) throw new HiveError('CANCELLED', 'Request cancelled.');
-      if (timeout.aborted) throw new HiveError('TIMEOUT', `Provider did not respond within ${Math.round(timeoutMs / 1000)}s.`);
-      throw new HiveError('PROVIDER', `Could not reach ${this.endpoint.baseUrl}: ${secretRedactor.redact(errorMessage(error))}`);
+      if (timeout.aborted)
+        throw new HiveError(
+          'TIMEOUT',
+          `Provider did not respond within ${Math.round(timeoutMs / 1000)}s.`,
+        );
+      throw new HiveError(
+        'PROVIDER',
+        `Could not reach ${this.endpoint.baseUrl}: ${secretRedactor.redact(errorMessage(error))}`,
+      );
     }
     if (!response.ok) throw await this.httpError(response);
     try {
@@ -53,9 +72,16 @@ export class OpenAICompatibleClient implements ChatClient {
     try {
       const text = await response.text();
       try {
-        const body = JSON.parse(text) as { error?: { message?: string } | string; message?: string; detail?: string };
+        const body = JSON.parse(text) as {
+          error?: { message?: string } | string;
+          message?: string;
+          detail?: string;
+        };
         detail =
-          (typeof body.error === 'string' ? body.error : body.error?.message) ?? body.message ?? body.detail ?? text;
+          (typeof body.error === 'string' ? body.error : body.error?.message) ??
+          body.message ??
+          body.detail ??
+          text;
       } catch {
         detail = text;
       }
@@ -65,10 +91,18 @@ export class OpenAICompatibleClient implements ChatClient {
     detail = secretRedactor.redact(detail).slice(0, 500);
     const status = response.status;
     if (status === 401 || status === 403) {
-      return new HiveError('PROVIDER_AUTH', `Authentication failed (${status}). Check the API key. ${detail}`.trim());
+      return new HiveError(
+        'PROVIDER_AUTH',
+        `Authentication failed (${status}). Check the API key. ${detail}`.trim(),
+      );
     }
-    if (status === 429) return new HiveError('PROVIDER', `Rate limited or out of quota (429). ${detail}`.trim());
-    if (status === 404) return new HiveError('PROVIDER', `Not found (404) — check the endpoint and model id. ${detail}`.trim());
+    if (status === 429)
+      return new HiveError('PROVIDER', `Rate limited or out of quota (429). ${detail}`.trim());
+    if (status === 404)
+      return new HiveError(
+        'PROVIDER',
+        `Not found (404) — check the endpoint and model id. ${detail}`.trim(),
+      );
     return new HiveError('PROVIDER', `Provider error ${status}. ${detail}`.trim());
   }
 
@@ -87,23 +121,38 @@ export class OpenAICompatibleClient implements ChatClient {
   async chat(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
     const payload: Record<string, unknown> = { model: request.model, messages: request.messages };
     if (request.tools?.length) payload.tools = request.tools;
-    if (request.temperature !== null && request.temperature !== undefined) payload.temperature = request.temperature;
+    if (request.temperature !== null && request.temperature !== undefined)
+      payload.temperature = request.temperature;
     if (request.maxTokens) payload.max_tokens = request.maxTokens;
     if (request.jsonMode) payload.response_format = { type: 'json_object' };
     if (this.endpoint.kind === 'openrouter') payload.usage = { include: true };
 
     const started = Date.now();
-    const body = (await this.request('/chat/completions', { method: 'POST', body: JSON.stringify(payload) }, signal)) as {
+    const body = (await this.request(
+      '/chat/completions',
+      { method: 'POST', body: JSON.stringify(payload) },
+      signal,
+    )) as {
       choices?: {
-        message?: { content?: string | null; tool_calls?: ToolCall[]; reasoning_content?: string; reasoning?: string };
+        message?: {
+          content?: string | null;
+          tool_calls?: ToolCall[];
+          reasoning_content?: string;
+          reasoning?: string;
+        };
         finish_reason?: string | null;
       }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };
       error?: { message?: string };
     };
-    if (body.error) throw new HiveError('PROVIDER', secretRedactor.redact(body.error.message ?? 'Provider returned an error.'));
+    if (body.error)
+      throw new HiveError(
+        'PROVIDER',
+        secretRedactor.redact(body.error.message ?? 'Provider returned an error.'),
+      );
     const choice = body.choices?.[0];
-    if (!choice?.message) throw new HiveError('PROVIDER', 'Provider response contained no message.');
+    if (!choice?.message)
+      throw new HiveError('PROVIDER', 'Provider response contained no message.');
     const toolCalls = (choice.message.tool_calls ?? []).filter((call) => call?.function?.name);
     return {
       message: {
@@ -122,29 +171,57 @@ export class OpenAICompatibleClient implements ChatClient {
       reasoning: choice.message.reasoning_content ?? choice.message.reasoning ?? null,
       finishReason: choice.finish_reason ?? null,
       usage: body.usage
-        ? { promptTokens: body.usage.prompt_tokens ?? 0, completionTokens: body.usage.completion_tokens ?? 0 }
+        ? {
+            promptTokens: body.usage.prompt_tokens ?? 0,
+            completionTokens: body.usage.completion_tokens ?? 0,
+          }
         : null,
       latencyMs: Date.now() - started,
     };
   }
 
   /**
+   * Smallest possible chat call to confirm a model really answers. Listing models is not
+   * enough: providers keep retired models in the catalog while calls to them return 404.
+   */
+  async testModel(modelId: string, signal?: AbortSignal): Promise<{ latencyMs: number }> {
+    const timeout = AbortSignal.timeout(45_000);
+    const response = await this.chat(
+      { model: modelId, messages: [{ role: 'user', content: 'Reply with: ok' }], maxTokens: 16 },
+      signal ? AbortSignal.any([signal, timeout]) : timeout,
+    );
+    return { latencyMs: response.latencyMs };
+  }
+
+  /**
    * Explicit, user-triggered check of tool calling for one model. Costs a few tokens.
    * `unknown` is returned when the model answered without calling the tool: inconclusive.
    */
-  async probeTools(modelId: string, signal?: AbortSignal): Promise<{ tools: 'yes' | 'no' | 'unknown'; message: string }> {
+  async probeTools(
+    modelId: string,
+    signal?: AbortSignal,
+  ): Promise<{ tools: 'yes' | 'no' | 'unknown'; message: string }> {
     try {
       const response = await this.chat(
         {
           model: modelId,
-          messages: [{ role: 'user', content: 'Call the `ping` tool with {"value": "hive"}. Do not reply with text.' }],
+          messages: [
+            {
+              role: 'user',
+              content: 'Call the `ping` tool with {"value": "hive"}. Do not reply with text.',
+            },
+          ],
           tools: [
             {
               type: 'function',
               function: {
                 name: 'ping',
                 description: 'Connectivity check.',
-                parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] },
+                parameters: {
+                  type: 'object',
+                  properties: { value: { type: 'string' } },
+                  required: ['value'],
+                },
               },
             },
           ],
@@ -155,10 +232,17 @@ export class OpenAICompatibleClient implements ChatClient {
       if (response.message.tool_calls?.some((call) => call.function.name === 'ping')) {
         return { tools: 'yes', message: 'Model returned a well-formed tool call.' };
       }
-      return { tools: 'unknown', message: 'Model replied without calling the tool; support is unconfirmed.' };
+      return {
+        tools: 'unknown',
+        message: 'Model replied without calling the tool; support is unconfirmed.',
+      };
     } catch (error) {
       const message = errorMessage(error);
-      if (error instanceof HiveError && error.code === 'PROVIDER' && /tool|function/i.test(message)) {
+      if (
+        error instanceof HiveError &&
+        error.code === 'PROVIDER' &&
+        /tool|function/i.test(message)
+      ) {
         return { tools: 'no', message };
       }
       throw error;

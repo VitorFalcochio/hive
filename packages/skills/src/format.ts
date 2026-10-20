@@ -32,7 +32,14 @@ export const skillMetadataSchema = z
 
 export type SkillMetadata = z.infer<typeof skillMetadataSchema>;
 
-export const knownMetadataKeys = new Set(['name', 'description', 'license', 'compatibility', 'metadata', 'allowed-tools']);
+export const knownMetadataKeys = new Set([
+  'name',
+  'description',
+  'license',
+  'compatibility',
+  'metadata',
+  'allowed-tools',
+]);
 
 export interface ParsedSkill {
   metadata: SkillMetadata;
@@ -51,13 +58,15 @@ export class SkillParseError extends Error {
 }
 
 export function parseSkillMarkdown(text: string): ParsedSkill {
-  const normalized = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
+  const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(normalized);
-  if (!match) throw new SkillParseError('FRONTMATTER', 'Start SKILL.md with YAML between two --- lines.');
+  if (!match)
+    throw new SkillParseError('FRONTMATTER', 'Start SKILL.md with YAML between two --- lines.');
   let value: unknown;
   try {
     const document = parseDocument(match[1]!, { uniqueKeys: true });
-    if (document.errors.length) throw new Error(document.errors.map((error) => error.message).join('; '));
+    if (document.errors.length)
+      throw new Error(document.errors.map((error) => error.message).join('; '));
     value = document.toJS({ maxAliasCount: 0 });
   } catch (error) {
     throw new SkillParseError(
@@ -69,7 +78,9 @@ export function parseSkillMarkdown(text: string): ParsedSkill {
   if (!parsed.success) {
     throw new SkillParseError(
       'METADATA',
-      parsed.error.issues.map((issue) => `${issue.path.join('.') || 'frontmatter'}: ${issue.message}`).join('; '),
+      parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || 'frontmatter'}: ${issue.message}`)
+        .join('; '),
     );
   }
   return {

@@ -20,13 +20,17 @@ export function workerCompatibilityIssues(
     return issues;
   }
   if (!model) {
-    issues.push(`Warning: model "${worker.modelId}" is not in the cached catalog; refresh models to verify it exists.`);
+    issues.push(
+      `Warning: model "${worker.modelId}" is not in the cached catalog; refresh models to verify it exists.`,
+    );
     return issues;
   }
   if (model.capabilities.tools === 'no') {
     issues.push(`Model "${model.id}" does not support tool calling, which agents require.`);
   } else if (model.capabilities.tools === 'unknown') {
-    issues.push(`Warning: tool calling for "${model.id}" is unverified. Use "Probe tools" on the Providers screen.`);
+    issues.push(
+      `Warning: tool calling for "${model.id}" is unverified. Use "Probe tools" on the Providers screen.`,
+    );
   }
   return issues;
 }

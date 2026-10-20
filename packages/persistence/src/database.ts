@@ -50,7 +50,9 @@ export class HiveDatabase {
   constructor(file: string) {
     if (file !== ':memory:') mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    this.db.exec(
+      'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;',
+    );
     this.migrate();
   }
 

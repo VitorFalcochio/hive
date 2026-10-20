@@ -38,7 +38,10 @@ const shape = `{
 export function buildPlanPrompt(request: PlanRequest): ChatMessage[] {
   const workers = request.workers
     .filter((worker) => worker.role !== 'queen')
-    .map((worker) => `- id: ${worker.id} | ${worker.name} (${worker.role}) — ${worker.description || 'no description'}`)
+    .map(
+      (worker) =>
+        `- id: ${worker.id} | ${worker.name} (${worker.role}) — ${worker.description || 'no description'}`,
+    )
     .join('\n');
   return [
     {
@@ -49,7 +52,7 @@ export function buildPlanPrompt(request: PlanRequest): ChatMessage[] {
         'Rules:',
         '- 1 to 6 tasks. Each task must be completable by one worker in one session.',
         '- Tasks that touch different files should not depend on each other, so they can run in parallel.',
-        '- Use dependsOn only when a task needs another task\'s output.',
+        "- Use dependsOn only when a task needs another task's output.",
         '- Every task needs 1-5 concrete, verifiable acceptance criteria.',
         '- Assign workerId only from the provided list; match the worker role to the work.',
       ].join('\n'),
@@ -71,13 +74,22 @@ export function extractJson(text: string): unknown {
   return JSON.parse(candidate.slice(start, end + 1));
 }
 
-export function validatePlan(value: unknown, workerIds: ReadonlySet<string>): { plan: Plan | null; errors: string[] } {
+export function validatePlan(
+  value: unknown,
+  workerIds: ReadonlySet<string>,
+): { plan: Plan | null; errors: string[] } {
   const parsed = planSchema.safeParse(value);
   if (!parsed.success) {
-    return { plan: null, errors: parsed.error.issues.map((issue) => `${issue.path.join('.') || 'plan'}: ${issue.message}`) };
+    return {
+      plan: null,
+      errors: parsed.error.issues.map(
+        (issue) => `${issue.path.join('.') || 'plan'}: ${issue.message}`,
+      ),
+    };
   }
   const issues = checkPlanGraph(parsed.data, workerIds);
-  if (issues.length) return { plan: null, errors: issues.map((issue) => `${issue.path}: ${issue.message}`) };
+  if (issues.length)
+    return { plan: null, errors: issues.map((issue) => `${issue.path}: ${issue.message}`) };
   return { plan: parsed.data, errors: [] };
 }
 
@@ -105,19 +117,39 @@ export async function planMission(request: PlanRequest): Promise<PlanResult> {
       value = extractJson(text);
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
-      messages.push({ role: 'assistant', content: text }, { role: 'user', content: `That was not valid JSON (${lastError}). Reply with only the JSON object.` });
+      messages.push(
+        { role: 'assistant', content: text },
+        {
+          role: 'user',
+          content: `That was not valid JSON (${lastError}). Reply with only the JSON object.`,
+        },
+      );
       continue;
     }
     // Models sometimes invent worker ids; drop unknown ones rather than failing the whole plan.
     if (value && typeof value === 'object' && Array.isArray((value as { tasks?: unknown }).tasks)) {
       for (const task of (value as { tasks: Record<string, unknown>[] }).tasks) {
-        if (task && typeof task === 'object' && (typeof task.workerId !== 'string' || !workerIds.has(task.workerId))) task.workerId = null;
+        if (
+          task &&
+          typeof task === 'object' &&
+          (typeof task.workerId !== 'string' || !workerIds.has(task.workerId))
+        )
+          task.workerId = null;
       }
     }
     const { plan, errors } = validatePlan(value, workerIds);
     if (plan) return { plan, attempts: attempt, usage };
     lastError = errors.slice(0, 8).join('; ');
-    messages.push({ role: 'assistant', content: text }, { role: 'user', content: `The plan is invalid: ${lastError}. Fix these problems and reply with only the corrected JSON object.` });
+    messages.push(
+      { role: 'assistant', content: text },
+      {
+        role: 'user',
+        content: `The plan is invalid: ${lastError}. Fix these problems and reply with only the corrected JSON object.`,
+      },
+    );
   }
-  throw new HiveError('VALIDATION', `The Queen could not produce a valid plan after ${maxAttempts} attempts: ${lastError}`);
+  throw new HiveError(
+    'VALIDATION',
+    `The Queen could not produce a valid plan after ${maxAttempts} attempts: ${lastError}`,
+  );
 }

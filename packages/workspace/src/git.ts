@@ -11,7 +11,11 @@ export interface GitResult {
  * Runs git without a shell. Never prompts (credential helpers, editors, pagers are disabled),
  * so a misconfigured repository fails fast instead of hanging a worker.
  */
-export function git(cwd: string, args: string[], options: { timeoutMs?: number; allowFailure?: boolean } = {}): Promise<GitResult> {
+export function git(
+  cwd: string,
+  args: string[],
+  options: { timeoutMs?: number; allowFailure?: boolean } = {},
+): Promise<GitResult> {
   return new Promise((resolve, reject) => {
     execFile(
       'git',
@@ -37,7 +41,12 @@ export function git(cwd: string, args: string[], options: { timeoutMs?: number; 
           return;
         }
         if (code !== 0 && !options.allowFailure) {
-          reject(new HiveError('GIT', `git ${args[0]} failed: ${(stderr || stdout || errorMessage(error)).trim()}`));
+          reject(
+            new HiveError(
+              'GIT',
+              `git ${args[0]} failed: ${(stderr || stdout || errorMessage(error)).trim()}`,
+            ),
+          );
           return;
         }
         resolve({ stdout, stderr, code });

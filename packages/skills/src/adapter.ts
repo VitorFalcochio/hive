@@ -49,7 +49,10 @@ export class SkillForgeAdapter {
   private async cliPath(): Promise<string | null> {
     const base = this.options.catalogPath;
     if (!base) return null;
-    for (const candidate of [path.join(base, 'packages/cli/dist/index.js'), path.join(base, '../packages/cli/dist/index.js')]) {
+    for (const candidate of [
+      path.join(base, 'packages/cli/dist/index.js'),
+      path.join(base, '../packages/cli/dist/index.js'),
+    ]) {
       if (await exists(candidate)) return candidate;
     }
     return null;
@@ -63,7 +66,10 @@ export class SkillForgeAdapter {
     const files = await listSkillFiles(directory).catch(() => []);
     const base = {
       source,
-      category: source === 'local' ? 'local' : path.relative(root, path.dirname(directory)).split(path.sep).join('/') || '.',
+      category:
+        source === 'local'
+          ? 'local'
+          : path.relative(root, path.dirname(directory)).split(path.sep).join('/') || '.',
       resources: files.map((file) => file.relative).filter((file) => file !== 'SKILL.md'),
       hasScripts: files.some((file) => file.relative.startsWith('scripts/')),
       installed: source === 'local',
@@ -95,40 +101,51 @@ export class SkillForgeAdapter {
     const root = await this.catalogSkillsRoot();
     if (!root) return [];
     const directories = await discoverSkillDirectories(root);
-    return Promise.all(directories.map((directory) => this.summarize(directory, 'skillforge', root)));
+    return Promise.all(
+      directories.map((directory) => this.summarize(directory, 'skillforge', root)),
+    );
   }
 
   async listLocal(): Promise<SkillSummary[]> {
     await mkdir(this.options.libraryDir, { recursive: true });
     const directories = await discoverSkillDirectories(this.options.libraryDir);
-    return Promise.all(directories.map((directory) => this.summarize(directory, 'local', this.options.libraryDir)));
+    return Promise.all(
+      directories.map((directory) => this.summarize(directory, 'local', this.options.libraryDir)),
+    );
   }
 
   async list(): Promise<SkillSummary[]> {
     const [local, catalog] = await Promise.all([this.listLocal(), this.listCatalog()]);
     const installed = new Set(local.map((skill) => skill.name));
-    return [...local, ...catalog.map((skill) => ({ ...skill, installed: installed.has(skill.name) }))].sort(
-      (a, b) => a.name.localeCompare(b.name) || a.source.localeCompare(b.source),
-    );
+    return [
+      ...local,
+      ...catalog.map((skill) => ({ ...skill, installed: installed.has(skill.name) })),
+    ].sort((a, b) => a.name.localeCompare(b.name) || a.source.localeCompare(b.source));
   }
 
   private async directoryFor(name: string, source: Source): Promise<string> {
     skillNameSchema.parse(name);
     if (source === 'local') {
       const directory = path.join(this.options.libraryDir, name);
-      if (!(await exists(path.join(directory, 'SKILL.md')))) throw new HiveError('NOT_FOUND', `Local skill not found: ${name}`);
+      if (!(await exists(path.join(directory, 'SKILL.md'))))
+        throw new HiveError('NOT_FOUND', `Local skill not found: ${name}`);
       return directory;
     }
     const root = await this.catalogSkillsRoot();
     if (!root) throw new HiveError('SKILL', 'No SkillForge catalog is connected.');
-    const directory = (await discoverSkillDirectories(root)).find((dir) => path.basename(dir) === name);
+    const directory = (await discoverSkillDirectories(root)).find(
+      (dir) => path.basename(dir) === name,
+    );
     if (!directory) throw new HiveError('NOT_FOUND', `Skill not found in catalog: ${name}`);
     return directory;
   }
 
   async get(name: string, source: Source): Promise<SkillDetail> {
     const directory = await this.directoryFor(name, source);
-    const root = source === 'local' ? this.options.libraryDir : ((await this.catalogSkillsRoot()) ?? directory);
+    const root =
+      source === 'local'
+        ? this.options.libraryDir
+        : ((await this.catalogSkillsRoot()) ?? directory);
     const summary = await this.summarize(directory, source, root);
     const raw = await readTextFile(path.join(directory, 'SKILL.md'));
     let body = raw;
@@ -137,7 +154,8 @@ export class SkillForgeAdapter {
     } catch {
       // keep raw body; validation reports the problem
     }
-    if (source === 'skillforge') summary.installed = await exists(path.join(this.options.libraryDir, name, 'SKILL.md'));
+    if (source === 'skillforge')
+      summary.installed = await exists(path.join(this.options.libraryDir, name, 'SKILL.md'));
     return { ...summary, raw, body };
   }
 
@@ -148,12 +166,20 @@ export class SkillForgeAdapter {
       if (cli) return this.validateWithCli(cli, directory);
     }
     const diagnostics = await validateSkillDirectory(directory);
-    return { valid: !diagnostics.some((d) => d.severity === 'error'), validator: 'hive', diagnostics };
+    return {
+      valid: !diagnostics.some((d) => d.severity === 'error'),
+      validator: 'hive',
+      diagnostics,
+    };
   }
 
   validateDraft(raw: string): SkillValidation {
     const { diagnostics } = validateSkillText(raw, null);
-    return { valid: !diagnostics.some((d) => d.severity === 'error'), validator: 'hive', diagnostics };
+    return {
+      valid: !diagnostics.some((d) => d.severity === 'error'),
+      validator: 'hive',
+      diagnostics,
+    };
   }
 
   private validateWithCli(cli: string, directory: string): Promise<SkillValidation> {
@@ -167,17 +193,30 @@ export class SkillForgeAdapter {
           try {
             const result = JSON.parse(stdout) as {
               valid: boolean;
-              diagnostics: { severity: 'error' | 'warning'; code: string; path: string; message: string; line?: number }[];
+              diagnostics: {
+                severity: 'error' | 'warning';
+                code: string;
+                path: string;
+                message: string;
+                line?: number;
+              }[];
             };
             const diagnostics: SkillDiagnostic[] = result.diagnostics.map((item) => ({
               severity: item.severity,
               code: item.code,
               message: item.message,
-              file: item.path ? `${path.relative(directory, item.path).split(path.sep).join('/') || 'SKILL.md'}${item.line ? `:${item.line}` : ''}` : null,
+              file: item.path
+                ? `${path.relative(directory, item.path).split(path.sep).join('/') || 'SKILL.md'}${item.line ? `:${item.line}` : ''}`
+                : null,
             }));
             resolve({ valid: result.valid, validator: 'skillforge-cli', diagnostics });
           } catch {
-            reject(new HiveError('SKILL', `SkillForge CLI validation failed: ${error ? errorMessage(error) : 'unexpected output'}`));
+            reject(
+              new HiveError(
+                'SKILL',
+                `SkillForge CLI validation failed: ${error ? errorMessage(error) : 'unexpected output'}`,
+              ),
+            );
           }
         },
       );
@@ -189,7 +228,8 @@ export class SkillForgeAdapter {
     const source = await this.directoryFor(name, 'skillforge');
     const before = await validateSkillDirectory(source);
     const errors = before.filter((d) => d.severity === 'error');
-    if (errors.length) throw new HiveError('SKILL', `Skill is invalid: ${errors.map((d) => d.message).join('; ')}`);
+    if (errors.length)
+      throw new HiveError('SKILL', `Skill is invalid: ${errors.map((d) => d.message).join('; ')}`);
     await mkdir(this.options.libraryDir, { recursive: true });
     const staging = path.join(this.options.libraryDir, `.staging-${newId('skill')}`);
     const destination = path.join(this.options.libraryDir, name);
@@ -198,10 +238,15 @@ export class SkillForgeAdapter {
       for (const file of await listSkillFiles(source)) {
         const target = path.join(staging, ...file.relative.split('/'));
         await mkdir(path.dirname(target), { recursive: true });
-        await cp(path.join(source, ...file.relative.split('/')), target, { verbatimSymlinks: true });
+        await cp(path.join(source, ...file.relative.split('/')), target, {
+          verbatimSymlinks: true,
+        });
       }
-      const after = await validateSkillDirectory(staging).then((items) => items.filter((d) => d.code !== 'NAME_MISMATCH'));
-      if (after.some((d) => d.severity === 'error')) throw new HiveError('SKILL', 'Copied skill failed validation.');
+      const after = await validateSkillDirectory(staging).then((items) =>
+        items.filter((d) => d.code !== 'NAME_MISMATCH'),
+      );
+      if (after.some((d) => d.severity === 'error'))
+        throw new HiveError('SKILL', 'Copied skill failed validation.');
       await rm(destination, { recursive: true, force: true });
       await rename(staging, destination);
     } finally {
@@ -214,12 +259,14 @@ export class SkillForgeAdapter {
   async saveLocal(raw: string, originalName?: string): Promise<SkillSummary> {
     const { parsed, diagnostics } = validateSkillText(raw, null);
     const errors = diagnostics.filter((d) => d.severity === 'error');
-    if (!parsed || errors.length) throw new HiveError('SKILL', errors.map((d) => d.message).join('; ') || 'Invalid SKILL.md');
+    if (!parsed || errors.length)
+      throw new HiveError('SKILL', errors.map((d) => d.message).join('; ') || 'Invalid SKILL.md');
     const name = parsed.metadata.name;
     const destination = path.join(this.options.libraryDir, name);
     if (originalName && originalName !== name) {
       skillNameSchema.parse(originalName);
-      if (await exists(destination)) throw new HiveError('CONFLICT', `A local skill named "${name}" already exists.`);
+      if (await exists(destination))
+        throw new HiveError('CONFLICT', `A local skill named "${name}" already exists.`);
       const previous = path.join(this.options.libraryDir, originalName);
       if (await exists(previous)) await rename(previous, destination);
     } else if (!originalName && (await exists(destination))) {

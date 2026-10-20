@@ -62,8 +62,15 @@ class JsonTable<T extends { id: string }> {
     const valid = this.schema.parse(entity);
     const extra = this.columns(valid);
     const names = ['id', ...Object.keys(extra), 'updated_at', 'data'];
-    const values: SQLInputValue[] = [valid.id, ...Object.values(extra), new Date().toISOString(), JSON.stringify(valid)];
-    const updates = names.filter((name) => name !== 'id').map((name) => `${name} = excluded.${name}`);
+    const values: SQLInputValue[] = [
+      valid.id,
+      ...Object.values(extra),
+      new Date().toISOString(),
+      JSON.stringify(valid),
+    ];
+    const updates = names
+      .filter((name) => name !== 'id')
+      .map((name) => `${name} = excluded.${name}`);
     this.db.run(
       `INSERT INTO ${this.table} (${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')})
        ON CONFLICT(id) DO UPDATE SET ${updates.join(', ')}`,
@@ -94,9 +101,17 @@ export class Repositories {
     this.workspaces = new JsonTable(db, 'workspaces', workspaceSchema, (w) => ({ path: w.path }));
     this.providers = new JsonTable(db, 'providers', providerConfigSchema);
     this.workers = new JsonTable(db, 'workers', workerSchema);
-    this.missions = new JsonTable(db, 'missions', missionSchema, (m) => ({ workspace_id: m.workspaceId }));
-    this.runs = new JsonTable(db, 'runs', runSchema, (r) => ({ mission_id: r.missionId, workspace_id: r.workspaceId }));
-    this.tasks = new JsonTable(db, 'tasks', taskSchema, (t) => ({ run_id: t.runId, worker_id: t.workerId }));
+    this.missions = new JsonTable(db, 'missions', missionSchema, (m) => ({
+      workspace_id: m.workspaceId,
+    }));
+    this.runs = new JsonTable(db, 'runs', runSchema, (r) => ({
+      mission_id: r.missionId,
+      workspace_id: r.workspaceId,
+    }));
+    this.tasks = new JsonTable(db, 'tasks', taskSchema, (t) => ({
+      run_id: t.runId,
+      worker_id: t.workerId,
+    }));
     this.approvals = new JsonTable(db, 'approvals', approvalSchema, (a) => ({
       run_id: a.runId,
       task_id: a.taskId,
@@ -127,7 +142,9 @@ export class Repositories {
   }
 
   getValue(key: string): string | null {
-    return this.db.get<{ value: string }>('SELECT value FROM settings WHERE key = ?', key)?.value ?? null;
+    return (
+      this.db.get<{ value: string }>('SELECT value FROM settings WHERE key = ?', key)?.value ?? null
+    );
   }
 
   setValue(key: string, value: string | null): void {
@@ -143,7 +160,10 @@ export class Repositories {
   /* ------------------------------------------------------------ secrets (ciphertext only) */
 
   getSecret(id: string): { ciphertext: Uint8Array; hint: string } | null {
-    const row = this.db.get<{ ciphertext: Uint8Array; hint: string }>('SELECT ciphertext, hint FROM secrets WHERE id = ?', id);
+    const row = this.db.get<{ ciphertext: Uint8Array; hint: string }>(
+      'SELECT ciphertext, hint FROM secrets WHERE id = ?',
+      id,
+    );
     return row ?? null;
   }
 
@@ -171,7 +191,11 @@ export class Repositories {
   }
 
   getModel(providerId: string, modelId: string): ModelInfo | null {
-    const row = this.db.get<Row>('SELECT data FROM models WHERE provider_id = ? AND id = ?', providerId, modelId);
+    const row = this.db.get<Row>(
+      'SELECT data FROM models WHERE provider_id = ? AND id = ?',
+      providerId,
+      modelId,
+    );
     return row ? modelInfoSchema.parse(JSON.parse(row.data)) : null;
   }
 
@@ -220,9 +244,18 @@ export class Repositories {
   queryEvents(query: EventQuery): AgentEvent[] {
     const where: string[] = [];
     const params: SQLInputValue[] = [];
-    if (query.runId) (where.push('run_id = ?'), params.push(query.runId));
-    if (query.taskId) (where.push('task_id = ?'), params.push(query.taskId));
-    if (query.workerId) (where.push('worker_id = ?'), params.push(query.workerId));
+    if (query.runId) {
+      where.push('run_id = ?');
+      params.push(query.runId);
+    }
+    if (query.taskId) {
+      where.push('task_id = ?');
+      params.push(query.taskId);
+    }
+    if (query.workerId) {
+      where.push('worker_id = ?');
+      params.push(query.workerId);
+    }
     if (query.types?.length) {
       where.push(`type IN (${query.types.map(() => '?').join(', ')})`);
       params.push(...query.types);
@@ -272,7 +305,11 @@ export class Repositories {
     );
   }
 
-  usageTotals(workspaceId: string | null): { promptTokens: number; completionTokens: number; runsCounted: number } {
+  usageTotals(workspaceId: string | null): {
+    promptTokens: number;
+    completionTokens: number;
+    runsCounted: number;
+  } {
     const runs = workspaceId ? this.runs.list('workspace_id = ?', workspaceId) : this.runs.list();
     let promptTokens = 0;
     let completionTokens = 0;

@@ -10,16 +10,17 @@
     "node": ">=24.0.0 <25"
   },
   "scripts": {
-    "dev": "pnpm --filter @hive/desktop dev",
-    "build": "pnpm --filter @hive/desktop build",
-    "start": "pnpm --filter @hive/desktop start",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "eslint . --max-warnings 0",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test"
+    "setup": "node scripts/run.mjs install --frozen-lockfile",
+    "dev": "node scripts/run.mjs --filter @hive/desktop dev",
+    "build": "node scripts/run.mjs --filter @hive/desktop build",
+    "start": "node scripts/run.mjs --filter @hive/desktop start",
+    "typecheck": "node scripts/run.mjs -r typecheck",
+    "lint": "node scripts/run.mjs exec eslint . --max-warnings 0",
+    "format": "node scripts/run.mjs exec prettier --write .",
+    "format:check": "node scripts/run.mjs exec prettier --check .",
+    "test": "node scripts/run.mjs exec vitest run",
+    "test:watch": "node scripts/run.mjs exec vitest",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

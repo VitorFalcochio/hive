@@ -37,7 +37,10 @@ export async function resolveInside(root: string, requested: string): Promise<st
   }
   const real = await realpathOfExistingAncestor(candidate);
   if (!isInside(realRoot, real)) {
-    throw new HiveError('FORBIDDEN_PATH', `Path resolves outside the authorised directory: ${requested}`);
+    throw new HiveError(
+      'FORBIDDEN_PATH',
+      `Path resolves outside the authorised directory: ${requested}`,
+    );
   }
   return real;
 }

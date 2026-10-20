@@ -33,14 +33,31 @@ export function killTree(pid: number): void {
  */
 export function runCommand(
   command: string,
-  options: { cwd: string; timeoutMs: number; signal?: AbortSignal; onOutput?: (chunk: string) => void },
+  options: {
+    cwd: string;
+    timeoutMs: number;
+    signal?: AbortSignal;
+    onOutput?: (chunk: string) => void;
+  },
 ): Promise<CommandResult> {
   const started = Date.now();
   if (options.signal?.aborted) {
-    return Promise.resolve({ exitCode: null, output: '', timedOut: false, cancelled: true, durationMs: 0 });
+    return Promise.resolve({
+      exitCode: null,
+      output: '',
+      timedOut: false,
+      cancelled: true,
+      durationMs: 0,
+    });
   }
   return new Promise((resolve) => {
-    const env = { ...process.env, CI: '1', FORCE_COLOR: '0', NO_COLOR: '1', GIT_TERMINAL_PROMPT: '0' };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      CI: '1',
+      FORCE_COLOR: '0',
+      NO_COLOR: '1',
+      GIT_TERMINAL_PROMPT: '0',
+    };
     delete env.ELECTRON_RUN_AS_NODE;
     delete env.NODE_OPTIONS;
     const child = spawn(command, {
