@@ -82,4 +82,29 @@ describe('FileService', { timeout: 30_000 }, () => {
     const read = await files.read('img.bin');
     expect(read).toMatchObject({ binary: true, content: null });
   });
+
+  it('busca no projeto inteiro respeitando o .gitignore e incluindo arquivos novos', async () => {
+    const { root, files } = await setup();
+    await writeFile(path.join(root, '.gitignore'), 'ignorado.txt\n');
+    await writeFile(path.join(root, 'ignorado.txt'), 'Ação escondida\n');
+    // Not committed yet, with Windows line endings: a search must still find it cleanly.
+    await writeFile(path.join(root, 'novo.ts'), 'const x = 1;\r\nconst ação = "Ação";\r\n');
+    await writeFile(path.join(root, 'acao.md'), 'nada\n');
+    const options = { caseSensitive: false, wholeWord: false, regex: false };
+
+    const found = await files.search('ação', options);
+    expect(found.matches).toEqual([
+      { path: 'novo.ts', line: 2, column: 7, length: 4, text: 'const ação = "Ação";' },
+    ]);
+    expect(found.truncated).toBe(false);
+
+    const exact = await files.search('Ação', { ...options, caseSensitive: true });
+    expect(exact.matches.map((match) => match.column)).toEqual([15]);
+
+    expect((await files.search('acao', options)).files).toEqual(['acao.md']);
+    expect((await files.search('nad', { ...options, wholeWord: true })).matches).toEqual([]);
+    const pattern = await files.search('const [a-z]+ = 1', { ...options, regex: true });
+    expect(pattern.matches.map((match) => match.line)).toEqual([1]);
+    expect((await files.search('não existe', options)).matches).toEqual([]);
+  });
 });

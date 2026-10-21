@@ -8,12 +8,14 @@ import {
   ShieldQuestion,
   Sparkles,
   Square,
+  Timer,
   X,
 } from 'lucide-react';
 import type { AgentEvent, Approval, Task, TaskStatus, WorkerState } from '@hive/core';
 import { useHive } from './context';
 import { Dot, Empty, PageHeader, runTone, statusLabels, useTask } from './ui';
 import { applyCandidate, discardCandidates, isCandidate, summarizeCandidate } from './comparison';
+import { useShift } from './shift';
 
 export const taskLabels: Record<TaskStatus, string> = {
   pending: 'Na fila',
@@ -86,6 +88,7 @@ export function MissionPage() {
   const plan = useTask();
   const action = useTask();
   const activity = useActivity(detail?.run.id ?? '');
+  const [shift, setShift] = useShift();
   if (!detail) return null;
   const { run, tasks } = detail;
   const candidates = tasks.filter(isCandidate);
@@ -103,6 +106,8 @@ export function MissionPage() {
     setDetail(await window.hive.invoke('run.get', run.id));
     await refresh();
   };
+  const queued = shift?.queue.some((item) => item.runId === run.id) ?? false;
+  const canQueue = queued || (!running && !planning && run.status !== 'completed');
 
   function generate() {
     void plan.run(async () => {
@@ -162,6 +167,31 @@ export function MissionPage() {
           >
             <Play size={14} />
             {run.status === 'awaiting_plan_approval' ? 'Executar plano' : 'Retomar execução'}
+          </button>
+        )}
+        {canQueue && (
+          <button
+            className="secondary"
+            disabled={action.running}
+            title={
+              queued
+                ? 'Tirar esta missão da fila do Modo Turno'
+                : 'O Modo Turno planeja e executa esta missão sem esperar por você'
+            }
+            onClick={() =>
+              void action.run(async () => {
+                setShift(
+                  await window.hive.invoke(
+                    queued ? 'autopilot.dequeue' : 'autopilot.enqueue',
+                    run.id,
+                  ),
+                );
+                await reload();
+              })
+            }
+          >
+            {queued ? <X size={14} /> : <Timer size={14} />}
+            {queued ? 'Tirar do turno' : 'Colocar no turno'}
           </button>
         )}
       </PageHeader>
@@ -314,7 +344,9 @@ function TaskCard({
       <small className="task-meta">
         {worker?.name ?? 'Agente automático'}
         {task.dependsOn.length > 0 && ` · depende de ${task.dependsOn.join(', ')}`}
-        {task.attempt > 1 && ` · tentativa ${task.attempt}`}
+        {task.revision
+          ? ` · revisão ${task.revision.round}`
+          : task.attempt > 1 && ` · tentativa ${task.attempt}`}
         {task.status === 'pending' && waitingOn.length > 0 && ' · aguardando dependências'}
       </small>
 
@@ -347,7 +379,8 @@ function TaskCard({
         )}
         {result?.commit && (
           <button className="ghost" onClick={() => openModal({ kind: 'diff', task })}>
-            <FileDiff size={14} /> Ver alterações
+            <FileDiff size={14} />{' '}
+            {task.status === 'completed' ? 'Revisar e comentar' : 'Ver alterações'}
           </button>
         )}
         <span className="spacer" />

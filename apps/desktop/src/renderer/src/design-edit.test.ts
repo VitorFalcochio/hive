@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildStyleInstruction, isSourceFile, styleChanges, type DesignElement } from './design';
+import {
+  buildStyleInstruction,
+  isSourceFile,
+  styleChanges,
+  textChange,
+  toHex,
+  type DesignElement,
+} from './design';
 
 const element: DesignElement = {
   tag: 'button',
@@ -7,6 +14,8 @@ const element: DesignElement = {
   classes: ['btn', 'primary'],
   selector: 'div > button',
   text: 'Salvar',
+  editableText: true,
+  source: null,
   rect: { x: 0, y: 0, width: 80, height: 32 },
   styles: {
     color: 'rgb(255, 255, 255)',
@@ -22,15 +31,19 @@ const element: DesignElement = {
 describe('styleChanges', () => {
   it('keeps only the styles whose value was edited', () => {
     const changes = styleChanges(element, {
-      color: '#ffffff',
+      color: '#000000',
       backgroundColor: 'rgb(47, 111, 79)',
       fontSize: '  18px ',
       padding: '',
     });
     expect(changes).toEqual([
-      { property: 'color', from: 'rgb(255, 255, 255)', to: '#ffffff' },
+      { property: 'color', from: 'rgb(255, 255, 255)', to: '#000000' },
       { property: 'fontSize', from: '15px', to: '18px' },
     ]);
+  });
+
+  it('treats a picked color equal to the current one as unchanged', () => {
+    expect(styleChanges(element, { color: '#FFFFFF', backgroundColor: '#2f6f4f' })).toEqual([]);
   });
 
   it('ignores styles the editor does not expose', () => {
@@ -51,6 +64,12 @@ describe('buildStyleInstruction', () => {
     expect(text).toContain('- background-color: rgb(47, 111, 79) → #1d4ed8');
     expect(text).toContain('Pedido adicional do usuário: Mais contraste');
     expect(text).toContain('Retorne o arquivo completo');
+    expect(text).not.toContain('Troque o texto');
+  });
+
+  it('asks for the new text when it was edited', () => {
+    const text = buildStyleInstruction(element, [], '', 'Enviar');
+    expect(text).toContain('Troque o texto do elemento para: "Enviar"');
   });
 
   it('omits the change list when there is nothing to change', () => {
@@ -66,5 +85,28 @@ describe('isSourceFile', () => {
     expect(isSourceFile('styles/main.CSS')).toBe(true);
     expect(isSourceFile('public/logo.png')).toBe(false);
     expect(isSourceFile('package.json')).toBe(false);
+  });
+});
+
+describe('textChange', () => {
+  it('returns the new text only when it changed and can be edited', () => {
+    expect(textChange(element, 'Enviar')).toBe('Enviar');
+    expect(textChange(element, 'Salvar')).toBeNull();
+    expect(textChange({ ...element, editableText: false }, 'Enviar')).toBeNull();
+  });
+});
+
+describe('toHex', () => {
+  it('converts the color formats the browser reports', () => {
+    expect(toHex('rgb(47, 111, 79)')).toBe('#2f6f4f');
+    expect(toHex('rgba(255, 0, 0, 0.5)')).toBe('#ff000080');
+    expect(toHex('rgb(0 0 255 / 100%)')).toBe('#0000ff');
+    expect(toHex('#ABC')).toBe('#aabbcc');
+  });
+
+  it('marks fully transparent colors and rejects unknown text', () => {
+    expect(toHex('rgba(0, 0, 0, 0)')).toBe('transparent');
+    expect(toHex('transparent')).toBe('transparent');
+    expect(toHex('azul')).toBe('');
   });
 });

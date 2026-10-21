@@ -217,6 +217,31 @@ export const taskResultSchema = z.object({
 });
 export type TaskResult = z.infer<typeof taskResultSchema>;
 
+/** A note the user left on one line of a task's diff. */
+export const reviewCommentSchema = z.object({
+  path: z.string().min(1).max(1_000),
+  /** Line number in the new file, or in the old one for a removed line. */
+  line: z.number().int().min(1),
+  side: z.enum(['new', 'old']),
+  /** The code on that line, so the agent can find it even if numbers shift. */
+  code: z.string().max(1_000),
+  body: z.string().trim().min(1).max(4_000),
+});
+export type ReviewComment = z.infer<typeof reviewCommentSchema>;
+
+/** Review notes sent back to the agent: the next attempt revises its own last result. */
+export const taskRevisionSchema = z.object({
+  /** Commit of the result being revised; the new attempt starts from it. */
+  fromCommit: z.string(),
+  /** Diff base of the original attempt, so the review shows the whole task, not just the fix. */
+  startCommit: z.string(),
+  round: z.number().int().min(1),
+  previousSummary: z.string(),
+  comments: z.array(reviewCommentSchema).max(100),
+  note: z.string().max(4_000),
+});
+export type TaskRevision = z.infer<typeof taskRevisionSchema>;
+
 export const taskSchema = z.object({
   id: z.string(),
   runId: z.string(),
@@ -238,6 +263,8 @@ export const taskSchema = z.object({
   createdAt: z.string(),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
+  /** Present once the user sent review notes; absent on tasks saved before reviews existed. */
+  revision: taskRevisionSchema.optional(),
 });
 export type Task = z.infer<typeof taskSchema>;
 
@@ -357,6 +384,23 @@ export type SkillValidation = z.infer<typeof skillValidationSchema>;
 
 /* ---------------------------------------------------------------- Settings */
 
+/** Shift mode ("Modo Turno"): queued missions are planned and run without anyone watching. */
+export const autopilotSettingsSchema = z.object({
+  enabled: z.boolean(),
+  /**
+   * Commands any agent may run while unattended, matched like `autoApproveCommands`. Every other
+   * command is denied at once instead of waiting for someone to answer.
+   */
+  safeCommands: z.array(z.string().min(1).max(200)).max(100),
+  /** Attempts per task while unattended, counting the first; failures are retried up to this. */
+  maxAttempts: z.number().int().min(1).max(5),
+  /** Keep the computer from sleeping while queued work runs. */
+  keepAwake: z.boolean(),
+  /** Closing the window keeps Hive running in the notification area while the shift is on. */
+  runInBackground: z.boolean(),
+});
+export type AutopilotSettings = z.infer<typeof autopilotSettingsSchema>;
+
 export const settingsSchema = z.object({
   maxConcurrentTasks: z.number().int().min(1).max(8),
   skillforgeCatalogPath: z.string().nullable(),
@@ -366,6 +410,7 @@ export const settingsSchema = z.object({
   runTokenBudget: z.number().int().min(0),
   reduceMotion: z.enum(['system', 'on', 'off']),
   density: z.enum(['comfortable', 'compact']),
+  autopilot: autopilotSettingsSchema,
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -385,4 +430,33 @@ export const defaultSettings: Settings = {
   runTokenBudget: 2_000_000,
   reduceMotion: 'system',
   density: 'comfortable',
+  autopilot: {
+    enabled: false,
+    // Checks only. Installs, deploys, publishing and git writes are denied while unattended.
+    safeCommands: [
+      'npm test *',
+      'npm run test *',
+      'npm run lint *',
+      'npm run typecheck *',
+      'npm run build *',
+      'npm run check *',
+      'npx tsc *',
+      'npx vitest *',
+      'npx eslint *',
+      'npx prettier --check *',
+      'pnpm test *',
+      'pnpm run test *',
+      'pnpm run lint *',
+      'pnpm run build *',
+      'yarn test *',
+      'git status *',
+      'git diff *',
+      'git log *',
+      'node --version',
+      'npm --version',
+    ],
+    maxAttempts: 2,
+    keepAwake: true,
+    runInBackground: true,
+  },
 };

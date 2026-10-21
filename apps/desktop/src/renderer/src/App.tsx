@@ -13,8 +13,10 @@ import {
   LayoutGrid,
   Plug,
   Plus,
+  Search,
   ShieldQuestion,
   SquareTerminal,
+  Timer,
   X,
 } from 'lucide-react';
 import type {
@@ -35,6 +37,8 @@ import { RunPage } from './run';
 import { hasUnsavedChanges, projectHasUnsavedChanges, useCode } from './code/store';
 import { ProjectTabs } from './project-tabs';
 import { SettingsPage } from './settings';
+import { ShiftPage } from './shift';
+import { SearchPage } from './search';
 import { MissionCards, type SidebarMission } from './mission-cards';
 
 // Monaco is large; it loads the first time the code view opens.
@@ -46,17 +50,21 @@ import { Dot } from './ui';
 
 const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   { view: 'overview', label: 'Visão geral', icon: LayoutGrid },
+  { view: 'search', label: 'Buscar', icon: Search },
   { view: 'code', label: 'Código', icon: Code2 },
   { view: 'run', label: 'Rodar', icon: SquareTerminal },
+  { view: 'shift', label: 'Modo Turno', icon: Timer },
   { view: 'agents', label: 'Agentes', icon: Bot },
   { view: 'providers', label: 'Provedores', icon: Plug },
   { view: 'skills', label: 'Skills', icon: BookOpen },
 ];
 const viewTitles: Record<View, string> = {
   overview: 'Visão geral',
+  search: 'Buscar',
   mission: 'Missão',
   code: 'Código',
   run: 'Rodar projeto',
+  shift: 'Modo Turno',
   agents: 'Agentes',
   providers: 'Provedores',
   skills: 'Skills',
@@ -297,6 +305,18 @@ export function App() {
   if (page === 'code' && !codeVisited) setCodeVisited(true);
   const activeTasks = summary?.activeTasks.length ?? 0;
 
+  // Ctrl+Shift+F searches the whole project from anywhere, as in VS Code.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setView('search');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   async function activate(workspace: Workspace) {
     if (workspace.id === activeWorkspace?.id) return;
     try {
@@ -403,28 +423,27 @@ export function App() {
               const missions = missionsByProject[workspace.id] ?? [];
               return (
                 <div key={workspace.id} className={active ? 'tree-group active' : 'tree-group'}>
-                  <div className="tree-root-row">
-                    <button
-                      className="tree-toggle"
-                      aria-expanded={open}
-                      aria-label={open ? 'Recolher missões' : 'Expandir missões'}
-                      title={open ? 'Recolher missões' : 'Expandir missões'}
-                      onClick={() =>
-                        setCollapsedProjects((current) =>
-                          current.includes(workspace.id)
-                            ? current.filter((id) => id !== workspace.id)
-                            : [...current, workspace.id],
-                        )
-                      }
-                    >
-                      <ChevronDown size={13} className={open ? 'chevron open' : 'chevron'} />
-                    </button>
-                    <button className="tree-root" onClick={() => void activate(workspace)}>
-                      {active ? <FolderOpen size={14} /> : <Folder size={14} />}
-                      <span className="truncate">{workspace.name}</span>
-                      <span className="count">{missions.length}</span>
-                    </button>
-                  </div>
+                  {/* One row: a click opens another project with its missions shown, and on
+                      the open project it shows or hides the missions. */}
+                  <button
+                    className="tree-root"
+                    aria-expanded={open}
+                    title={open && active ? 'Recolher missões' : 'Abrir projeto e missões'}
+                    onClick={() => {
+                      const collapse = active && open;
+                      setCollapsedProjects((current) =>
+                        collapse
+                          ? [...current, workspace.id]
+                          : current.filter((id) => id !== workspace.id),
+                      );
+                      if (!active) void activate(workspace);
+                    }}
+                  >
+                    <ChevronDown size={13} className={open ? 'chevron open' : 'chevron'} />
+                    {active ? <FolderOpen size={14} /> : <Folder size={14} />}
+                    <span className="truncate">{workspace.name}</span>
+                    <span className="count">{missions.length}</span>
+                  </button>
                   {open && (
                     <div className="tree-missions">
                       <MissionCards
@@ -493,6 +512,7 @@ export function App() {
           )}
           <div className={page === 'run' ? 'page page-full' : 'page'} hidden={page === 'code'}>
             {page === 'overview' && <OverviewPage />}
+            {page === 'search' && <SearchPage key={activeWorkspace?.id ?? 'none'} />}
             {page === 'mission' && <MissionPage />}
             {page === 'run' && <RunPage key={activeWorkspace?.id ?? 'none'} />}
             {page === 'agents' && <AgentsPage />}
@@ -500,6 +520,7 @@ export function App() {
             {page === 'skills' && <SkillsPage />}
             {page === 'about' && <AboutPage />}
             {page === 'settings' && <SettingsPage settings={settings} onSaved={refresh} />}
+            {page === 'shift' && <ShiftPage settings={settings} onSaved={refresh} />}
           </div>
         </main>
 

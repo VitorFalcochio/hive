@@ -31,7 +31,10 @@ export function SettingsPage({
 function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Promise<void> }) {
   const [draft, setDraft] = useState<Settings>(settings);
   const task = useTask();
-  const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  // The shift has its own page and can be switched from the tray, so this form leaves it alone.
+  const dirty =
+    JSON.stringify({ ...draft, autopilot: null }) !==
+    JSON.stringify({ ...settings, autopilot: null });
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
@@ -46,14 +49,20 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
 
   function save() {
     void task.run(async () => {
-      await window.hive.invoke('settings.update', draft);
+      const rest: Partial<Settings> = { ...draft };
+      delete rest.autopilot;
+      await window.hive.invoke('settings.update', rest);
       await onSaved();
     });
   }
 
   function restoreDefaults() {
     // The catalog folder is a choice the user made, so restoring defaults keeps it.
-    setDraft({ ...defaultSettings, skillforgeCatalogPath: draft.skillforgeCatalogPath });
+    setDraft({
+      ...defaultSettings,
+      skillforgeCatalogPath: draft.skillforgeCatalogPath,
+      autopilot: draft.autopilot,
+    });
   }
 
   function pickCatalog() {
@@ -224,7 +233,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
   );
 }
 
-function Section({
+export function Section({
   title,
   description,
   children,
@@ -244,7 +253,15 @@ function Section({
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
   return (
     <label className="settings-field">
       <span>{label}</span>
@@ -254,7 +271,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function NumberField({
+export function NumberField({
   label,
   hint,
   value,

@@ -84,6 +84,75 @@ describe('design inspector script', () => {
     }
   });
 
+  it('previews styles and text on the selected element and resets them', () => {
+    document.body.innerHTML = '<h1 style="margin: 4px">Olá</h1>';
+    try {
+      sendToPage({ source: 'hive-design', type: 'enable' });
+      const title = document.querySelector('h1')!;
+      click(title);
+      expect(parentPost.mock.calls[0]![0].element.editableText).toBe(true);
+      sendToPage({
+        source: 'hive-design',
+        type: 'apply',
+        styles: { color: '#ff0000', fontSize: '30px', onclick: 'x' },
+        text: 'Bem-vindo',
+      });
+      expect(title.style.color).toBe('rgb(255, 0, 0)');
+      expect(title.style.fontSize).toBe('30px');
+      expect(title.textContent).toBe('Bem-vindo');
+      // A later apply replaces the earlier one instead of adding to it.
+      sendToPage({
+        source: 'hive-design',
+        type: 'apply',
+        styles: { fontSize: '20px' },
+        text: null,
+      });
+      expect(title.style.color).toBe('');
+      expect(title.style.fontSize).toBe('20px');
+      expect(title.textContent).toBe('Olá');
+      sendToPage({ source: 'hive-design', type: 'reset' });
+      expect(title.getAttribute('style')).toBe('margin: 4px;');
+    } finally {
+      sendToPage({ source: 'hive-design', type: 'disable' });
+    }
+  });
+
+  it('never replaces the text of elements that contain other elements', () => {
+    document.body.innerHTML = '<p>Oi <b>mundo</b></p>';
+    try {
+      sendToPage({ source: 'hive-design', type: 'enable' });
+      click(document.querySelector('p')!);
+      expect(parentPost.mock.calls[0]![0].element.editableText).toBe(false);
+      sendToPage({ source: 'hive-design', type: 'apply', styles: {}, text: 'trocado' });
+      expect(document.querySelector('p')!.innerHTML).toBe('Oi <b>mundo</b>');
+    } finally {
+      sendToPage({ source: 'hive-design', type: 'disable' });
+    }
+  });
+
+  it('reports where a dev build says the element was written', () => {
+    document.body.innerHTML = '<section><button>Vue</button><a>React</a></section>';
+    try {
+      sendToPage({ source: 'hive-design', type: 'enable' });
+      const section = document.querySelector('section')! as unknown as Record<string, unknown>;
+      section.__vueParentComponent = { type: { __file: 'src/components/Card.vue' } };
+      click(document.querySelector('button')!);
+      expect(parentPost.mock.calls[0]![0].element.source).toEqual({
+        file: 'src/components/Card.vue',
+        line: null,
+      });
+      const link = document.querySelector('a')! as unknown as Record<string, unknown>;
+      link['__reactFiber$abc'] = { _debugSource: { fileName: '/repo/src/Nav.tsx', lineNumber: 7 } };
+      click(document.querySelector('a')!);
+      expect(parentPost.mock.calls[1]![0].element.source).toEqual({
+        file: '/repo/src/Nav.tsx',
+        line: 7,
+      });
+    } finally {
+      sendToPage({ source: 'hive-design', type: 'disable' });
+    }
+  });
+
   it('ignores control messages that do not come from the parent window', () => {
     document.body.innerHTML = '<p>Texto</p>';
     try {

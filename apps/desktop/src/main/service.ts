@@ -6,6 +6,7 @@ import {
   rolePresets,
   defaultLimits,
   recommendedModelCandidates,
+  type AutopilotStatus,
   type DashboardSummary,
   type RecommendedSetup,
   type HivePush,
@@ -25,19 +26,37 @@ import {
   listWorktrees,
   statusPorcelain,
 } from '@hive/workspace';
-import { Scheduler, planMission, validatePlan } from '@hive/orchestrator';
+import {
+  Autopilot,
+  Scheduler,
+  planMission,
+  validatePlan,
+  type AutopilotHistoryItem,
+} from '@hive/orchestrator';
 import { NativeAgentRuntime, type AgentRuntime } from '@hive/agents';
 import { SkillForgeAdapter } from '@hive/skills';
 import { FileService } from './files';
 import { TerminalManager } from './terminal';
 import { assistCode } from './code-assistant';
 import { startStaticServer, type StaticServer } from './static-server';
+import { locateElement } from './locate';
 
 export class DesktopService {
   readonly repos: Repositories;
   readonly scheduler: Scheduler;
+  readonly autopilot: Autopilot;
   readonly terminals: TerminalManager;
+  /** Set by the app shell to notify the user when the shift finishes a mission. */
+  onShiftFinished?: (item: AutopilotHistoryItem) => void;
+  /** Set by the app shell: a PNG data URL of part of the window, for Design Mode notes. */
+  capturePage?: (rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => Promise<string | null>;
   private readonly planning = new Set<string>();
+  private shiftTimer: ReturnType<typeof setTimeout> | undefined;
   // Each open project keeps its own watcher and preview server, so switching tabs loses nothing.
   private readonly fileServices = new Map<string, FileService>();
   private readonly previewServers = new Map<string, StaticServer>();
@@ -58,6 +77,27 @@ export class DesktopService {
       worktreeRoot: (workspace) => path.join(this.dataDir, 'worktrees', workspace.id),
       onEvent: (event) => this.push({ kind: 'event', event }),
       onChange: (entity, id) => this.changed(entity, id),
+      unattended: (runId) => this.autopilot.isUnattended(runId),
+    });
+    this.autopilot = new Autopilot({
+      repos: this.repos,
+      plan: async (runId) => {
+        const run = this.repos.runs.require(runId, 'Execução');
+        const queen =
+          (run.queenWorkerId ? this.repos.workers.get(run.queenWorkerId) : null) ??
+          this.repos.workers
+            .list()
+            .find((worker) => worker.role === 'queen' && worker.providerId && worker.modelId);
+        if (!queen)
+          throw new HiveError(
+            'VALIDATION',
+            'Configure um provedor e modelo para a Queen na aba Agentes.',
+          );
+        await this.planRun(runId, queen.id);
+      },
+      start: (runId) => this.scheduler.start(runId),
+      onChange: () => this.changed('autopilot'),
+      onFinished: (item) => this.onShiftFinished?.(item),
     });
     if (this.repos.getValue('seeded') !== '1') {
       for (const role of [
@@ -99,9 +139,13 @@ export class DesktopService {
     }
     this.scheduler.recover();
     this.terminals = new TerminalManager((event) => this.push({ kind: 'terminal', event }));
+    // A shift that was on when Hive closed picks its queue back up.
+    this.advanceShift();
   }
 
   dispose(): void {
+    clearTimeout(this.shiftTimer);
+    this.shiftTimer = undefined;
     this.terminals.dispose();
     this.files.dispose();
     for (const service of this.fileServices.values()) service.dispose();
@@ -200,6 +244,81 @@ export class DesktopService {
     id: string | null = null,
   ) {
     this.push({ kind: 'changed', entity, id });
+    if (entity === 'run' || entity === 'settings') this.advanceShift();
+  }
+
+  /**
+   * Deferred, so the shift never re-enters the scheduler while it is still updating a run, and
+   * merged, so a burst of changes costs one look at the queue.
+   */
+  private advanceShift(): void {
+    this.shiftTimer ??= setTimeout(() => {
+      this.shiftTimer = undefined;
+      this.autopilot.tick();
+    }, 0);
+  }
+
+  private autopilotStatus(): AutopilotStatus {
+    return {
+      enabled: this.autopilot.enabled,
+      currentRunId: this.autopilot.current(),
+      queue: this.autopilot.queue().map((runId) => {
+        const run = this.repos.runs.require(runId, 'Execução');
+        const tasks = this.repos.tasks.list('run_id = ?', runId);
+        return {
+          runId,
+          missionId: run.missionId,
+          missionTitle: this.repos.missions.get(run.missionId)?.title ?? run.missionId,
+          workspaceName: this.repos.workspaces.get(run.workspaceId)?.name ?? '',
+          status: run.status,
+          tasks: {
+            total: tasks.length,
+            done: tasks.filter((task) => ['completed', 'approved'].includes(task.status)).length,
+            failed: tasks.filter((task) => task.status === 'failed').length,
+          },
+        };
+      }),
+      history: this.autopilot.history(),
+    };
+  }
+
+  /** Asks the Queen for a plan; used by the mission page and by the shift. */
+  private async planRun(runId: string, queenWorkerId: string): Promise<RunDetail> {
+    if (this.planning.has(runId))
+      throw new HiveError('CONFLICT', 'Esta execução já está sendo planejada.');
+    const { run, mission } = this.runDetail(runId);
+    if (run.status === 'running')
+      throw new HiveError('CONFLICT', 'Cancele a execução antes de gerar um novo plano.');
+    const queen = this.repos.workers.require(queenWorkerId, 'Queen');
+    if (queen.role !== 'queen' || !queen.providerId || !queen.modelId)
+      throw new HiveError(
+        'VALIDATION',
+        'Configure um provedor e modelo para a Queen na aba Agentes.',
+      );
+    const workspace = this.repos.workspaces.require(run.workspaceId, 'Workspace');
+    this.planning.add(runId);
+    this.repos.runs.put({ ...run, status: 'planning', queenWorkerId, error: null });
+    this.changed('run', runId);
+    try {
+      const result = await planMission({
+        title: mission.title,
+        objective: mission.objective,
+        workers: this.repos.workers.list(),
+        projectContext: `Repository: ${workspace.name}\nBranch: ${run.baseBranch}`,
+        queen,
+        model: queen.modelId,
+        chat: this.client(queen.providerId),
+        signal: AbortSignal.timeout(180_000),
+      });
+      return this.setPlan(runId, result.plan);
+    } catch (error) {
+      const failure = this.modelFailure(queen.modelId, error);
+      this.repos.runs.put({ ...run, queenWorkerId, status: 'failed', error: failure });
+      this.changed('run', runId);
+      throw error instanceof HiveError ? new HiveError(error.code, failure) : error;
+    } finally {
+      this.planning.delete(runId);
+    }
   }
 
   private active() {
@@ -644,41 +763,7 @@ export class DesktopService {
       }
       case 'run.plan': {
         const { runId, queenWorkerId } = parse(channel);
-        if (this.planning.has(runId))
-          throw new HiveError('CONFLICT', 'Esta execução já está sendo planejada.');
-        const { run, mission } = this.runDetail(runId);
-        if (run.status === 'running')
-          throw new HiveError('CONFLICT', 'Cancele a execução antes de gerar um novo plano.');
-        const queen = this.repos.workers.require(queenWorkerId, 'Queen');
-        if (queen.role !== 'queen' || !queen.providerId || !queen.modelId)
-          throw new HiveError(
-            'VALIDATION',
-            'Configure um provedor e modelo para a Queen na aba Agentes.',
-          );
-        const workspace = this.repos.workspaces.require(run.workspaceId, 'Workspace');
-        this.planning.add(runId);
-        this.repos.runs.put({ ...run, status: 'planning', queenWorkerId, error: null });
-        this.changed('run', runId);
-        try {
-          const result = await planMission({
-            title: mission.title,
-            objective: mission.objective,
-            workers: this.repos.workers.list(),
-            projectContext: `Repository: ${workspace.name}\nBranch: ${run.baseBranch}`,
-            queen,
-            model: queen.modelId,
-            chat: this.client(queen.providerId),
-            signal: AbortSignal.timeout(180_000),
-          });
-          return this.setPlan(runId, result.plan);
-        } catch (error) {
-          const failure = this.modelFailure(queen.modelId, error);
-          this.repos.runs.put({ ...run, queenWorkerId, status: 'failed', error: failure });
-          this.changed('run', runId);
-          throw error instanceof HiveError ? new HiveError(error.code, failure) : error;
-        } finally {
-          this.planning.delete(runId);
-        }
+        return this.planRun(runId, queenWorkerId);
       }
       case 'run.start':
         this.scheduler.start(parse(channel));
@@ -690,6 +775,10 @@ export class DesktopService {
         return this.scheduler.cancelTask(parse(channel));
       case 'task.retry':
         return this.scheduler.retry(parse(channel));
+      case 'task.revise': {
+        const { taskId, comments, note } = parse(channel);
+        return this.scheduler.revise(taskId, comments, note);
+      }
       case 'task.approve':
         return this.scheduler.approve(parse(channel));
       case 'task.reject':
@@ -730,6 +819,17 @@ export class DesktopService {
         return this.files.list(parse(channel).path);
       case 'fs.files':
         return this.files.files();
+      case 'design.locate': {
+        const workspace = this.active();
+        if (!workspace) throw new HiveError('VALIDATION', 'Selecione um projeto primeiro.');
+        return locateElement(workspace.path, parse(channel));
+      }
+      case 'design.capture':
+        return this.capturePage ? this.capturePage(parse(channel)) : null;
+      case 'fs.search': {
+        const { query, ...options } = parse(channel);
+        return this.files.search(query, options);
+      }
       case 'preview.serve': {
         const workspace = this.active();
         if (!workspace)
@@ -831,6 +931,29 @@ export class DesktopService {
           usage: this.repos.usageTotals(workspace?.id ?? null),
         };
         return summary;
+      }
+      case 'autopilot.status':
+        return this.autopilotStatus();
+      case 'autopilot.setEnabled': {
+        const settings = this.repos.getSettings();
+        this.repos.saveSettings({
+          ...settings,
+          autopilot: { ...settings.autopilot, enabled: parse(channel) },
+        });
+        this.changed('settings');
+        this.changed('autopilot');
+        return this.autopilotStatus();
+      }
+      case 'autopilot.enqueue':
+        this.autopilot.enqueue(parse(channel));
+        return this.autopilotStatus();
+      case 'autopilot.dequeue':
+        this.autopilot.dequeue(parse(channel));
+        return this.autopilotStatus();
+      case 'autopilot.move': {
+        const { runId, offset } = parse(channel);
+        this.autopilot.move(runId, offset);
+        return this.autopilotStatus();
       }
       default:
         throw new HiveError(

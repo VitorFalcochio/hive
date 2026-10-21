@@ -152,6 +152,7 @@ function FilePane({
   const [error, setError] = useState('');
   useEffect(() => {
     let editor: monaco.editor.IStandaloneCodeEditor | null = null;
+    let stopReveal = () => {};
     let disposed = false;
     setError('');
     openDoc(path)
@@ -182,6 +183,28 @@ function FilePane({
         editor.onDidChangeCursorSelection(publishSelection);
         publishSelection();
         editor.focus();
+        // Search results ask for a spot; it is shown now if waiting, or whenever it arrives.
+        const showReveal = () => {
+          const target = useCode.getState().reveal;
+          if (!target || target.path !== path) return;
+          useCode.getState().clearReveal();
+          const range = new monaco.Range(
+            target.line,
+            target.column,
+            target.line,
+            target.column + target.length,
+          );
+          currentEditor.setSelection(range);
+          // The click usually comes from another page; centre once the editor is visible.
+          setTimeout(() => {
+            if (disposed) return;
+            currentEditor.layout();
+            currentEditor.revealRangeInCenter(range);
+            currentEditor.focus();
+          }, 60);
+        };
+        showReveal();
+        stopReveal = useCode.subscribe(showReveal);
       })
       .catch((failure: unknown) => {
         if (!disposed)
@@ -189,6 +212,7 @@ function FilePane({
       });
     return () => {
       disposed = true;
+      stopReveal();
       if (editor) {
         viewStates.set(stateKey, editor.saveViewState());
         editor.dispose();

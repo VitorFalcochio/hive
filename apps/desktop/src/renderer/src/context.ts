@@ -14,9 +14,11 @@ import type {
 
 export type View =
   | 'overview'
+  | 'search'
   | 'mission'
   | 'code'
   | 'run'
+  | 'shift'
   | 'agents'
   | 'providers'
   | 'skills'

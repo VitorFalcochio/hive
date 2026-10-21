@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   planSchema,
   providerKindSchema,
+  reviewCommentSchema,
   settingsSchema,
   workerInputSchema,
   type AgentEvent,
@@ -83,6 +84,30 @@ export interface DashboardSummary {
   workers: number;
 }
 
+/** One mission in the shift queue, first = the one in progress or next to start. */
+export interface AutopilotQueueItem {
+  runId: string;
+  missionId: string;
+  missionTitle: string;
+  workspaceName: string;
+  status: Run['status'];
+  tasks: { total: number; done: number; failed: number };
+}
+
+export interface AutopilotStatus {
+  enabled: boolean;
+  /** Run being planned or executed by the shift right now. */
+  currentRunId: string | null;
+  queue: AutopilotQueueItem[];
+  history: {
+    runId: string;
+    missionTitle: string;
+    status: Run['status'];
+    error: string | null;
+    finishedAt: string;
+  }[];
+}
+
 export interface RecommendedSetup {
   /** One entry per agent; `modelId` is null when no catalog model answered. */
   assignments: { workerId: string; workerName: string; modelId: string | null }[];
@@ -111,6 +136,47 @@ export interface FileDiffContent {
   path: string;
   original: string;
   modified: string;
+}
+
+/** What the Design Mode knows about a clicked element, to find the file that renders it. */
+export const elementHintSchema = z.object({
+  tag: z.string().max(60),
+  id: z.string().max(200).nullable(),
+  classes: z.array(z.string().max(200)).max(12),
+  text: z.string().max(400),
+  source: z.object({ file: z.string().max(1_000), line: z.number().int().nullable() }).nullable(),
+});
+export type ElementHint = z.infer<typeof elementHintSchema>;
+
+export interface LocateCandidate {
+  path: string;
+  line: number | null;
+  score: number;
+  /** 'framework': the dev build said so; 'match': found by searching the element's text. */
+  reason: 'framework' | 'match';
+}
+
+export interface SearchOptions {
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+}
+
+/** One line that matched; `column` is 1-based in characters, `length` 0 when not located. */
+export interface SearchMatch {
+  path: string;
+  line: number;
+  column: number;
+  length: number;
+  text: string;
+}
+
+export interface SearchResult {
+  /** Files whose name matches. */
+  files: string[];
+  matches: SearchMatch[];
+  /** True when there were more matches than the result holds. */
+  truncated: boolean;
 }
 
 export interface GitStatusSummary {
@@ -251,6 +317,14 @@ export const ipcContract = {
 
   'task.cancel': channel<void>()(id),
   'task.retry': channel<void>()(id),
+  /** Sends line comments on a finished task back to its agent for one revision pass. */
+  'task.revise': channel<void>()(
+    z.object({
+      taskId: id,
+      comments: z.array(reviewCommentSchema).max(100),
+      note: z.string().max(4_000),
+    }),
+  ),
   'task.approve': channel<Task>()(id),
   'task.reject': channel<Task>()(id),
   'task.diff': channel<TaskDiff>()(id),
@@ -265,6 +339,25 @@ export const ipcContract = {
 
   'fs.list': channel<FileEntry[]>()(z.object({ path: relPath })),
   'fs.files': channel<string[]>()(none),
+  /** Most likely files (best first) that render an element picked in the Design Mode. */
+  'design.locate': channel<LocateCandidate[]>()(elementHintSchema),
+  /** PNG data URL of a part of the Hive window, in window pixels (an element of the preview). */
+  'design.capture': channel<string | null>()(
+    z.object({
+      x: z.number().min(0).max(20_000),
+      y: z.number().min(0).max(20_000),
+      width: z.number().min(1).max(20_000),
+      height: z.number().min(1).max(20_000),
+    }),
+  ),
+  'fs.search': channel<SearchResult>()(
+    z.object({
+      query: z.string().min(1).max(200),
+      caseSensitive: z.boolean(),
+      wholeWord: z.boolean(),
+      regex: z.boolean(),
+    }),
+  ),
   'preview.serve': channel<{ url: string }>()(z.object({ path: relPath })),
   'fs.read': channel<FileContent>()(z.object({ path: relPath })),
   'fs.write': channel<{ mtimeMs: number }>()(
@@ -313,6 +406,14 @@ export const ipcContract = {
     }),
   ),
   'dashboard.summary': channel<DashboardSummary>()(none),
+
+  'autopilot.status': channel<AutopilotStatus>()(none),
+  'autopilot.setEnabled': channel<AutopilotStatus>()(z.boolean()),
+  'autopilot.enqueue': channel<AutopilotStatus>()(id),
+  'autopilot.dequeue': channel<AutopilotStatus>()(id),
+  'autopilot.move': channel<AutopilotStatus>()(
+    z.object({ runId: id, offset: z.union([z.literal(-1), z.literal(1)]) }),
+  ),
 } as const;
 
 export type IpcContract = typeof ipcContract;
@@ -345,7 +446,8 @@ export type HivePush =
         | 'provider'
         | 'skill'
         | 'workspace'
-        | 'settings';
+        | 'settings'
+        | 'autopilot';
       id: string | null;
     };
 

@@ -1,7 +1,15 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { FileContent, FileEntry, FileDiffContent, GitStatusSummary } from '@hive/core';
+import type {
+  FileContent,
+  FileEntry,
+  FileDiffContent,
+  GitStatusSummary,
+  SearchMatch,
+  SearchOptions,
+  SearchResult,
+} from '@hive/core';
 import { HiveError, resolveInside, toPosixRelative } from '@hive/shared';
 import { git, inspectRepository, statusPorcelain } from '@hive/workspace';
 
@@ -12,6 +20,35 @@ const QUIET = new Set(['.git', 'node_modules', '.local', 'dist', 'out', '.next',
 
 function isBinary(buffer: Buffer): boolean {
   return buffer.subarray(0, 8000).includes(0);
+}
+
+const MAX_NAME_RESULTS = 50;
+const MAX_CONTENT_RESULTS = 2_000;
+const MAX_LINE_CHARS = 400;
+
+/**
+ * The same rules git applies, in JavaScript: to match file names and to find where on a line
+ * the match is. A regex git accepts but JavaScript does not still searches, without a highlight.
+ */
+function searchMatcher(query: string, options: SearchOptions) {
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let pattern: RegExp | null;
+  try {
+    const source = options.regex ? query : escaped;
+    pattern = new RegExp(
+      options.wholeWord ? `(?<![\\p{L}\\p{N}_])(?:${source})(?![\\p{L}\\p{N}_])` : source,
+      options.caseSensitive ? 'u' : 'iu',
+    );
+  } catch {
+    pattern = null;
+  }
+  return {
+    test: (text: string) => pattern?.test(text) ?? false,
+    locate: (text: string) => {
+      const found = pattern?.exec(text);
+      return found ? { index: found.index, length: found[0].length } : { index: 0, length: 0 };
+    },
+  };
 }
 
 /**
@@ -71,6 +108,58 @@ export class FileService {
     );
     if (result.code !== 0) return [];
     return [...new Set(result.stdout.split('\0').filter(Boolean))].slice(0, 50_000);
+  }
+
+  /**
+   * Searches file names and contents of the whole project with `git grep`, so .gitignore is
+   * respected and new files that are not committed yet are included. Binary files are skipped.
+   */
+  async search(query: string, options: SearchOptions): Promise<SearchResult> {
+    const root = this.requireRoot();
+    const matcher = searchMatcher(query, options);
+    const files = (await this.files())
+      .filter((file) => matcher.test(file.split('/').pop() ?? file))
+      .slice(0, MAX_NAME_RESULTS);
+    const args = ['grep', '-n', '-I', '--null', '--untracked', '--exclude-standard', '--no-color'];
+    args.push(options.regex ? '-E' : '-F');
+    if (!options.caseSensitive) args.push('-i');
+    if (options.wholeWord) args.push('-w');
+    args.push('-e', query);
+    const result = await git(root, args, { allowFailure: true, timeoutMs: 30_000 });
+    // git grep exits with 1 when nothing matches; anything above that is a real failure.
+    if (result.code > 1)
+      throw new HiveError(
+        'VALIDATION',
+        options.regex
+          ? 'A expressão regular não é válida para a busca.'
+          : `A busca falhou: ${result.stderr.trim().slice(0, 300)}`,
+      );
+    const matches: SearchMatch[] = [];
+    let truncated = false;
+    for (const row of result.stdout.split('\n')) {
+      if (!row) continue;
+      if (matches.length >= MAX_CONTENT_RESULTS) {
+        truncated = true;
+        break;
+      }
+      // With --null the path ends at a NUL; the line number follows, then ':' and the text.
+      const nul = row.indexOf('\0');
+      const rest = row.slice(nul + 1);
+      const colon = rest.indexOf('\0') >= 0 ? rest.indexOf('\0') : rest.indexOf(':');
+      const line = Number(rest.slice(0, colon));
+      if (nul < 0 || !Number.isFinite(line)) continue;
+      const text = rest.slice(colon + 1).replace(/\r$/, '');
+      const found = matcher.locate(text);
+      matches.push({
+        path: row.slice(0, nul),
+        line,
+        // Columns are counted in characters here, as the editor counts them.
+        column: found.index + 1,
+        length: found.length,
+        text: text.length > MAX_LINE_CHARS ? text.slice(0, MAX_LINE_CHARS) : text,
+      });
+    }
+    return { files, matches, truncated };
   }
 
   async read(relative: string): Promise<FileContent> {

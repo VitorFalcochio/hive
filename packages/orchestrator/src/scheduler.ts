@@ -1,11 +1,13 @@
 import {
   activeStatuses,
+  commandMatchesAllowList,
   isBlockedByFailure,
   readyTasks,
   stateForTaskStatus,
   workerStateSchema,
   type AgentEvent,
   type AgentEventType,
+  type ReviewComment,
   type Run,
   type RunStatus,
   type Task,
@@ -40,6 +42,11 @@ export interface SchedulerOptions {
   worktreeRoot: (workspace: Workspace) => string;
   onEvent: (event: AgentEvent) => void;
   onChange: (entity: 'run' | 'task' | 'approval', id: string) => void;
+  /**
+   * True while nobody is watching this run (shift mode). Commands outside the safe list are then
+   * denied instead of waiting, and failed tasks are retried up to the configured attempts.
+   */
+  unattended?: (runId: string) => boolean;
 }
 
 /** Prefix of the error given to tasks skipped because a dependency did not succeed. */
@@ -64,6 +71,8 @@ export class Scheduler {
   private readonly launching = new Set<string>();
   private readonly cancelRequested = new Set<string>();
   private readonly pendingApprovals = new Map<string, (approved: boolean) => void>();
+  /** taskId → error of the attempt that failed, handed to the agent on the automatic retry. */
+  private readonly retryNotes = new Map<string, string>();
 
   constructor(private readonly options: SchedulerOptions) {}
 
@@ -183,14 +192,60 @@ export class Scheduler {
         finishedAt: null,
       });
     reset(task);
+    // A discarded result is gone, so a retry starts over instead of revising it.
+    if (task.status === 'rejected') this.update(task.id, { revision: undefined });
     for (const item of this.repos.tasks.list('run_id = ?', task.runId))
       if (item.status === 'cancelled' && item.error?.startsWith(BLOCKED)) reset(item);
+    this.resume(task.runId);
+  }
+
+  /**
+   * Sends the user's review back to the agent. The task runs again from its own last result,
+   * with the comments in its prompt; its diff still covers the whole task.
+   */
+  revise(taskId: string, comments: ReviewComment[], note: string): void {
+    const task = this.repos.tasks.require(taskId, 'Tarefa');
+    if (task.status !== 'completed' || !task.result?.commit || !task.startCommit)
+      throw new HiveError(
+        'CONFLICT',
+        'Só tarefas prontas para revisão e com alterações podem receber comentários.',
+      );
+    if (!comments.length && !note.trim())
+      throw new HiveError('VALIDATION', 'Escreva ao menos um comentário para o agente.');
+    const round = (task.revision?.round ?? 0) + 1;
+    this.update(taskId, {
+      status: 'pending',
+      workerState: 'idle',
+      error: null,
+      finishedAt: null,
+      revision: {
+        fromCommit: task.result.commit,
+        startCommit: task.revision?.startCommit ?? task.startCommit,
+        round,
+        previousSummary: task.result.summary,
+        comments,
+        note: note.trim(),
+      },
+    });
     const run = this.repos.runs.require(task.runId, 'Execução');
+    this.log(
+      run,
+      taskId,
+      task.workerId,
+      'task.status',
+      'info',
+      `Revisão ${round} enviada ao agente: ${comments.length} comentário(s).`,
+    );
+    this.resume(task.runId);
+  }
+
+  private resume(runId: string): void {
+    const run = this.repos.runs.require(runId, 'Execução');
     if (run.status !== 'running') {
       this.repos.runs.put({ ...run, status: 'running', error: null, finishedAt: null });
       this.options.onChange('run', run.id);
     }
-    this.pump(task.runId);
+    this.pump(runId);
   }
 
   resolveApproval(approvalId: string, approve: boolean, remember: boolean): void {
@@ -382,6 +437,9 @@ export class Scheduler {
     const branch = taskBranchName(run.id, initial.key, attempt);
     let worktree: string | null = null;
     let commit: string | null = null;
+    // A revision continues from the task's last result, which already holds its dependencies.
+    const revision = initial.revision;
+    const previousBranch = revision ? initial.branch : null;
     const checkCancelled = () => {
       if (this.cancelRequested.delete(initial.id))
         throw new HiveError('CANCELLED', 'Cancelada antes de começar.');
@@ -402,17 +460,19 @@ export class Scheduler {
       });
       this.log(run, initial.id, worker.id, 'task.status', 'info', `${worker.name} começou.`);
       const name = `${run.id.slice(-6)}-${initial.key}-a${attempt}`.replace(/[^\w-]+/g, '-');
-      worktree = await manager.create(name, branch, run.baseCommit);
+      worktree = await manager.create(name, branch, revision?.fromCommit ?? run.baseCommit);
       const tasks = this.repos.tasks.list('run_id = ?', run.id);
       const upstream = initial.dependsOn
         .map((key) => tasks.find((task) => task.key === key))
         .filter((task): task is Task => !!task);
-      for (const dependency of upstream)
-        if (dependency.branch && dependency.result?.commit) {
-          await manager.mergeBranch(worktree, dependency.result.commit);
-          this.log(run, initial.id, worker.id, 'git', 'debug', `Incluído: ${dependency.title}`);
-        }
-      const startCommit = (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+      if (!revision)
+        for (const dependency of upstream)
+          if (dependency.branch && dependency.result?.commit) {
+            await manager.mergeBranch(worktree, dependency.result.commit);
+            this.log(run, initial.id, worker.id, 'git', 'debug', `Incluído: ${dependency.title}`);
+          }
+      const startCommit =
+        revision?.startCommit ?? (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
       this.update(initial.id, { worktreePath: worktree, startCommit, workerState: 'thinking' });
       const { skills, missing } = await this.options.resolveSkills(worker.skills);
       if (missing.length)
@@ -426,16 +486,30 @@ export class Scheduler {
         );
       checkCancelled();
 
+      const previousError = this.retryNotes.get(initial.id);
+      this.retryNotes.delete(initial.id);
       const session = await this.options.runtime.start({
         sessionId,
         task: {
           title: initial.title,
-          description: initial.description,
+          description: previousError
+            ? `${initial.description}\n\nA tentativa anterior falhou com este erro: ${previousError}\nCorrija a causa antes de concluir.`
+            : initial.description,
           acceptanceCriteria: initial.acceptanceCriteria,
           upstream: upstream.map((task) => ({
             title: task.title,
             summary: task.result?.summary ?? '',
           })),
+          ...(revision
+            ? {
+                review: {
+                  round: revision.round,
+                  previousSummary: revision.previousSummary,
+                  comments: revision.comments,
+                  note: revision.note,
+                },
+              }
+            : {}),
         },
         worker,
         model: worker.modelId,
@@ -454,7 +528,12 @@ export class Scheduler {
       const outcome = await session.done;
       unsubscribe();
 
-      commit = await manager.commitAll(worktree, `hive: ${initial.title}`);
+      commit = await manager.commitAll(
+        worktree,
+        revision ? `hive: ${initial.title} (revisão ${revision.round})` : `hive: ${initial.title}`,
+      );
+      // A revision that changed nothing still holds the earlier work, so it stays reviewable.
+      commit ??= revision?.fromCommit ?? null;
       const diff = commit ? await diffRefs(worktree, startCommit, commit) : null;
       const result: TaskResult = {
         summary: outcome.summary,
@@ -465,6 +544,11 @@ export class Scheduler {
         commands: outcome.commands,
         usage: outcome.usage,
       };
+      if (
+        outcome.status === 'failed' &&
+        this.retryUnattended(run, initial.id, attempt, outcome.error)
+      )
+        return;
       this.update(initial.id, {
         status: outcome.status,
         workerState: stateForTaskStatus(outcome.status) ?? 'idle',
@@ -483,9 +567,13 @@ export class Scheduler {
           ? `Concluída: ${result.filesChanged.length} arquivo(s), +${result.insertions} −${result.deletions}.`
           : `${outcome.status === 'cancelled' ? 'Cancelada' : 'Falhou'}: ${outcome.error ?? ''}`,
       );
+      // The revised branch holds the earlier work too, so the old branch is no longer needed.
+      if (previousBranch && previousBranch !== branch && outcome.status === 'completed')
+        await git(workspace.path, ['branch', '-D', previousBranch], { allowFailure: true });
     } catch (error) {
       const cancelled = error instanceof HiveError && error.code === 'CANCELLED';
       const message = secretRedactor.redact(errorMessage(error));
+      if (!cancelled && this.retryUnattended(run, initial.id, attempt, message)) return;
       this.update(initial.id, {
         status: cancelled ? 'cancelled' : 'failed',
         workerState: cancelled ? 'cancelled' : 'failed',
@@ -506,12 +594,60 @@ export class Scheduler {
     }
   }
 
+  /** While unattended, a failed attempt goes back to the queue with its error, up to the limit. */
+  private retryUnattended(
+    run: Run,
+    taskId: string,
+    attempt: number,
+    error: string | null,
+  ): boolean {
+    if (!this.options.unattended?.(run.id)) return false;
+    const max = this.repos.getSettings().autopilot.maxAttempts;
+    if (attempt >= max || this.repos.runs.get(run.id)?.status !== 'running') return false;
+    const reason = error?.trim() || 'erro sem descrição';
+    this.retryNotes.set(taskId, reason.slice(0, 2_000));
+    this.update(taskId, {
+      status: 'pending',
+      workerState: 'idle',
+      error: null,
+      result: null,
+      finishedAt: null,
+      worktreePath: null,
+    });
+    const workerId = this.repos.tasks.get(taskId)?.workerId ?? null;
+    this.log(
+      run,
+      taskId,
+      workerId,
+      'task.status',
+      'warn',
+      `Nova tentativa automática (${attempt + 1} de ${max}): ${reason}`,
+    );
+    return true;
+  }
+
   private requestApproval(
     run: Run,
     taskId: string,
     worker: Worker,
     command: string,
   ): Promise<boolean> {
+    // Nobody is there to answer: the safe list decides at once and the decision is logged.
+    if (this.options.unattended?.(run.id)) {
+      const allowed = commandMatchesAllowList(
+        command,
+        this.repos.getSettings().autopilot.safeCommands,
+      );
+      this.log(
+        run,
+        taskId,
+        worker.id,
+        'approval.resolved',
+        allowed ? 'info' : 'warn',
+        `${allowed ? 'Liberado' : 'Negado'} automaticamente (Modo Turno): ${command}`,
+      );
+      return Promise.resolve(allowed);
+    }
     const approval = this.repos.approvals.put({
       id: newId('approval'),
       runId: run.id,

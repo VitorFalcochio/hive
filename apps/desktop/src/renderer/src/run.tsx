@@ -14,7 +14,9 @@ import {
 import type { TerminalEvent, TerminalSession, TerminalStatus } from '@hive/core';
 import { useHive } from './context';
 import { Dot } from './ui';
-import { DesignPanel, parseDesignElement, type DesignElement } from './design';
+import { DesignPanel, parseDesignElement, type DesignElement, type DesignPreview } from './design';
+import { useTray } from './design-tray';
+import { DesignTray } from './design-tray-panel';
 
 const MAX_RENDERED_OUTPUT = 1024 * 1024;
 
@@ -240,10 +242,45 @@ export function RunPage() {
     );
   }
 
+  /**
+   * A picture of the element as the preview shows it. Its rect is relative to the page inside
+   * the iframe, so it is moved by the iframe's place in the window and kept inside the frame.
+   */
+  async function captureElement(element: DesignElement): Promise<string | null> {
+    const frame = previewFrame.current?.getBoundingClientRect();
+    if (!frame) return null;
+    const pad = 6;
+    const left = Math.max(frame.left, frame.left + element.rect.x - pad);
+    const top = Math.max(frame.top, frame.top + element.rect.y - pad);
+    const right = Math.min(frame.right, frame.left + element.rect.x + element.rect.width + pad);
+    const bottom = Math.min(frame.bottom, frame.top + element.rect.y + element.rect.height + pad);
+    if (right - left < 4 || bottom - top < 4) return null;
+    return window.hive.invoke('design.capture', {
+      x: left,
+      y: top,
+      width: right - left,
+      height: bottom - top,
+    });
+  }
+
+  // Edits are shown on the page right away; they live only in the preview until saved.
+  function postPreview(preview: DesignPreview) {
+    previewFrame.current?.contentWindow?.postMessage(
+      { source: 'hive-design', type: 'apply', ...preview },
+      '*',
+    );
+  }
+
   function toggleDesign() {
     const next = !designOn;
     setDesignOn(next);
-    if (!next) setSelection(null);
+    if (!next) {
+      setSelection(null);
+      previewFrame.current?.contentWindow?.postMessage(
+        { source: 'hive-design', type: 'reset' },
+        '*',
+      );
+    }
     postDesign(next);
   }
 
@@ -490,8 +527,8 @@ export function RunPage() {
           {designOn && (
             <p className="design-hint" role="status">
               {selected
-                ? 'Elemento selecionado. Clique em outro para trocar.'
-                : 'Clique em um elemento do preview para inspecioná-lo.'}
+                ? 'Ajuste no painel ao lado: o preview muda na hora. Clique em outro elemento para trocar.'
+                : 'Clique em um elemento do preview para editar cores, texto e fonte.'}
             </p>
           )}
           <div className="preview-body">
@@ -523,9 +560,15 @@ export function RunPage() {
                 key={`${selected.selector}:${selected.rect.x}:${selected.rect.y}`}
                 element={selected}
                 onClose={() => setSelection(null)}
+                onPreview={postPreview}
+                onCapture={() => captureElement(selected)}
+                onAddNote={(note) =>
+                  useTray.getState().add(workspace.id, { ...note, id: crypto.randomUUID() })
+                }
               />
             )}
           </div>
+          {designOn && <DesignTray workspaceId={workspace.id} pageUrl={previewUrl} />}
         </section>
       </div>
     </section>

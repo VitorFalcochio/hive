@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Check, CircleAlert, ExternalLink } from 'lucide-react';
+import { Check, CircleAlert, ExternalLink, Send } from 'lucide-react';
 import {
   providerPresets,
   type ConnectionTest,
@@ -16,6 +16,8 @@ import { hasAccess, useHive, usableWorkers, type ModalState } from './context';
 import { buildComparisonPlan, MAX_CANDIDATES, MIN_CANDIDATES } from './comparison';
 import { Modal, Select, useTask, type SelectOption } from './ui';
 import { taskDiffTab, useCode } from './code/store';
+import { draftKey, loadDraft, saveDraft } from './review';
+import { ReviewDiff } from './review-diff';
 
 export function ModalHost({ modal }: { modal: ModalState | null }) {
   if (!modal) return null;
@@ -263,6 +265,7 @@ function MissionModal() {
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
   const [compare, setCompare] = useState(false);
+  const [queue, setQueue] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const task = useTask();
   const candidates = usableWorkers(workers, providers).filter((worker) => worker.role !== 'queen');
@@ -306,6 +309,8 @@ function MissionModal() {
             if (plan) {
               await window.hive.invoke('run.setPlan', { runId: created.runId, plan });
               await window.hive.invoke('run.start', created.runId);
+            } else if (queue) {
+              await window.hive.invoke('autopilot.enqueue', created.runId);
             }
             setDetail(await window.hive.invoke('run.get', created.runId));
             await refresh();
@@ -338,15 +343,34 @@ function MissionModal() {
         </label>
         <fieldset className="mode-choice">
           <legend>Como executar</legend>
-          <label className="choice">
+          <label className={compare ? 'option-card' : 'option-card selected'}>
             <input type="radio" name="mode" checked={!compare} onChange={() => setCompare(false)} />
-            Plano da Queen
+            <span>
+              <strong>Plano da Queen</strong>
+              <small>A Queen divide o objetivo em tarefas para a equipe.</small>
+            </span>
           </label>
-          <label className="choice">
+          <label className={compare ? 'option-card selected' : 'option-card'}>
             <input type="radio" name="mode" checked={compare} onChange={() => setCompare(true)} />
-            Comparar agentes
+            <span>
+              <strong>Comparar agentes</strong>
+              <small>Vários agentes fazem a mesma tarefa e você escolhe a melhor.</small>
+            </span>
           </label>
         </fieldset>
+        {!compare && (
+          <label className={queue ? 'option-card wide selected' : 'option-card wide'}>
+            <input
+              type="checkbox"
+              checked={queue}
+              onChange={(event) => setQueue(event.target.checked)}
+            />
+            <span>
+              <strong>Colocar na fila do Modo Turno</strong>
+              <small>A Queen planeja e os agentes executam sem esperar por você.</small>
+            </span>
+          </label>
+        )}
         {compare && (
           <fieldset className="agent-picks">
             <legend>
@@ -551,15 +575,6 @@ function ModelModal({ worker }: { worker: Worker }) {
   );
 }
 
-function patchLineClass(line: string): string | undefined {
-  if (line.startsWith('+++') || line.startsWith('---')) return 'meta';
-  if (line.startsWith('+')) return 'add';
-  if (line.startsWith('-')) return 'del';
-  if (line.startsWith('@@')) return 'hunk';
-  if (line.startsWith('diff --git')) return 'file';
-  return undefined;
-}
-
 function DiffModal({ task }: { task: Task }) {
   const { closeModal, refresh, setDetail, notify, go } = useHive();
   const [diff, setDiff] = useState<TaskDiff | null>(null);
@@ -573,6 +588,15 @@ function DiffModal({ task }: { task: Task }) {
   useEffect(() => {
     void load.run(async () => setDiff(await window.hive.invoke('task.diff', task.id)));
   }, [task.id, load.run]);
+  // Review notes are kept per result, so closing the diff does not lose them.
+  const reviewKey = draftKey(task.id, task.result?.commit);
+  const [review, setReview] = useState(() => loadDraft(reviewKey));
+  const updateReview = (next: typeof review) => {
+    setReview(next);
+    saveDraft(reviewKey, next);
+  };
+  const reviewable = task.status === 'completed' && !!task.result?.commit;
+  const hasReview = review.comments.length > 0 || review.note.trim().length > 0;
   const finish = async (message: string) => {
     setDetail(await window.hive.invoke('run.get', task.runId));
     await refresh();
@@ -611,18 +635,32 @@ function DiffModal({ task }: { task: Task }) {
           ))}
         </ul>
       )}
+      {diff && reviewable && (
+        <p className="review-hint">
+          Passe o mouse numa linha e clique no balão para comentar. Os comentários vão juntos para o
+          agente, que corrige a partir desta entrega.
+        </p>
+      )}
       {diff && (
-        <pre className="diff-view">
-          {diff.patch
-            ? diff.patch.split('\n').map((line, index) => (
-                <span key={index} className={patchLineClass(line)}>
-                  {line || ' '}
-                  {'\n'}
-                </span>
-              ))
-            : 'Nenhuma alteração.'}
-          {diff.truncated && '\n[diff truncado]'}
-        </pre>
+        <ReviewDiff
+          patch={diff.patch}
+          comments={review.comments}
+          editable={reviewable}
+          onChange={(comments) => updateReview({ ...review, comments })}
+        />
+      )}
+      {diff?.truncated && <p className="review-empty">O diff foi cortado por ser muito grande.</p>}
+      {reviewable && (
+        <label className="review-general">
+          Observação geral para o agente <span className="optional">(opcional)</span>
+          <textarea
+            rows={2}
+            maxLength={4000}
+            value={review.note}
+            placeholder="Ex.: mantenha o padrão de nomes do projeto."
+            onChange={(event) => updateReview({ ...review, note: event.target.value })}
+          />
+        </label>
       )}
       <FormError error={load.error || act.error} />
       {task.status === 'completed' && (
@@ -639,6 +677,29 @@ function DiffModal({ task }: { task: Task }) {
           >
             Descartar
           </button>
+          {reviewable && (
+            <button
+              className="secondary"
+              disabled={act.running || !hasReview}
+              title={hasReview ? undefined : 'Comente alguma linha ou escreva uma observação'}
+              onClick={() =>
+                void act.run(async () => {
+                  await window.hive.invoke('task.revise', {
+                    taskId: task.id,
+                    comments: review.comments,
+                    note: review.note,
+                  });
+                  saveDraft(reviewKey, { comments: [], note: '' });
+                  await finish('Comentários enviados. O agente está revisando a entrega.');
+                })
+              }
+            >
+              <Send size={13} />
+              {review.comments.length
+                ? `Enviar ${review.comments.length} comentário(s) ao agente`
+                : 'Enviar ao agente'}
+            </button>
+          )}
           <button
             disabled={act.running}
             onClick={() =>

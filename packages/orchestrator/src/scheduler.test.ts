@@ -38,7 +38,11 @@ afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
 
-async function setup(behaviour: Behaviour, tasks: { key: string; dependsOn?: string[] }[]) {
+async function setup(
+  behaviour: Behaviour,
+  tasks: { key: string; dependsOn?: string[] }[],
+  unattended = false,
+) {
   const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-sched-'));
   const git = (...args: string[]) =>
     execFileSync('git', args, { cwd: repo, windowsHide: true }).toString();
@@ -129,6 +133,7 @@ async function setup(behaviour: Behaviour, tasks: { key: string; dependsOn?: str
     worktreeRoot: () => path.join(repo, '..', `${path.basename(repo)}-worktrees`),
     onEvent: () => undefined,
     onChange: () => undefined,
+    unattended: () => unattended,
   });
   const task = (key: string) => repos.tasks.require(`task_${key}`, 'Tarefa');
   const status = () => repos.runs.require(run.id, 'Execução').status;
@@ -221,5 +226,115 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     const statuses = (['a', 'b'] as const).map((key) => ctx.task(key));
     expect(statuses.map((task: Task) => task.status)).toEqual(['completed', 'completed']);
     expect(ctx.task('a').attempt).toBe(2);
+  });
+
+  it('sem ninguém olhando, libera só comandos seguros e não cria pedidos', async () => {
+    const answers: boolean[] = [];
+    const ctx = await setup(
+      async (input) => {
+        answers.push(await input.requestApproval({ command: 'npm test' }));
+        answers.push(await input.requestApproval({ command: 'npm install left-pad' }));
+        answers.push(await input.requestApproval({ command: 'npm test && rm -rf /' }));
+        await writeTaskFile(input);
+        return {};
+      },
+      [{ key: 'a' }],
+      true,
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'review');
+    expect(answers).toEqual([true, false, false]);
+    expect(ctx.repos.approvals.list()).toEqual([]);
+  });
+
+  it('sem ninguém olhando, tenta de novo com o erro anterior até o limite', async () => {
+    const descriptions: string[] = [];
+    const ctx = await setup(
+      async (input) => {
+        descriptions.push(input.task.description);
+        if (descriptions.length === 1)
+          return { status: 'failed', error: 'teste vermelho', summary: '' };
+        await writeTaskFile(input);
+        return {};
+      },
+      [{ key: 'a' }],
+      true,
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'review after automatic retry');
+    expect(ctx.task('a').attempt).toBe(2);
+    expect(descriptions[0]).toBe('d');
+    expect(descriptions[1]).toContain('A tentativa anterior falhou com este erro: teste vermelho');
+  });
+
+  it('para de tentar quando chega ao limite de tentativas', async () => {
+    let calls = 0;
+    const ctx = await setup(
+      async () => {
+        calls += 1;
+        return { status: 'failed', error: `falha ${calls}`, summary: '' };
+      },
+      [{ key: 'a' }],
+      true,
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'failed', 'failed run');
+    expect(calls).toBe(2);
+    expect(ctx.task('a').error).toBe('falha 2');
+  });
+
+  it('revisa a partir da entrega anterior com os comentários do usuário', async () => {
+    const seen: { review?: AgentTaskInput['task']['review']; hadFirst: boolean }[] = [];
+    const ctx = await setup(
+      async (input) => {
+        const first = path.join(input.worktreePath, 'tela.txt');
+        seen.push({ review: input.task.review, hadFirst: existsSync(first) });
+        if (!input.task.review) await writeFile(first, 'botão azul\n');
+        else await writeFile(path.join(input.worktreePath, 'ajuste.txt'), 'verde\n');
+        return { summary: input.task.review ? 'Troquei a cor.' : 'Fiz a tela.' };
+      },
+      [{ key: 'a' }],
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'first review');
+    const firstBranch = ctx.task('a').branch!;
+
+    ctx.scheduler.revise(
+      'task_a',
+      [{ path: 'tela.txt', line: 1, side: 'new', code: 'botão azul', body: 'Use verde.' }],
+      'Mantenha o resto.',
+    );
+    await until(() => ctx.status() === 'review' && ctx.task('a').attempt === 2, 'revision');
+
+    expect(seen[1]).toMatchObject({
+      hadFirst: true,
+      review: { round: 1, previousSummary: 'Fiz a tela.', note: 'Mantenha o resto.' },
+    });
+    expect(seen[1]!.review!.comments[0]!.body).toBe('Use verde.');
+    // The diff still covers the whole task, not only the fix.
+    const files = ctx
+      .task('a')
+      .result!.filesChanged.map((file) => file.path)
+      .sort();
+    expect(files).toEqual(['ajuste.txt', 'tela.txt']);
+    expect(ctx.git('branch', '--list', firstBranch).trim()).toBe('');
+
+    await ctx.scheduler.approve('task_a');
+    // Git on Windows may convert line endings on checkout.
+    expect((await readFile(path.join(ctx.repo, 'ajuste.txt'), 'utf8')).trimEnd()).toBe('verde');
+  });
+
+  it('recusa revisar tarefa que não está pronta ou sem comentários', async () => {
+    const ctx = await setup(
+      async (input) => {
+        await writeTaskFile(input);
+        return {};
+      },
+      [{ key: 'a' }],
+    );
+    expect(() => ctx.scheduler.revise('task_a', [], 'x')).toThrow(/prontas para revisão/);
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'review');
+    expect(() => ctx.scheduler.revise('task_a', [], '  ')).toThrow(/ao menos um comentário/);
   });
 });

@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HiveDatabase } from '@hive/persistence';
 import type {
+  AutopilotStatus,
   HivePush,
   CodeAssistantResponse,
   MissionDetail,
@@ -35,7 +36,9 @@ vi.mock('electron', () => ({
 import { DesktopService } from './service';
 
 const databases: HiveDatabase[] = [];
+const services: DesktopService[] = [];
 afterEach(() => {
+  for (const service of services.splice(0)) service.dispose();
   for (const db of databases.splice(0)) db.close();
   vi.unstubAllGlobals();
   mocks.selected = '';
@@ -45,7 +48,9 @@ function setup(file = ':memory:') {
   const db = new HiveDatabase(file);
   databases.push(db);
   const pushes: HivePush[] = [];
-  return { service: new DesktopService(db, os.tmpdir(), (push) => pushes.push(push)), db, pushes };
+  const service = new DesktopService(db, os.tmpdir(), (push) => pushes.push(push));
+  services.push(service);
+  return { service, db, pushes };
 }
 
 describe('desktop integrado aos serviços locais', () => {
@@ -57,6 +62,8 @@ describe('desktop integrado aos serviços locais', () => {
     expect(workers).toHaveLength(6);
     const worker = workers[0]!;
     await first.service.invoke('worker.save', { ...worker, name: 'Minha equipe' });
+    first.service.dispose();
+    services.splice(services.indexOf(first.service), 1);
     first.db.close();
     databases.splice(databases.indexOf(first.db), 1);
     const second = setup(file);
@@ -145,6 +152,84 @@ describe('desktop integrado aos serviços locais', () => {
     expect(pushes.some((push) => push.kind === 'changed' && push.entity === 'run')).toBe(true);
     expect(await readFile(path.join(repo, 'README.md'), 'utf8')).toBe('# Teste\n');
     expect(git(['status', '--porcelain']).toString()).toBe('');
+  });
+
+  it('no Modo Turno, planeja a missão da fila sozinho e registra por que não pôde executar', async () => {
+    const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-shift-'));
+    const git = (args: string[]) => execFileSync('git', args, { cwd: repo, windowsHide: true });
+    git(['init', '-b', 'main']);
+    await writeFile(path.join(repo, 'README.md'), '# Turno\n');
+    git(['add', 'README.md']);
+    git([
+      '-c',
+      'user.name=T',
+      '-c',
+      'user.email=t@hive.local',
+      '-c',
+      'core.hooksPath=',
+      'commit',
+      '-m',
+      'i',
+    ]);
+    mocks.selected = repo;
+    const { service } = setup();
+    await service.invoke('workspace.pick', undefined);
+    const provider = (await service.invoke('provider.save', {
+      kind: 'openai-compatible',
+      name: 'Local',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      enabled: true,
+    })) as ProviderConfig;
+    // Only the Queen has a model, so planning works and starting must fail with a clear reason.
+    const queen = ((await service.invoke('worker.list', undefined)) as Worker[]).find(
+      (worker) => worker.role === 'queen',
+    )!;
+    await service.invoke('worker.save', { ...queen, providerId: provider.id, modelId: 'm' });
+    const plan = {
+      notes: 'ok',
+      tasks: [
+        {
+          key: 'a',
+          title: 'Tarefa',
+          description: 'd',
+          workerId: null,
+          dependsOn: [],
+          acceptanceCriteria: ['ok'],
+        },
+      ],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: JSON.stringify(plan) } }],
+              usage: { prompt_tokens: 1, completion_tokens: 1 },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const created = (await service.invoke('mission.create', {
+      title: 'Missão do turno',
+      objective: 'Fazer algo.',
+    })) as MissionDetail & { runId: string };
+    await service.invoke('autopilot.setEnabled', true);
+    await service.invoke('autopilot.enqueue', created.runId);
+
+    const status = async () =>
+      (await service.invoke('autopilot.status', undefined)) as AutopilotStatus;
+    const started = Date.now();
+    while ((await status()).history.length === 0) {
+      if (Date.now() - started > 10_000) throw new Error('O turno não terminou a missão.');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const done = await status();
+    expect(done.queue).toEqual([]);
+    expect(done.history[0]).toMatchObject({ runId: created.runId, status: 'failed' });
+    expect(done.history[0]?.error).toContain('Configure os agentes');
+    expect(((await service.invoke('run.get', created.runId)) as RunDetail).tasks).toHaveLength(1);
   });
 
   it('oferece iniciar uma pasta comum como repositório, com commit inicial dos arquivos', async () => {

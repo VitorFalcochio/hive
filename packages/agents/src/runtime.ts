@@ -1,4 +1,10 @@
-import type { AgentEventType, CommandEvidence, ExecutionLimits, Worker } from '@hive/core';
+import type {
+  AgentEventType,
+  CommandEvidence,
+  ExecutionLimits,
+  ReviewComment,
+  Worker,
+} from '@hive/core';
 import type { ChatClient } from '@hive/providers';
 import type { ResolvedSkill } from '@hive/skills';
 
@@ -11,6 +17,13 @@ export interface AgentTaskInput {
     acceptanceCriteria: string[];
     /** Results of upstream tasks this one builds on. */
     upstream: { title: string; summary: string }[];
+    /** The user's review of this task's previous result, which is already in the worktree. */
+    review?: {
+      round: number;
+      previousSummary: string;
+      comments: ReviewComment[];
+      note: string;
+    };
   };
   worker: Worker;
   model: string;

@@ -85,6 +85,24 @@ export function buildTaskPrompt(input: AgentTaskInput): string {
     lines.push('', '## Completed upstream work (already present in your worktree)');
     for (const item of task.upstream) lines.push(`### ${item.title}`, item.summary.slice(0, 4000));
   }
+  if (task.review) {
+    const { review } = task;
+    lines.push(
+      '',
+      `## Review of your previous result (round ${review.round})`,
+      'Your previous work on this task is already in the worktree. The user reviewed its diff and asks for the changes below. Make them, keep everything else you did, and do not start over.',
+    );
+    if (review.previousSummary)
+      lines.push('', 'Your previous summary:', review.previousSummary.slice(0, 2000));
+    if (review.comments.length) {
+      lines.push('', 'Comments on specific lines (the code shown is the line as it was):');
+      for (const comment of review.comments) {
+        const where = `${comment.path}:${comment.line}${comment.side === 'old' ? ' (removed line)' : ''}`;
+        lines.push(`- ${where} \`${comment.code.trim().slice(0, 200)}\`: ${comment.body}`);
+      }
+    }
+    if (review.note.trim()) lines.push('', 'General note from the user:', review.note.trim());
+  }
   return lines.join('\n');
 }
 

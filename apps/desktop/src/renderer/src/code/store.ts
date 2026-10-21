@@ -70,6 +70,18 @@ interface CodeState extends ProjectSnapshot {
   setPendingProposal(proposal: AiProposal | null): void;
   /** Drop tabs of files that no longer exist (deleted or renamed elsewhere). */
   forget(path: string): void;
+  /** A spot to show once its file is open, e.g. a search result. The editor clears it. */
+  reveal: RevealTarget | null;
+  /** Opens the file and selects `length` characters at the 1-based line and column. */
+  revealAt(target: RevealTarget): void;
+  clearReveal(): void;
+}
+
+export interface RevealTarget {
+  path: string;
+  line: number;
+  column: number;
+  length: number;
 }
 
 export const fileTab = (path: string): Tab => ({ id: `file:${path}`, kind: 'file', path });
@@ -126,6 +138,13 @@ export const useCode = create<CodeState>((set) => ({
   selection: null,
   pendingProposal: null,
   setPendingProposal: (proposal) => set({ pendingProposal: proposal }),
+  reveal: null,
+  revealAt: (target) => {
+    useCode.getState().open(fileTab(target.path));
+    // A new object each time, so revealing the same spot twice still moves the editor.
+    set({ reveal: { ...target } });
+  },
+  clearReveal: () => set({ reveal: null }),
   open: (tab, group) =>
     set((state) => {
       const index = Math.min(group ?? state.focused, state.groups.length - 1);

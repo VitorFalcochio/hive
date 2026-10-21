@@ -16,6 +16,8 @@ describe('parseDesignElement', () => {
     const parsed = parseDesignElement({ source: 'hive-design', type: 'select', element });
     expect(parsed).toEqual({
       ...element,
+      editableText: false,
+      source: null,
       styles: { color: 'rgb(255, 255, 255)', display: 'inline-block' },
     });
   });
@@ -36,5 +38,21 @@ describe('parseDesignElement', () => {
     expect(
       parseDesignElement({ source: 'hive-design', type: 'select', element: badClasses }),
     ).toBeNull();
+  });
+
+  it('keeps a reported source location and drops a malformed one', () => {
+    const withSource = (source: unknown) =>
+      parseDesignElement({ source: 'hive-design', type: 'select', element: { ...element, source } })
+        ?.source;
+    expect(withSource({ file: 'src/App.vue', line: 12 })).toEqual({
+      file: 'src/App.vue',
+      line: 12,
+    });
+    expect(withSource({ file: 'src/App.vue', line: 'x' })).toEqual({
+      file: 'src/App.vue',
+      line: null,
+    });
+    expect(withSource({ file: '' })).toBeNull();
+    expect(withSource('src/App.vue')).toBeNull();
   });
 });
