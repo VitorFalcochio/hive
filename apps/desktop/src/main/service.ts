@@ -41,6 +41,13 @@ import { assistCode } from './code-assistant';
 import { startStaticServer, type StaticServer } from './static-server';
 import { locateElement } from './locate';
 
+/** Local midnight as an ISO time: "today" for the token meter is the user's calendar day. */
+function startOfToday(): string {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  return midnight.toISOString();
+}
+
 export class DesktopService {
   readonly repos: Repositories;
   readonly scheduler: Scheduler;
@@ -943,6 +950,10 @@ export class DesktopService {
           })),
           workers: this.repos.workers.list().length,
           usage: this.repos.usageTotals(workspace?.id ?? null),
+          today: {
+            ...this.repos.usageSince(startOfToday()),
+            budget: this.repos.getSettings().dailyTokenBudget,
+          },
         };
         return summary;
       }

@@ -11,6 +11,7 @@ import type {
   Worker,
   Workspace,
 } from '@hive/core';
+import { providerPresets } from '@hive/core';
 
 export type View =
   | 'overview'
@@ -70,9 +71,9 @@ export function useHive(): HiveContext {
 
 export const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** Providers that can actually be called: a stored key, or a local server that needs none. */
+/** Providers that can actually be called: a stored key, or one that works without (local, free). */
 export const hasAccess = (provider: ProviderConfig) =>
-  provider.enabled && (provider.hasCredential || provider.kind === 'openai-compatible');
+  provider.enabled && (provider.hasCredential || !!providerPresets[provider.kind].keyOptional);
 
 /** Agents that can answer now: a model, and a provider the user can reach. */
 export const usableWorkers = (workers: Worker[], providers: ProviderConfig[]) =>

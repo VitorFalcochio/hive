@@ -108,6 +108,39 @@ it('ao escolher o provedor de um agente, escolhe e testa o modelo automaticament
   expect(screen.getAllByText('z-ai/glm-5.3').length).toBeGreaterThan(0);
 });
 
+it('cria um agente novo a partir de uma função base', async () => {
+  const invoke = mount({
+    'worker.list': () => [queen],
+    'settings.get': () => ({
+      defaultLimits: {
+        maxSteps: 40,
+        maxTokens: 200_000,
+        commandTimeoutSec: 120,
+        taskTimeoutMin: 30,
+        temperature: null,
+      },
+    }),
+    'worker.save': (input) => ({ ...(input as object), id: 'w2', createdAt: '', updatedAt: '' }),
+  });
+  await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: 'Agentes' }));
+  fireEvent.click(screen.getByRole('button', { name: /Novo agente/ }));
+  fireEvent.click(await screen.findByRole('combobox', { name: /Função base/ }));
+  fireEvent.click(screen.getByRole('option', { name: 'Revisão' }));
+  fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Acessibilidade' } });
+  fireEvent.click(screen.getByRole('button', { name: /Criar agente/ }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      'worker.save',
+      expect.objectContaining({
+        name: 'Acessibilidade',
+        role: 'reviewer',
+        tools: ['list_dir', 'read_file', 'search', 'read_skill_resource'],
+      }),
+    ),
+  );
+});
+
 it('executa um comando do projeto na tela Rodar', async () => {
   const workspace = {
     id: 'ws1',

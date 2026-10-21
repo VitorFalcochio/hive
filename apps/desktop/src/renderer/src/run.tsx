@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   Bot,
   ChevronDown,
@@ -20,6 +28,7 @@ import { DesignPanel, parseDesignElement, type DesignElement, type DesignPreview
 import { useTray } from './design-tray';
 import { DesignTray } from './design-tray-panel';
 import { TerminalView } from './terminal-view';
+import { Mascot } from './mascot';
 
 const MAX_RENDERED_OUTPUT = 1024 * 1024;
 
@@ -31,11 +40,26 @@ const agentCommands = [
   { label: 'Codex', command: 'codex' },
   { label: 'Gemini CLI', command: 'gemini' },
   { label: 'OpenCode', command: 'opencode' },
+  { label: 'Kilo', command: 'kilo' },
 ];
 
 const sessionLabel = (session: TerminalSession) =>
   agentCommands.find((agent) => agent.command === session.command)?.label ??
   (session.command || 'Terminal');
+
+/** Height of the terminal bar alone: what stays visible when the terminal is collapsed. */
+const DOCK_HEADER = 41;
+const DOCK_MIN = 140;
+const DOCK_KEY = 'hive.run.terminalHeight';
+
+function savedDockHeight(): number {
+  try {
+    const value = Number(localStorage.getItem(DOCK_KEY));
+    return value >= DOCK_MIN ? value : 300;
+  } catch {
+    return 300;
+  }
+}
 
 const statusLabel: Record<TerminalStatus, string> = {
   running: 'Executando',
@@ -82,6 +106,9 @@ export function RunPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [designOn, setDesignOn] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(true);
+  const [terminalHeight, setTerminalHeight] = useState(savedDockHeight);
+  const [dragging, setDragging] = useState(false);
+  const stack = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<{ frame: number; element: DesignElement } | null>(
     null,
   );
@@ -330,10 +357,38 @@ export function RunPage() {
     }
   }
 
+  // Dragging the terminal's top edge resizes it; the preview always keeps some room above.
+  function startResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const container = stack.current;
+    if (!container) return;
+    event.preventDefault();
+    const bottom = container.getBoundingClientRect().bottom;
+    const max = container.clientHeight - 160;
+    let height = terminalHeight;
+    setDragging(true);
+    if (!terminalOpen) setTerminalOpen(true);
+    const move = (moveEvent: PointerEvent) => {
+      height = Math.round(Math.min(max, Math.max(DOCK_MIN, bottom - moveEvent.clientY)));
+      setTerminalHeight(height);
+    };
+    const end = () => {
+      setDragging(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      try {
+        localStorage.setItem(DOCK_KEY, String(height));
+      } catch {
+        // Only a convenience: the next visit starts at the default height.
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+  }
+
   if (!workspace) {
     return (
       <section className="run-empty">
-        <TerminalSquare size={30} />
+        <Mascot size={64} />
         <h1>Rodar projeto</h1>
         <p>Abra um repositório para executar comandos e visualizar o site.</p>
       </section>
@@ -345,158 +400,28 @@ export function RunPage() {
   return (
     <section className="run-page">
       <header className="run-header">
-        <div>
-          <h1>Rodar projeto</h1>
-          <p>Execute o projeto e acompanhe o resultado sem sair do Hive.</p>
-        </div>
+        <h1>Rodar projeto</h1>
+        <form className="command-bar" onSubmit={submit}>
+          <span aria-hidden="true">$</span>
+          <label className="sr-only" htmlFor="run-command">
+            Comando
+          </label>
+          <input
+            id="run-command"
+            value={command}
+            onChange={(event) => setCommand(event.target.value)}
+            placeholder="npm run dev"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button className="primary" type="submit" disabled={busy || !command.trim()}>
+            <Play size={14} fill="currentColor" /> Executar
+          </button>
+        </form>
         <span className="run-workspace">{workspace.name}</span>
       </header>
 
-      <form className="command-bar" onSubmit={submit}>
-        <span aria-hidden="true">$</span>
-        <label className="sr-only" htmlFor="run-command">
-          Comando
-        </label>
-        <input
-          id="run-command"
-          value={command}
-          onChange={(event) => setCommand(event.target.value)}
-          placeholder="npm run dev"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <button className="primary" type="submit" disabled={busy || !command.trim()}>
-          <Play size={14} fill="currentColor" /> Executar
-        </button>
-      </form>
-
-      <div className={terminalOpen ? 'run-grid' : 'run-grid terminal-collapsed'}>
-        <section className="run-panel terminal-panel" aria-label="Terminal">
-          <div className="run-panel-header">
-            <div className="run-panel-title">
-              <TerminalSquare size={15} />
-              <strong>Terminal</strong>
-              {active && (
-                <span className="terminal-status">
-                  <Dot tone={terminalTone(active.status)} /> {statusLabel[active.status]}
-                </span>
-              )}
-            </div>
-            <div className="run-actions">
-              <button
-                className="icon-button"
-                onClick={() => void start('')}
-                disabled={busy}
-                title="Novo terminal (PowerShell)"
-                aria-label="Novo terminal"
-              >
-                <Plus size={15} />
-              </button>
-              <div className="agent-menu">
-                <button
-                  className={agentMenu ? 'agent-menu-button open' : 'agent-menu-button'}
-                  onClick={() => setAgentMenu((open) => !open)}
-                  aria-expanded={agentMenu}
-                  aria-haspopup="menu"
-                  title="Abrir um agente de linha de comando neste projeto"
-                >
-                  <Bot size={14} /> Agente <ChevronDown size={12} />
-                </button>
-                {agentMenu && (
-                  <div className="agent-menu-list" role="menu">
-                    {agentCommands.map((agent) => (
-                      <button
-                        key={agent.command}
-                        role="menuitem"
-                        disabled={busy}
-                        onClick={() => void start(agent.command)}
-                      >
-                        <span>{agent.label}</span>
-                        <code>{agent.command}</code>
-                      </button>
-                    ))}
-                    <small>Precisa estar instalado no computador. Usa a sua conta do agente.</small>
-                  </div>
-                )}
-              </div>
-              <button
-                className="icon-button"
-                onClick={() => setTerminalOpen((open) => !open)}
-                title={terminalOpen ? 'Recolher terminal' : 'Expandir terminal'}
-                aria-expanded={terminalOpen}
-              >
-                <ChevronDown size={15} />
-              </button>
-              {running ? (
-                <button
-                  className="icon-button"
-                  onClick={() => void stop()}
-                  disabled={busy}
-                  title="Parar"
-                >
-                  <Square size={13} fill="currentColor" />
-                </button>
-              ) : (
-                <button
-                  className="icon-button"
-                  onClick={() => active && void start(active.command)}
-                  disabled={!active || busy}
-                  title="Executar novamente"
-                >
-                  <RotateCcw size={14} />
-                </button>
-              )}
-              <button
-                className="icon-button"
-                onClick={() => void clear()}
-                disabled={!active || !active.output}
-                title="Limpar saída"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          </div>
-
-          {sessions.length > 0 && (
-            <div className="terminal-tabs" aria-label="Sessões do terminal">
-              {sessions.map((session) => (
-                <button
-                  key={session.id}
-                  className={session.id === active?.id ? 'selected' : ''}
-                  onClick={() => setActiveId(session.id)}
-                  title={session.command || 'Terminal interativo'}
-                >
-                  <Dot tone={terminalTone(session.status)} />
-                  <span>{sessionLabel(session)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="terminal-placeholder" role="status">
-              Carregando sessões…
-            </div>
-          ) : active ? (
-            <TerminalView key={active.id} session={active} clearSignal={clearSignal} />
-          ) : (
-            <div className="terminal-placeholder">
-              <TerminalSquare size={24} />
-              <span>Escolha um comando, digite o seu acima ou abra um terminal.</span>
-              <div className="terminal-suggestions">
-                {suggestedCommands.map((suggested) => (
-                  <button key={suggested} type="button" onClick={() => setCommand(suggested)}>
-                    <code>{suggested}</code>
-                  </button>
-                ))}
-                <button type="button" onClick={() => void start('')}>
-                  <code>Terminal</code>
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-
+      <div className="run-stack" ref={stack}>
         <section className="run-panel preview-panel" aria-label="Live Preview">
           <div className="run-panel-header preview-header">
             <div className="run-panel-title">
@@ -618,6 +543,151 @@ export function RunPage() {
             )}
           </div>
           {designOn && <DesignTray workspaceId={workspace.id} pageUrl={previewUrl} />}
+        </section>
+        <section
+          className={`run-panel terminal-dock${terminalOpen ? '' : ' collapsed'}${dragging ? ' dragging' : ''}`}
+          aria-label="Terminal"
+          style={{ height: terminalOpen ? terminalHeight : DOCK_HEADER }}
+        >
+          <div
+            className="dock-resizer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Redimensionar terminal"
+            onPointerDown={startResize}
+          />
+          <div
+            className="run-panel-header dock-header"
+            onClick={(event) => {
+              // Clicking the bar itself, not one of its buttons, opens or closes the terminal.
+              if (!(event.target as Element).closest('button')) setTerminalOpen((open) => !open);
+            }}
+          >
+            <div className="run-panel-title">
+              <TerminalSquare size={15} />
+              <strong>Terminal</strong>
+              {active && (
+                <span className="terminal-status">
+                  <Dot tone={terminalTone(active.status)} /> {statusLabel[active.status]}
+                </span>
+              )}
+            </div>
+            <div className="run-actions">
+              <button
+                className="icon-button"
+                onClick={() => void start('')}
+                disabled={busy}
+                title="Novo terminal (PowerShell)"
+                aria-label="Novo terminal"
+              >
+                <Plus size={15} />
+              </button>
+              <div className="agent-menu">
+                <button
+                  className={agentMenu ? 'agent-menu-button open' : 'agent-menu-button'}
+                  onClick={() => setAgentMenu((open) => !open)}
+                  aria-expanded={agentMenu}
+                  aria-haspopup="menu"
+                  title="Abrir um agente de linha de comando neste projeto"
+                >
+                  <Bot size={14} /> Agente <ChevronDown size={12} />
+                </button>
+                {agentMenu && (
+                  <div className="agent-menu-list" role="menu">
+                    {agentCommands.map((agent) => (
+                      <button
+                        key={agent.command}
+                        role="menuitem"
+                        disabled={busy}
+                        onClick={() => void start(agent.command)}
+                      >
+                        <span>{agent.label}</span>
+                        <code>{agent.command}</code>
+                      </button>
+                    ))}
+                    <small>Precisa estar instalado no computador. Usa a sua conta do agente.</small>
+                  </div>
+                )}
+              </div>
+              <button
+                className={
+                  terminalOpen ? 'icon-button dock-toggle open' : 'icon-button dock-toggle'
+                }
+                onClick={() => setTerminalOpen((open) => !open)}
+                title={terminalOpen ? 'Recolher terminal' : 'Expandir terminal'}
+                aria-label={terminalOpen ? 'Recolher terminal' : 'Expandir terminal'}
+                aria-expanded={terminalOpen}
+              >
+                <ChevronDown size={15} />
+              </button>
+              {running ? (
+                <button
+                  className="icon-button"
+                  onClick={() => void stop()}
+                  disabled={busy}
+                  title="Parar"
+                >
+                  <Square size={13} fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  className="icon-button"
+                  onClick={() => active && void start(active.command)}
+                  disabled={!active || busy}
+                  title="Executar novamente"
+                >
+                  <RotateCcw size={14} />
+                </button>
+              )}
+              <button
+                className="icon-button"
+                onClick={() => void clear()}
+                disabled={!active || !active.output}
+                title="Limpar saída"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+
+          {sessions.length > 0 && (
+            <div className="terminal-tabs" aria-label="Sessões do terminal">
+              {sessions.map((session) => (
+                <button
+                  key={session.id}
+                  className={session.id === active?.id ? 'selected' : ''}
+                  onClick={() => setActiveId(session.id)}
+                  title={session.command || 'Terminal interativo'}
+                >
+                  <Dot tone={terminalTone(session.status)} />
+                  <span>{sessionLabel(session)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {loading ? (
+            <div className="terminal-placeholder" role="status">
+              Carregando sessões…
+            </div>
+          ) : active ? (
+            <TerminalView key={active.id} session={active} clearSignal={clearSignal} />
+          ) : (
+            <div className="terminal-placeholder">
+              <TerminalSquare size={24} />
+              <span>Escolha um comando, digite o seu acima ou abra um terminal.</span>
+              <div className="terminal-suggestions">
+                {suggestedCommands.map((suggested) => (
+                  <button key={suggested} type="button" onClick={() => setCommand(suggested)}>
+                    <code>{suggested}</code>
+                  </button>
+                ))}
+                <button type="button" onClick={() => void start('')}>
+                  <code>Terminal</code>
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </section>

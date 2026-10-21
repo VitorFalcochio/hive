@@ -305,6 +305,18 @@ export class Repositories {
     );
   }
 
+  /** Tokens of the tasks, in every project, that finished at or after `since` (an ISO time). */
+  usageSince(since: string): { promptTokens: number; completionTokens: number } {
+    let promptTokens = 0;
+    let completionTokens = 0;
+    for (const task of this.tasks.list('updated_at >= ?', since)) {
+      if (!task.finishedAt || task.finishedAt < since) continue;
+      promptTokens += task.result?.usage.promptTokens ?? 0;
+      completionTokens += task.result?.usage.completionTokens ?? 0;
+    }
+    return { promptTokens, completionTokens };
+  }
+
   usageTotals(workspaceId: string | null): {
     promptTokens: number;
     completionTokens: number;

@@ -80,6 +80,8 @@ export interface DashboardSummary {
   recentRuns: (Run & { missionTitle: string })[];
   pendingApprovals: Approval[];
   usage: { promptTokens: number; completionTokens: number; runsCounted: number };
+  /** Tokens used since local midnight across all projects, against the daily budget. */
+  today: { promptTokens: number; completionTokens: number; budget: number };
   providers: ProviderConfig[];
   workers: number;
 }

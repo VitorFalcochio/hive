@@ -291,6 +291,10 @@ nav {
   flex-shrink: 0;
   color: var(--muted-foreground);
 }
+.tree-root {
+  font-size: 13.5px;
+  font-weight: 600;
+}
 .tree-root .count {
   margin-left: auto;
   font: 11px var(--font-mono);
@@ -384,6 +388,14 @@ nav {
   align-items: flex-start;
   gap: 24px;
   margin-bottom: 28px;
+}
+.page-leading {
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+.page-heading {
+  flex: 1;
+  min-width: 0;
 }
 .page-actions {
   display: flex;
@@ -491,12 +503,14 @@ code {
 }
 
 /* Cards and rows */
+/* Sections are open, not boxed: a hairline above and room around, like the agents table. */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  padding: 20px 22px;
-  border-radius: var(--radius);
-  margin-bottom: 20px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 22px 0 8px;
+  border-radius: 0;
+  margin-bottom: 10px;
 }
 .card-heading {
   display: flex;
@@ -509,7 +523,7 @@ code {
   display: grid;
 }
 .card.flush {
-  padding: 6px;
+  padding: 6px 0;
 }
 .row {
   display: flex;
@@ -708,10 +722,8 @@ select:disabled {
 }
 .hint {
   margin: 0 0 20px;
-  padding: 11px 14px;
-  background: rgb(255 255 255 / 2.5%);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--border-strong);
   color: var(--muted-foreground);
   font-size: 12.5px;
 }
@@ -766,45 +778,207 @@ select:disabled {
   animation: spin 0.8s linear infinite;
 }
 
-/* Agents */
-.agent-grid {
+/* Agents: one compact row per agent; editing slides in from the right. */
+.agent-table {
+  border-top: 1px solid var(--border);
+}
+.agent-tr {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 20px;
+  grid-template-columns: 130px minmax(0, 1.4fr) 190px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
 }
-.agent-role {
+.agent-tr:not(.agent-th):hover,
+.agent-tr.active {
+  background: var(--hover);
+}
+.agent-th {
+  min-height: 34px;
+  padding-block: 0;
+  cursor: default;
   font: 500 10.5px var(--font-mono);
+  text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--muted-foreground);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  padding: 3px 9px;
+  color: var(--subtle-foreground);
 }
-.agent-card h2 {
-  font-size: 15px;
-}
-.agent-card > p {
-  margin: 6px 0 16px;
-  min-height: 43px;
-}
-.agent-card label {
-  margin-bottom: 10px;
-}
-.model-line {
+.agent-role-cell {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 28px;
+  gap: 9px;
+  font: 500 12px var(--font-mono);
+  color: var(--muted-foreground);
 }
-.model-line code {
+.agent-name-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.agent-name-cell > span,
+.agent-name-cell small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-name-cell > span {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.agent-name-cell small {
+  font-size: 12px;
+  color: var(--subtle-foreground);
+}
+.agent-provider {
+  margin: 0;
+}
+.agent-provider .select-trigger,
+.agent-provider button {
+  height: 32px;
+}
+.agent-model-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.agent-model-cell code {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
 }
-.model-line .progress {
+.agent-model-cell code.unset {
+  color: var(--subtle-foreground);
+}
+.agent-model-cell .progress {
   flex: 1;
+}
+.agent-model-error {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--danger);
+}
+button.ghost.danger {
+  color: var(--danger);
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(0 0 0 / 45%);
+  animation: fade-in 0.15s ease-out;
+}
+.drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  height: 100%;
+  background: var(--surface);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: -40px 0 120px -20px rgb(0 0 0 / 80%);
+  animation: slide-in 0.2s ease-out;
+}
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+.drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: calc(var(--titlebar) + 14px) 24px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-header .eyebrow {
+  margin-bottom: 6px;
+}
+.drawer-header h2 {
+  font-size: 17px;
+}
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 24px;
+}
+.drawer-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+}
+.drawer-spacer {
+  flex: 1;
+}
+.agent-section {
+  padding: 20px 0 4px;
+}
+.agent-section + .agent-section {
+  border-top: 1px solid var(--border);
+}
+.agent-section h3 {
+  margin: 0 0 14px;
+  font: 500 10.5px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+}
+.field-hint {
+  margin-top: -3px;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--subtle-foreground);
+}
+.field-hint code {
+  font-size: 11.5px;
+}
+textarea.mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.tool-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 20px;
+  margin-bottom: 16px;
+}
+.tool-option {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.tool-option input {
+  margin-top: 2px;
+}
+.tool-option span {
+  display: grid;
+  gap: 2px;
+}
+.tool-option small {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--subtle-foreground);
+}
+.agent-unsaved {
+  margin-right: auto;
+  font-size: 12.5px;
+  color: var(--warning);
 }
 .setup-result {
   list-style: none;
@@ -1007,7 +1181,14 @@ dd {
   .page {
     padding: 28px 24px 40px;
   }
-  .agent-grid {
+  .agent-tr {
+    grid-template-columns: 110px minmax(0, 1fr) 160px 32px;
+  }
+  .agent-model-cell,
+  .agent-th > :nth-child(4) {
+    display: none;
+  }
+  .tool-list {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -1216,22 +1397,74 @@ dd {
   max-height: 220px;
   overflow-y: auto;
 }
+/* Pending command approvals: flat rows with an amber edge, actions on the title line. */
+.approval-list {
+  margin: 0 0 22px;
+  border-top: 1px solid var(--border);
+}
 .approval-card {
-  border-color: rgb(245 181 68 / 40%);
-  background: rgb(245 181 68 / 5%);
+  padding: 14px 0 14px 14px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 2px 0 0 var(--warning);
 }
 .approval-head {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 30px;
   color: var(--warning);
 }
-.approval-head strong {
+.approval-title {
+  flex: 1;
+  min-width: 0;
   color: var(--foreground);
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
 }
-.approval-card .actions {
-  justify-content: flex-end;
+.approval-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+.approval-actions button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+.approval-actions .approve {
+  margin-left: 4px;
+}
+.approval-card pre.command {
+  margin: 8px 0 0 25px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #c9ccd1;
+}
+.approval-card pre.command span {
+  color: var(--subtle-foreground);
+}
+.approval-hint {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--subtle-foreground);
+}
+button.link {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-weight: 500;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--border-strong);
+}
+button.link:hover {
+  background: transparent;
+  text-decoration-color: currentColor;
 }
 pre.command {
   margin: 12px 0 0;
@@ -2046,24 +2279,23 @@ pre.command {
   flex-direction: column;
   height: 100%;
   min-height: 620px;
-  gap: 14px;
-  padding: 22px 28px 22px;
+  gap: 12px;
+  padding: 16px 20px;
   box-sizing: border-box;
 }
 .run-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  gap: 14px;
 }
 .run-header h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 15px;
+  white-space: nowrap;
 }
-.run-header p {
-  margin: 4px 0 0;
-  color: var(--muted-foreground);
-  font-size: 13px;
+.run-header .command-bar {
+  flex: 1;
+  min-width: 0;
 }
 .run-workspace {
   max-width: 320px;
@@ -2080,8 +2312,8 @@ pre.command {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 54px;
-  padding: 8px 8px 8px 16px;
+  min-height: 44px;
+  padding: 4px 4px 4px 14px;
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   background: var(--surface);
@@ -2099,17 +2331,18 @@ pre.command {
   font: 14px var(--font-mono);
 }
 .command-bar button {
-  height: 38px;
+  height: 34px;
   padding: 0 18px;
   font-size: 13.5px;
 }
-.run-grid {
-  display: grid;
-  grid-template-columns: minmax(340px, 0.85fr) minmax(0, 1.35fr);
+/* The preview fills the page; the terminal is a panel docked under it that slides open. */
+.run-stack {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  border-radius: 0;
   overflow: hidden;
   background: var(--surface);
 }
@@ -2119,8 +2352,44 @@ pre.command {
   min-height: 0;
   flex-direction: column;
 }
-.terminal-panel {
-  border-right: 1px solid var(--border-strong);
+.preview-panel {
+  flex: 1;
+}
+.terminal-dock {
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--border-strong);
+  transition: height 280ms cubic-bezier(0.2, 0, 0, 1);
+}
+.terminal-dock.dragging {
+  transition: none;
+  user-select: none;
+}
+.dock-resizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 5px;
+  cursor: row-resize;
+  transition: background 0.15s;
+}
+.dock-resizer:hover,
+.dragging .dock-resizer {
+  background: var(--ring);
+}
+.dock-header {
+  min-height: 40px;
+  cursor: pointer;
+  user-select: none;
+}
+.dock-toggle svg {
+  transition: transform 280ms cubic-bezier(0.2, 0, 0, 1);
+}
+.terminal-dock.collapsed .dock-toggle svg {
+  transform: rotate(180deg);
 }
 .run-panel-header {
   display: flex;
@@ -2398,20 +2667,6 @@ pre.command {
   border-color: rgb(76 214 160 / 50%);
   background: rgb(76 214 160 / 12%);
   color: var(--success);
-}
-
-@media (max-width: 1080px) {
-  .run-page {
-    min-height: 0;
-  }
-  .run-grid {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(260px, 0.8fr) minmax(340px, 1.2fr);
-  }
-  .terminal-panel {
-    border-right: 0;
-    border-bottom: 1px solid var(--border-strong);
-  }
 }
 
 /* Splash shown until the first load finishes */
@@ -3294,12 +3549,12 @@ pre.command {
 
 /* Sidebar sections match the Orca look: bold title, coloured ring, count pill */
 .mission-section-head {
-  height: 32px;
-  gap: 8px;
+  height: 28px;
+  gap: 7px;
   padding: 0 6px;
-  color: var(--foreground);
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
 }
@@ -3312,19 +3567,19 @@ pre.command {
 }
 .mission-section-count {
   margin-left: 0;
-  min-width: 22px;
-  height: 18px;
-  padding: 0 7px;
-  line-height: 18px;
-  font-size: 11.5px;
+  min-width: 20px;
+  height: 16px;
+  padding: 0 6px;
+  line-height: 16px;
+  font-size: 10.5px;
   font-weight: 500;
 }
 .section-ring {
   position: relative;
   flex-shrink: 0;
-  width: 13px;
-  height: 13px;
-  border: 2px solid var(--muted-foreground);
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--muted-foreground);
   border-radius: 50%;
 }
 .section-ring::after {
@@ -3470,12 +3725,10 @@ pre.command {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  margin: 0 -4px;
-  padding: 12px 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 -10px 30px rgb(0 0 0 / 35%);
+  margin: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  background: var(--background);
 }
 .settings-dirty {
   flex: 1;
@@ -3528,13 +3781,12 @@ pre.command {
   align-items: center;
   gap: 12px;
   min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
 }
 .shift-queue li.current {
-  border-color: rgb(76 214 160 / 45%);
-  background: rgb(76 214 160 / 6%);
+  box-shadow: inset 2px 0 0 var(--success);
+  padding-left: 12px;
 }
 .shift-position {
   display: grid;
@@ -3558,6 +3810,13 @@ pre.command {
   background: transparent;
   color: var(--foreground);
   text-align: left;
+  justify-content: start;
+  justify-items: start;
+  height: auto;
+  font-weight: 500;
+}
+.shift-title small {
+  font-weight: 400;
 }
 .shift-title:hover strong {
   text-decoration: underline;
@@ -4102,4 +4361,137 @@ pre.command {
   .design-tray-toggle .chevron {
     transition: none;
   }
+}
+
+/* Mascot: a pixel-art bee. Transforms are in sprite pixels, since they apply inside the SVG. */
+.mascot {
+  flex-shrink: 0;
+  overflow: visible;
+}
+.mascot-hover {
+  animation: mascot-hover 2.6s ease-in-out infinite alternate;
+}
+.mascot-wing {
+  transform-box: fill-box;
+}
+.mascot-wing.left {
+  transform-origin: right center;
+}
+.mascot-wing.right {
+  transform-origin: left center;
+}
+.mascot-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mascot-blink 4.6s infinite;
+}
+.mascot-idle .mascot-wing {
+  animation: mascot-flutter 3.4s ease-in-out infinite;
+}
+.mascot-working .mascot-hover {
+  animation-duration: 0.9s;
+}
+.mascot-working .mascot-wing {
+  animation: mascot-flap 0.14s linear infinite alternate;
+}
+@keyframes mascot-hover {
+  to {
+    transform: translateY(-0.7px);
+  }
+}
+@keyframes mascot-flap {
+  to {
+    transform: scaleY(0.45);
+  }
+}
+/* At rest the wings stay still, with a quick flutter now and then. */
+@keyframes mascot-flutter {
+  0%,
+  78%,
+  86%,
+  100% {
+    transform: none;
+  }
+  82%,
+  90% {
+    transform: scaleY(0.55);
+  }
+}
+@keyframes mascot-blink {
+  0%,
+  93%,
+  100% {
+    transform: none;
+  }
+  96% {
+    transform: scaleY(0.15);
+  }
+}
+.statusbar .mascot {
+  margin: -3px 0;
+}
+.empty .mascot {
+  opacity: 0.9;
+}
+
+/* Status bar token meter: honey fill towards the daily budget, red once it is passed. */
+.token-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.token-track {
+  position: relative;
+  width: 96px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--selected);
+}
+.token-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: #f5b544;
+  transition: width 0.4s ease-out;
+}
+.token-meter.over .token-fill {
+  background: var(--danger);
+}
+.token-meter.over {
+  color: var(--danger);
+}
+
+/* A flat list of radio choices: control, name and one line of explanation, hairlines between. */
+.choice-list {
+  display: grid;
+}
+.choice {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 0;
+  cursor: pointer;
+}
+.choice + .choice {
+  border-top: 1px solid var(--border);
+}
+.choice input {
+  margin-top: 2px;
+}
+.choice span {
+  display: grid;
+  gap: 3px;
+}
+.choice strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.choice small {
+  font-weight: 400;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--subtle-foreground);
 }

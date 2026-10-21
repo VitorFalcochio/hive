@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Check, ChevronDown, X } from 'lucide-react';
 import type { RunStatus } from '@hive/core';
 import { message } from './context';
+import { Mascot } from './mascot';
 
 export const statusLabels: Record<RunStatus, string> = {
   draft: 'Rascunho',
@@ -102,15 +103,19 @@ export function PageHeader({
   title,
   description,
   children,
+  leading,
 }: {
   eyebrow: string;
   title: string;
   description?: ReactNode;
   children?: ReactNode;
+  /** Shown to the left of the title, e.g. the mascot on the overview. */
+  leading?: ReactNode;
 }) {
   return (
     <div className="page-header">
-      <div>
+      {leading && <div className="page-leading">{leading}</div>}
+      <div className="page-heading">
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>
         {description && <p className="page-description">{description}</p>}
@@ -123,6 +128,7 @@ export function PageHeader({
 export function Empty({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="empty">
+      <Mascot size={40} />
       <p>{children}</p>
       {action}
     </div>

@@ -45,7 +45,10 @@ import { MissionCards, type SidebarMission } from './mission-cards';
 const CodeView = lazy(() => import('./code/CodeView'));
 import { ModalHost } from './modals';
 import { SplashScreen } from './splash';
-import { AboutPage, AgentsPage, OverviewPage, ProvidersPage, SkillsPage } from './pages';
+import { AgentsPage } from './agents';
+import { Mascot } from './mascot';
+import { TokenMeter } from './token-meter';
+import { AboutPage, OverviewPage, ProvidersPage, SkillsPage } from './pages';
 import { Dot } from './ui';
 
 const navigation: { view: View; label: string; icon: typeof Bot }[] = [
@@ -537,12 +540,13 @@ export function App() {
           <span className="spacer" />
           {activeTasks > 0 && (
             <span>
-              <Dot tone="busy" /> {activeTasks} tarefa(s) em execução
+              <Mascot size={18} mood="working" /> {activeTasks} tarefa(s) em execução
             </span>
           )}
           {approvals.length > 0 && (
             <span className="warn-text">{approvals.length} aprovação(ões) pendente(s)</span>
           )}
+          {summary?.today && <TokenMeter usage={summary.today} />}
           <span>
             {workers.filter((worker) => worker.modelId).length}/{workers.length} agentes
           </span>

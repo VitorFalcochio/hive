@@ -1,4 +1,4 @@
-import type { ModelInfo, ProviderConfig, Worker } from '@hive/core';
+import { providerPresets, type ModelInfo, type ProviderConfig, type Worker } from '@hive/core';
 
 /**
  * Problems that would prevent a worker from running, shown in the UI before execution.
@@ -12,7 +12,7 @@ export function workerCompatibilityIssues(
   const issues: string[] = [];
   if (!worker.providerId || !provider) return ['No provider selected.'];
   if (!provider.enabled) issues.push(`Provider "${provider.name}" is disabled.`);
-  if (!provider.hasCredential && provider.kind !== 'openai-compatible') {
+  if (!provider.hasCredential && !providerPresets[provider.kind].keyOptional) {
     issues.push(`Provider "${provider.name}" has no API key.`);
   }
   if (!worker.modelId) {

@@ -204,6 +204,22 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     expect(ctx.repos.workers.require('w1', 'Agente').autoApproveCommands).toEqual(['npm test']);
   });
 
+  it('libera sozinho comandos que só leem, sem criar aprovação', async () => {
+    const answers: boolean[] = [];
+    const ctx = await setup(
+      async (input) => {
+        answers.push(await input.requestApproval({ command: 'git status && node --version' }));
+        await writeTaskFile(input);
+        return {};
+      },
+      [{ key: 'a' }],
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'review');
+    expect(answers).toEqual([true]);
+    expect(ctx.repos.approvals.list()).toEqual([]);
+  });
+
   it('cancela dependentes quando uma tarefa falha e retoma no retry', async () => {
     let fail = true;
     const ctx = await setup(

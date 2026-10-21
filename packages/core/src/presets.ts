@@ -10,6 +10,8 @@ export interface ProviderPreset {
   keyHint: string;
   /** Whether a usable no-cost tier exists, and its catch, in the UI language. */
   free: { available: boolean; summary: string };
+  /** Calls work without an API key (a local server, or a gateway with keyless free models). */
+  keyOptional?: boolean;
 }
 
 /**
@@ -82,6 +84,20 @@ export const providerPresets: Record<ProviderKind, ProviderPreset> = {
         'Plano Experiment grátis (verificação por telefone), inclui Codestral. Cerca de 1 pedido por segundo.',
     },
   },
+  kilo: {
+    kind: 'kilo',
+    label: 'Kilo Gateway',
+    defaultBaseUrl: 'https://api.kilo.ai/api/gateway',
+    docsUrl: 'https://kilo.ai/docs/gateway',
+    keyUrl: 'https://app.kilo.ai',
+    keyHint: 'Opcional para os modelos grátis',
+    free: {
+      available: true,
+      summary:
+        'Modelos ":free" sem chave e sem cartão; o provedor pode registrar os prompts. Com uma chave, 400+ modelos pagos a preço de custo. O Hive prioriza os gratuitos.',
+    },
+    keyOptional: true,
+  },
   openrouter: {
     kind: 'openrouter',
     label: 'OpenRouter',
@@ -120,6 +136,7 @@ export const providerPresets: Record<ProviderKind, ProviderPreset> = {
     docsUrl: 'https://platform.openai.com/docs/api-reference/chat',
     keyUrl: 'https://ollama.com/download',
     keyHint: 'Opcional em servidores locais',
+    keyOptional: true,
     free: {
       available: true,
       summary:
@@ -300,6 +317,26 @@ const modelPreferences: Partial<Record<ProviderKind, Record<ModelTier, string[]>
       'codestral-latest',
       'devstral-small',
       'mistral-medium-latest',
+    ],
+  },
+  kilo: {
+    planner: [
+      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'minimax/minimax-m3.1-flash:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'kilo-auto/free',
+    ],
+    coder: [
+      'minimax/minimax-m3.1-flash:free',
+      'poolside/laguna-s-2.1:free',
+      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'kilo-auto/free',
+    ],
+    reviewer: [
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'minimax/minimax-m3.1-flash:free',
+      'cohere/north-mini-code:free',
+      'kilo-auto/free',
     ],
   },
   openrouter: {

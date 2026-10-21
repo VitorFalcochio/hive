@@ -79,7 +79,7 @@ function ProviderModal() {
     null,
   );
   const task = useTask();
-  const keyOptional = kind === 'openai-compatible';
+  const keyOptional = !!preset.keyOptional;
 
   function submit(event: FormEvent) {
     event.preventDefault();

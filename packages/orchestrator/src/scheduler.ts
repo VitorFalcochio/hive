@@ -1,7 +1,7 @@
 import {
   activeStatuses,
-  commandMatchesAllowList,
   isBlockedByFailure,
+  isSafeCommand,
   readyTasks,
   stateForTaskStatus,
   workerStateSchema,
@@ -632,12 +632,26 @@ export class Scheduler {
     worker: Worker,
     command: string,
   ): Promise<boolean> {
+    const settings = this.repos.getSettings();
+    // The approval setting lets read-only commands (or every command) through without asking.
+    // Checks like `npm test` are not read-only: they run project scripts the agent may have edited.
+    if (
+      settings.commandApproval === 'all' ||
+      (settings.commandApproval === 'safe' && isSafeCommand(command))
+    ) {
+      this.log(
+        run,
+        taskId,
+        worker.id,
+        'approval.resolved',
+        'info',
+        `Liberado automaticamente (${settings.commandApproval === 'all' ? 'todos os comandos' : 'comando seguro'}): ${command}`,
+      );
+      return Promise.resolve(true);
+    }
     // Nobody is there to answer: the safe list decides at once and the decision is logged.
     if (this.options.unattended?.(run.id)) {
-      const allowed = commandMatchesAllowList(
-        command,
-        this.repos.getSettings().autopilot.safeCommands,
-      );
+      const allowed = isSafeCommand(command, settings.autopilot.safeCommands);
       this.log(
         run,
         taskId,

@@ -3,6 +3,26 @@ import { FolderOpen, RotateCcw, Save, X } from 'lucide-react';
 import { defaultSettings, type Settings } from '@hive/core';
 import { PageHeader, useTask } from './ui';
 
+const approvalChoices: { value: Settings['commandApproval']; label: string; detail: string }[] = [
+  {
+    value: 'ask',
+    label: 'Perguntar sempre',
+    detail: 'Todo comando espera você permitir, menos os que você liberou para cada agente.',
+  },
+  {
+    value: 'safe',
+    label: 'Liberar comandos que só leem (recomendado)',
+    detail:
+      'Versões, pacotes instalados, git status/diff/log, listar e buscar arquivos do projeto rodam sozinhos, mesmo encadeados com && ou |. Instalar, apagar, testes e build continuam pedindo.',
+  },
+  {
+    value: 'all',
+    label: 'Liberar tudo',
+    detail:
+      'Nenhum comando pede aprovação. Rápido, mas um agente pode instalar pacotes ou apagar arquivos fora da tarefa sem você ver.',
+  },
+];
+
 // Only settings the app actually uses are listed here. New agents take the limits below as
 // their defaults; existing agents keep their own values.
 export function SettingsPage({
@@ -88,7 +108,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
     <div className="settings">
       <Section
         title="Execução"
-        description="Quantas tarefas de agentes podem rodar ao mesmo tempo."
+        description="Quantas tarefas de agentes rodam ao mesmo tempo e quanto elas podem gastar por dia."
       >
         <Field
           label="Tarefas em paralelo"
@@ -106,6 +126,37 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
             }}
           />
         </Field>
+        <NumberField
+          label="Orçamento diário de tokens"
+          hint="Mostrado na barra lá embaixo. Use 0 para esconder a barra."
+          min={0}
+          max={1_000_000_000}
+          step={100_000}
+          value={draft.dailyTokenBudget}
+          onChange={(value) => set('dailyTokenBudget', value)}
+        />
+      </Section>
+
+      <Section
+        title="Aprovação de comandos"
+        description="Quando um agente quer rodar um comando no terminal. Os comandos rodam na cópia isolada da tarefa."
+      >
+        <div className="choice-list" role="radiogroup" aria-label="Aprovação de comandos">
+          {approvalChoices.map((choice) => (
+            <label key={choice.value} className="choice">
+              <input
+                type="radio"
+                name="command-approval"
+                checked={draft.commandApproval === choice.value}
+                onChange={() => set('commandApproval', choice.value)}
+              />
+              <span>
+                <strong>{choice.label}</strong>
+                <small>{choice.detail}</small>
+              </span>
+            </label>
+          ))}
+        </div>
       </Section>
 
       <Section

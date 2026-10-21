@@ -219,9 +219,14 @@ export function MissionPage() {
           {plan.error || action.error || run.error}
         </p>
       )}
-      {pendingApprovals.map((approval) => (
-        <ApprovalCard key={approval.id} approval={approval} onDone={reload} />
-      ))}
+      {pendingApprovals.length > 0 && (
+        <section className="approval-list" aria-label="Comandos aguardando aprovação">
+          {pendingApprovals.map((approval) => (
+            <ApprovalCard key={approval.id} approval={approval} onDone={reload} />
+          ))}
+          <ApprovalSettingsHint />
+        </section>
+      )}
       {run.status === 'review' && (
         <p className="hint">
           Execução terminada. Revise as alterações de cada tarefa e aplique as que quiser na branch{' '}
@@ -268,30 +273,46 @@ function ApprovalCard({ approval, onDone }: { approval: Approval; onDone: () => 
       await onDone();
     });
   return (
-    <section className="card approval-card" role="alert">
+    <article className="approval-card" role="alert">
       <div className="approval-head">
-        <ShieldQuestion size={16} />
-        <strong>{approval.title}</strong>
+        <ShieldQuestion size={15} />
+        <span className="approval-title">{approval.title}</span>
+        <div className="approval-actions">
+          <button className="ghost" disabled={task.running} onClick={() => answer(false)}>
+            <X size={14} /> Negar
+          </button>
+          <button
+            className="ghost"
+            disabled={task.running}
+            title="Este agente poderá rodar exatamente este comando sem perguntar de novo"
+            onClick={() => answer(true, true)}
+          >
+            Sempre permitir
+          </button>
+          <button className="approve" disabled={task.running} onClick={() => answer(true)}>
+            <Check size={14} /> Permitir
+          </button>
+        </div>
       </div>
-      <pre className="command">{approval.detail}</pre>
+      <pre className="command">
+        <span aria-hidden="true">$ </span>
+        {approval.detail}
+      </pre>
       {task.error && <p className="form-error">{task.error}</p>}
-      <div className="actions">
-        <button className="secondary" disabled={task.running} onClick={() => answer(false)}>
-          <X size={14} /> Negar
-        </button>
-        <button
-          className="secondary"
-          disabled={task.running}
-          title="Este agente poderá rodar exatamente este comando sem perguntar de novo"
-          onClick={() => answer(true, true)}
-        >
-          Sempre permitir
-        </button>
-        <button disabled={task.running} onClick={() => answer(true)}>
-          <Check size={14} /> Permitir
-        </button>
-      </div>
-    </section>
+    </article>
+  );
+}
+
+/** One line under pending approvals: where to stop being asked about harmless commands. */
+function ApprovalSettingsHint() {
+  const { go } = useHive();
+  return (
+    <p className="approval-hint">
+      Cansou de aprovar comandos de leitura?{' '}
+      <button className="link" onClick={() => go('settings')}>
+        Configurar aprovação automática
+      </button>
+    </p>
   );
 }
 

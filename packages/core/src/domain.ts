@@ -23,6 +23,7 @@ export const providerKindSchema = z.enum([
   'gemini',
   'cerebras',
   'mistral',
+  'kilo',
   'openai-compatible',
 ]);
 export type ProviderKind = z.infer<typeof providerKindSchema>;
@@ -408,6 +409,10 @@ export const settingsSchema = z.object({
   defaultLimits: executionLimitsSchema,
   /** Token budget for a whole run across all tasks; 0 disables the run-level cap. */
   runTokenBudget: z.number().int().min(0),
+  /** Tokens the agents may use per day, shown as a meter in the status bar; 0 hides the meter. */
+  dailyTokenBudget: z.number().int().min(0),
+  /** Which commands agents run without asking: none, read-only ones (see isSafeCommand), or all. */
+  commandApproval: z.enum(['ask', 'safe', 'all']),
   reduceMotion: z.enum(['system', 'on', 'off']),
   density: z.enum(['comfortable', 'compact']),
   autopilot: autopilotSettingsSchema,
@@ -428,6 +433,8 @@ export const defaultSettings: Settings = {
   skillforgeCliValidation: false,
   defaultLimits,
   runTokenBudget: 2_000_000,
+  dailyTokenBudget: 2_000_000,
+  commandApproval: 'safe',
   reduceMotion: 'system',
   density: 'comfortable',
   autopilot: {

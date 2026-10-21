@@ -1,17 +1,9 @@
 import { useState } from 'react';
-import {
-  Check,
-  KeyRound,
-  Plus,
-  RefreshCw,
-  SlidersHorizontal,
-  Sparkles,
-  Trash2,
-} from 'lucide-react';
-import type { ProviderConfig, RecommendedSetup, Worker } from '@hive/core';
+import { Check, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { providerPresets, type ProviderConfig } from '@hive/core';
 import { hasAccess, useHive } from './context';
-import { SetupResult } from './modals';
-import { Dot, Empty, PageHeader, Select, runTone, statusLabels, useTask } from './ui';
+import { Mascot } from './mascot';
+import { Dot, Empty, PageHeader, runTone, statusLabels, useTask } from './ui';
 
 export function OverviewPage() {
   const { summary, providers, workers, openModal, pickWorkspace, openMission } = useHive();
@@ -78,6 +70,7 @@ export function OverviewPage() {
       <PageHeader
         eyebrow="Central de trabalho"
         title="Vamos construir."
+        leading={<Mascot size={64} mood={summary?.activeTasks.length ? 'working' : 'idle'} />}
         description="Conecte seu projeto, prepare a equipe e planeje sua próxima missão."
       >
         <button disabled={!workspace} onClick={() => openModal({ kind: 'mission' })}>
@@ -191,7 +184,7 @@ export function ProvidersPage() {
                 </div>
                 <span className="badge">
                   {provider.credentialHint ??
-                    (provider.kind === 'openai-compatible' ? 'sem chave' : 'falta chave')}
+                    (providerPresets[provider.kind].keyOptional ? 'sem chave' : 'falta chave')}
                 </span>
                 <div className="row-actions">
                   <button
@@ -236,132 +229,6 @@ export function ProvidersPage() {
         </section>
       )}
     </>
-  );
-}
-
-const roleOrder: Worker['role'][] = [
-  'queen',
-  'architect',
-  'frontend',
-  'backend',
-  'qa',
-  'reviewer',
-  'custom',
-];
-
-export function AgentsPage() {
-  const { workers, providers, openModal } = useHive();
-  const usable = providers.filter(hasAccess);
-  return (
-    <>
-      <PageHeader
-        eyebrow="Sua equipe"
-        title="Agentes"
-        description="Escolha o provedor: o modelo certo para a função é escolhido e testado automaticamente."
-      >
-        <button disabled={!usable.length} onClick={() => openModal({ kind: 'team' })}>
-          <Sparkles size={15} /> Configurar equipe
-        </button>
-      </PageHeader>
-      {!usable.length && (
-        <p className="hint">
-          Adicione um provedor com chave na aba Provedores para configurar os agentes.
-        </p>
-      )}
-      <div className="agent-grid">
-        {[...workers]
-          .sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role))
-          .map((worker) => (
-            <AgentCard key={worker.id} worker={worker} />
-          ))}
-      </div>
-    </>
-  );
-}
-
-function AgentCard({ worker }: { worker: Worker }) {
-  const { providers, refresh, openModal } = useHive();
-  const usable = providers.filter(
-    (provider) => hasAccess(provider) || provider.id === worker.providerId,
-  );
-  const [pending, setPending] = useState<string | null>(null);
-  const [setup, setSetup] = useState<RecommendedSetup | null>(null);
-  const task = useTask();
-  const providerId = pending ?? worker.providerId ?? '';
-
-  function choose(next: string) {
-    setSetup(null);
-    setPending(next);
-    void task.run(async () => {
-      try {
-        if (!next)
-          await window.hive.invoke('worker.save', { ...worker, providerId: null, modelId: null });
-        else
-          setSetup(
-            await window.hive.invoke('worker.autoConfigure', {
-              workerId: worker.id,
-              providerId: next,
-            }),
-          );
-      } finally {
-        await refresh();
-        setPending(null);
-      }
-    });
-  }
-
-  const failed = setup && !setup.assignments[0]?.modelId;
-  return (
-    <section className="card agent-card">
-      <div className="card-heading">
-        <span className="agent-role">{worker.role.toUpperCase()}</span>
-        {worker.modelId && !task.running && <Dot tone={setup ? 'ok' : 'idle'} />}
-      </div>
-      <h2>{worker.name}</h2>
-      <p>{worker.description}</p>
-      <label>
-        Provedor
-        <Select
-          value={providerId}
-          disabled={task.running}
-          placeholder="Selecione um provedor"
-          onChange={choose}
-          options={[
-            ...(worker.providerId ? [{ value: '', label: 'Nenhum provedor' }] : []),
-            ...usable.map((provider) => ({ value: provider.id, label: provider.name })),
-          ]}
-        />
-      </label>
-      <div className="model-line">
-        {task.running ? (
-          <span className="progress">Escolhendo e testando o modelo…</span>
-        ) : (
-          <>
-            <code>{worker.modelId ?? 'sem modelo'}</code>
-            {setup && !failed && (
-              <span className="success-text">
-                <Check size={13} /> testado
-              </span>
-            )}
-          </>
-        )}
-        <button
-          className="icon-button"
-          title="Escolher modelo manualmente"
-          aria-label={`Escolher modelo de ${worker.name}`}
-          disabled={task.running || !worker.providerId}
-          onClick={() => openModal({ kind: 'model', worker })}
-        >
-          <SlidersHorizontal size={14} />
-        </button>
-      </div>
-      {failed && setup && <SetupResult setup={setup} />}
-      {task.error && (
-        <p role="alert" className="form-error">
-          {task.error}
-        </p>
-      )}
-    </section>
   );
 }
 
