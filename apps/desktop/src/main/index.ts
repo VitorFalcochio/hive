@@ -23,6 +23,9 @@ import { HiveDatabase } from '@hive/persistence';
 import { HiveError, errorMessage, secretRedactor } from '@hive/shared';
 import { DesktopService } from './service';
 import { attachDesignInspector } from './design-inspector';
+import appIcon from '../../resources/icon.png?asset';
+import trayIcon from '../../resources/tray.png?asset';
+import trayIcon2x from '../../resources/tray@2x.png?asset';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(process.env.HIVE_DATA_DIR || app.getPath('userData'));
@@ -34,10 +37,6 @@ let tray: Tray | undefined;
 let quitting = false;
 let awakeBlocker: number | null = null;
 let hiddenNoticeShown = false;
-
-// A 32 px amber hexagon, embedded so the tray needs no file next to the bundle.
-const TRAY_ICON =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA3ElEQVR4nO2XzQ3DIAyFGaEjZJQcPEhHYYOMkpPPHSEjMAInzq0qgVRZBkqBPFXK4Z3y40/ye8aYwGSQghbvBVgC0yNqORPgFpi2wPQU2uKzqQD3wOSV4kk+vjMcYA1MR6Gw1BG/6QZ493ZvKCy11/xR6rPtKCxlc/7I9dkNLJ7kNH9oAC0/9RVTahoGkGKXi+U0gNzgSYNpGoD7MlprxUM/A9iGAVNK0AVwAfwvADyG8EEkBRvFn5pyGMGPY4NeSKSxICuZFi3IUqr5A7KWS3/ALibSH5Cr2VDBAV7lkEk8CCI28wAAAABJRU5ErkJggg==';
 
 const shiftLabels: Partial<Record<string, string>> = {
   review: 'pronta para revisão',
@@ -58,12 +57,22 @@ function showWindow() {
   window.focus();
 }
 
+/** The tray hexagon, with a sharper copy for high-DPI screens. */
+function trayImage() {
+  const image = nativeImage.createFromPath(trayIcon);
+  image.addRepresentation({
+    scaleFactor: 2,
+    buffer: nativeImage.createFromPath(trayIcon2x).toPNG(),
+  });
+  return image;
+}
+
 function notify(title: string, body: string) {
   if (!Notification.isSupported()) return;
   const notification = new Notification({
     title,
     body,
-    icon: nativeImage.createFromDataURL(TRAY_ICON),
+    icon: appIcon,
   });
   notification.on('click', showWindow);
   notification.show();
@@ -91,7 +100,7 @@ function syncShift() {
     return;
   }
   if (!tray) {
-    tray = new Tray(nativeImage.createFromDataURL(TRAY_ICON));
+    tray = new Tray(trayImage());
     tray.on('click', showWindow);
   }
   tray.setToolTip(
@@ -125,6 +134,7 @@ async function createWindow() {
     minWidth: 900,
     minHeight: 650,
     title: 'Hive',
+    icon: appIcon,
     backgroundColor: '#08090a',
     // The renderer draws its own title bar; Windows/Linux keep native controls on top of it.
     titleBarStyle: 'hidden',

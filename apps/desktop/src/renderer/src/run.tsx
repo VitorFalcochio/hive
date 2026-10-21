@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
+  Bot,
   ChevronDown,
   ExternalLink,
   Monitor,
   MousePointerClick,
   Play,
+  Plus,
   RefreshCw,
   RotateCcw,
   Square,
@@ -17,10 +19,23 @@ import { Dot } from './ui';
 import { DesignPanel, parseDesignElement, type DesignElement, type DesignPreview } from './design';
 import { useTray } from './design-tray';
 import { DesignTray } from './design-tray-panel';
+import { TerminalView } from './terminal-view';
 
 const MAX_RENDERED_OUTPUT = 1024 * 1024;
 
 const suggestedCommands = ['npm run dev', 'npm start', 'npm test', 'npm run build'];
+
+/** Coding agents with a command line; they run in the project like in any terminal. */
+const agentCommands = [
+  { label: 'Claude Code', command: 'claude' },
+  { label: 'Codex', command: 'codex' },
+  { label: 'Gemini CLI', command: 'gemini' },
+  { label: 'OpenCode', command: 'opencode' },
+];
+
+const sessionLabel = (session: TerminalSession) =>
+  agentCommands.find((agent) => agent.command === session.command)?.label ??
+  (session.command || 'Terminal');
 
 const statusLabel: Record<TerminalStatus, string> = {
   running: 'Executando',
@@ -72,7 +87,8 @@ export function RunPage() {
   );
   const previewFrame = useRef<HTMLIFrameElement>(null);
   const [htmlPages, setHtmlPages] = useState<string[]>([]);
-  const outputRef = useRef<HTMLPreElement>(null);
+  const [clearSignal, setClearSignal] = useState(0);
+  const [agentMenu, setAgentMenu] = useState(false);
 
   const active = useMemo(
     () => sessions.find((session) => session.id === activeId) ?? sessions[0] ?? null,
@@ -145,11 +161,6 @@ export function RunPage() {
   }, [active?.previewUrls, previewUrl]);
 
   useEffect(() => {
-    const output = outputRef.current;
-    if (output) output.scrollTop = output.scrollHeight;
-  }, [active?.output]);
-
-  useEffect(() => {
     if (!previewUrl) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     return onFiles(() => {
@@ -158,10 +169,12 @@ export function RunPage() {
     });
   }, [onFiles, previewUrl]);
 
+  // An empty command opens a plain interactive shell.
   const start = useCallback(
     async (nextCommand: string) => {
-      if (!workspace || !nextCommand.trim()) return;
+      if (!workspace) return;
       setBusy(true);
+      setAgentMenu(false);
       try {
         const session = await window.hive.invoke('terminal.start', {
           command: nextCommand.trim(),
@@ -204,6 +217,7 @@ export function RunPage() {
     try {
       const session = await window.hive.invoke('terminal.clear', active.id);
       setSessions((current) => upsert(current, session));
+      setClearSignal((value) => value + 1);
     } catch (error) {
       fail(error);
     }
@@ -371,6 +385,42 @@ export function RunPage() {
             <div className="run-actions">
               <button
                 className="icon-button"
+                onClick={() => void start('')}
+                disabled={busy}
+                title="Novo terminal (PowerShell)"
+                aria-label="Novo terminal"
+              >
+                <Plus size={15} />
+              </button>
+              <div className="agent-menu">
+                <button
+                  className={agentMenu ? 'agent-menu-button open' : 'agent-menu-button'}
+                  onClick={() => setAgentMenu((open) => !open)}
+                  aria-expanded={agentMenu}
+                  aria-haspopup="menu"
+                  title="Abrir um agente de linha de comando neste projeto"
+                >
+                  <Bot size={14} /> Agente <ChevronDown size={12} />
+                </button>
+                {agentMenu && (
+                  <div className="agent-menu-list" role="menu">
+                    {agentCommands.map((agent) => (
+                      <button
+                        key={agent.command}
+                        role="menuitem"
+                        disabled={busy}
+                        onClick={() => void start(agent.command)}
+                      >
+                        <span>{agent.label}</span>
+                        <code>{agent.command}</code>
+                      </button>
+                    ))}
+                    <small>Precisa estar instalado no computador. Usa a sua conta do agente.</small>
+                  </div>
+                )}
+              </div>
+              <button
+                className="icon-button"
                 onClick={() => setTerminalOpen((open) => !open)}
                 title={terminalOpen ? 'Recolher terminal' : 'Expandir terminal'}
                 aria-expanded={terminalOpen}
@@ -414,10 +464,10 @@ export function RunPage() {
                   key={session.id}
                   className={session.id === active?.id ? 'selected' : ''}
                   onClick={() => setActiveId(session.id)}
-                  title={session.command}
+                  title={session.command || 'Terminal interativo'}
                 >
                   <Dot tone={terminalTone(session.status)} />
-                  <span>{session.command}</span>
+                  <span>{sessionLabel(session)}</span>
                 </button>
               ))}
             </div>
@@ -428,21 +478,20 @@ export function RunPage() {
               Carregando sessões…
             </div>
           ) : active ? (
-            <pre ref={outputRef} className="terminal-output" aria-label="Saída do terminal">
-              <span className="terminal-prompt">$ {active.command}</span>
-              {'\n'}
-              {active.output || (running ? 'Iniciando…' : 'Sem saída.')}
-            </pre>
+            <TerminalView key={active.id} session={active} clearSignal={clearSignal} />
           ) : (
             <div className="terminal-placeholder">
               <TerminalSquare size={24} />
-              <span>Escolha um comando ou digite o seu acima.</span>
+              <span>Escolha um comando, digite o seu acima ou abra um terminal.</span>
               <div className="terminal-suggestions">
                 {suggestedCommands.map((suggested) => (
                   <button key={suggested} type="button" onClick={() => setCommand(suggested)}>
                     <code>{suggested}</code>
                   </button>
                 ))}
+                <button type="button" onClick={() => void start('')}>
+                  <code>Terminal</code>
+                </button>
               </div>
             </div>
           )}

@@ -2195,21 +2195,80 @@ pre.command {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.terminal-output {
+/* The live terminal (xterm.js) fills the panel; xterm sizes its own canvas inside. */
+.xterm-host {
   flex: 1;
   min-height: 0;
-  margin: 0;
-  padding: 16px 18px;
-  overflow: auto;
-  background: #090a0b;
-  color: #c9ccd1;
-  font: 13px/1.6 var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  tab-size: 2;
+  padding: 8px 4px 4px 12px;
+  overflow: hidden;
+  background: #0b0c0d;
 }
-.terminal-prompt {
-  color: var(--success);
+.xterm-host .xterm {
+  height: 100%;
+}
+.xterm-host .xterm-viewport {
+  background: #0b0c0d !important;
+}
+/* Agents menu: opens a coding agent's command line in the project */
+.agent-menu {
+  position: relative;
+}
+.agent-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.agent-menu-button:hover,
+.agent-menu-button.open {
+  background: var(--hover);
+  color: var(--foreground);
+}
+.agent-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  width: 240px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+.agent-menu-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 13px;
+}
+.agent-menu-list button:hover {
+  background: var(--hover);
+}
+.agent-menu-list code {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+.agent-menu-list small {
+  padding: 6px 10px 2px;
+  color: var(--subtle-foreground);
+  font-size: 11px;
+  line-height: 1.4;
 }
 .terminal-placeholder,
 .preview-placeholder,

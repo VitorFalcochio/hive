@@ -887,7 +887,21 @@ export class DesktopService {
         if (!workspace)
           throw new HiveError('VALIDATION', 'Selecione um projeto antes de executar.');
         const value = parse(channel);
-        return this.terminals.start(workspace.id, workspace.path, value.command, value.cwd);
+        return this.terminals.start(
+          workspace.id,
+          workspace.path,
+          value.command,
+          value.cwd,
+          value.cols && value.rows ? { cols: value.cols, rows: value.rows } : undefined,
+        );
+      }
+      case 'terminal.input': {
+        const { id: terminalId, data } = parse(channel);
+        return this.terminals.write(terminalId, data);
+      }
+      case 'terminal.resize': {
+        const { id: terminalId, cols, rows } = parse(channel);
+        return this.terminals.resize(terminalId, cols, rows);
       }
       case 'terminal.stop':
         return this.terminals.stop(parse(channel));

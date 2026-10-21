@@ -3,6 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, expect, it, vi } from 'vitest';
 import { App } from './App';
 
+// xterm.js draws on a canvas jsdom does not have; these tests only need the session's text.
+vi.mock('./terminal-view', () => ({
+  TerminalView: ({ session }: { session: { output: string } }) => <pre>{session.output}</pre>,
+}));
+
 const emptySummary = {
   workspace: null,
   recentMissions: [],

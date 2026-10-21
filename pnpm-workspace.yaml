@@ -2,7 +2,9 @@ packages:
   - apps/*
   - packages/*
 
-# Only these dependencies may run install scripts (Electron downloads its binary).
+# Only these dependencies may run install scripts (Electron downloads its binary; node-pty
+# checks that its prebuilt Windows/macOS/Linux binaries are present).
 onlyBuiltDependencies:
   - electron
   - esbuild
+  - node-pty

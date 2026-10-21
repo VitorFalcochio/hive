@@ -376,8 +376,23 @@ export const ipcContract = {
   'git.checkout': channel<void>()(z.string().min(1).max(250)),
   'task.fileDiff': channel<FileDiffContent>()(z.object({ taskId: id, path: relPath })),
   'terminal.list': channel<TerminalSession[]>()(none),
+  /** An empty command opens the platform shell as an interactive terminal. */
   'terminal.start': channel<TerminalSession>()(
-    z.object({ command: z.string().trim().min(1).max(2_000), cwd: relPath.optional() }),
+    z.object({
+      command: z.string().trim().max(2_000),
+      cwd: relPath.optional(),
+      cols: z.number().int().min(2).max(500).optional(),
+      rows: z.number().int().min(2).max(300).optional(),
+    }),
+  ),
+  /** Keystrokes or pasted text for a running terminal. */
+  'terminal.input': channel<void>()(z.object({ id, data: z.string().min(1).max(100_000) })),
+  'terminal.resize': channel<void>()(
+    z.object({
+      id,
+      cols: z.number().int().min(2).max(500),
+      rows: z.number().int().min(2).max(300),
+    }),
   ),
   'terminal.stop': channel<TerminalSession>()(id),
   'terminal.clear': channel<TerminalSession>()(id),

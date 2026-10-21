@@ -1,19 +1,39 @@
-import { spawn, type ChildProcess } from 'node:child_process';
 import { stat } from 'node:fs/promises';
+import * as pty from 'node-pty';
 import { killTree } from '@hive/agents';
 import type { TerminalEvent, TerminalSession, TerminalStatus } from '@hive/core';
 import { HiveError, newId, nowIso, resolveInside } from '@hive/shared';
 
+/** Raw output kept per session (escape sequences included), replayed when a view reopens. */
 const MAX_CAPTURE = 1024 * 1024;
 const MAX_SESSIONS = 20;
 const URL_SCAN_TAIL = 512;
+const DEFAULT_SIZE = { cols: 100, rows: 30 };
 
 interface ManagedSession {
   session: TerminalSession;
-  child: ChildProcess;
+  terminal: pty.IPty;
   stopRequested: boolean;
   finished: boolean;
   scanTail: string;
+}
+
+/**
+ * What runs in the pseudo terminal: the user's command through the platform shell, or the
+ * shell itself when no command is given (an interactive terminal).
+ */
+export function shellFor(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): { file: string; args: string[] | string } {
+  if (platform === 'win32') {
+    if (!command) return { file: 'powershell.exe', args: ['-NoLogo'] };
+    // With /s, cmd drops the outer quotes and runs the rest exactly as typed.
+    return { file: env.ComSpec || 'cmd.exe', args: `/d /s /c "${command}"` };
+  }
+  const shell = env.SHELL || '/bin/sh';
+  return command ? { file: shell, args: ['-lc', command] } : { file: shell, args: ['-l'] };
 }
 
 const escape = String.fromCharCode(27);
@@ -76,6 +96,7 @@ export class TerminalManager {
     workspaceRoot: string,
     command: string,
     requestedCwd = '.',
+    size: { cols: number; rows: number } = DEFAULT_SIZE,
   ): Promise<TerminalSession> {
     if (this.disposed) throw new HiveError('INTERNAL', 'O terminal já foi encerrado.');
     const cwd = await resolveInside(workspaceRoot, requestedCwd || '.');
@@ -83,15 +104,16 @@ export class TerminalManager {
       throw new HiveError('VALIDATION', 'A pasta de execução não é um diretório.');
 
     this.prune();
+    // A real terminal: colours on, and tools may ask questions, which the user can answer.
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      FORCE_COLOR: '0',
-      NO_COLOR: '1',
-      TERM: 'dumb',
-      GIT_TERMINAL_PROMPT: '0',
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
     };
     delete env.ELECTRON_RUN_AS_NODE;
     delete env.NODE_OPTIONS;
+    delete env.NO_COLOR;
+    delete env.FORCE_COLOR;
 
     const session: TerminalSession = {
       id: newId('terminal'),
@@ -105,17 +127,25 @@ export class TerminalManager {
       exitCode: null,
       previewUrls: [],
     };
-    const child = spawn(command, {
-      cwd,
-      shell: true,
-      windowsHide: true,
-      detached: process.platform !== 'win32',
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const { file, args } = shellFor(command);
+    let terminal: pty.IPty;
+    try {
+      terminal = pty.spawn(file, args, {
+        name: 'xterm-256color',
+        cols: size.cols,
+        rows: size.rows,
+        cwd,
+        env: env as Record<string, string>,
+      });
+    } catch (error) {
+      throw new HiveError(
+        'VALIDATION',
+        `Não foi possível abrir o terminal: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     const managed: ManagedSession = {
       session,
-      child,
+      terminal,
       stopRequested: false,
       finished: false,
       scanTail: '',
@@ -123,12 +153,12 @@ export class TerminalManager {
     this.sessions.set(session.id, managed);
     this.send({ type: 'started', session: copySession(session) });
 
-    const append = (value: Buffer | string) => {
-      const chunk = cleanTerminalOutput(value.toString());
-      if (!chunk) return;
+    // The view gets the raw stream (colours, cursor moves); URLs are read from clean text.
+    terminal.onData((chunk) => {
       session.output = (session.output + chunk).slice(-MAX_CAPTURE);
-      const previewUrls = detectPreviewUrls(managed.scanTail + chunk);
-      managed.scanTail = (managed.scanTail + chunk).slice(-URL_SCAN_TAIL);
+      const clean = cleanTerminalOutput(chunk);
+      const previewUrls = detectPreviewUrls(managed.scanTail + clean);
+      managed.scanTail = (managed.scanTail + clean).slice(-URL_SCAN_TAIL);
       for (const url of previewUrls)
         if (!session.previewUrls.includes(url)) session.previewUrls.push(url);
       this.send({
@@ -137,22 +167,33 @@ export class TerminalManager {
         chunk,
         previewUrls: [...session.previewUrls],
       });
-    };
-    child.stdout?.on('data', append);
-    child.stderr?.on('data', append);
-    child.once('error', (error) => {
-      append(`\nNão foi possível iniciar o comando: ${error.message}\n`);
-      this.finish(managed, 'failed', null);
     });
-    child.once('close', (code) => {
+    terminal.onExit(({ exitCode }) => {
       const status: TerminalStatus = managed.stopRequested
         ? 'stopped'
-        : code === 0
+        : exitCode === 0
           ? 'exited'
           : 'failed';
-      this.finish(managed, status, code);
+      this.finish(managed, status, exitCode);
     });
     return copySession(session);
+  }
+
+  /** Keystrokes and pasted text typed into a running terminal. */
+  write(id: string, data: string): void {
+    const managed = this.require(id);
+    if (managed.finished || managed.session.status !== 'running') return;
+    managed.terminal.write(data);
+  }
+
+  resize(id: string, cols: number, rows: number): void {
+    const managed = this.require(id);
+    if (managed.finished) return;
+    try {
+      managed.terminal.resize(Math.max(2, cols), Math.max(2, rows));
+    } catch {
+      // The process may exit between the check and the resize.
+    }
   }
 
   stop(id: string): TerminalSession {
@@ -162,8 +203,18 @@ export class TerminalManager {
     managed.stopRequested = true;
     managed.session.status = 'stopping';
     this.send({ type: 'state', session: copySession(managed.session) });
-    if (managed.child.pid) killTree(managed.child.pid);
+    this.kill(managed);
     return copySession(managed.session);
+  }
+
+  /** Ends the whole process tree (a dev server spawns children), then the terminal itself. */
+  private kill(managed: ManagedSession) {
+    if (managed.terminal.pid) killTree(managed.terminal.pid);
+    try {
+      managed.terminal.kill();
+    } catch {
+      // Already gone.
+    }
   }
 
   clear(id: string): TerminalSession {
@@ -179,7 +230,7 @@ export class TerminalManager {
     this.disposed = true;
     for (const managed of this.sessions.values()) {
       managed.stopRequested = true;
-      if (!managed.finished && managed.child.pid) killTree(managed.child.pid);
+      if (!managed.finished) this.kill(managed);
     }
   }
 
