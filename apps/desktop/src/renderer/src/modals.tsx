@@ -12,8 +12,10 @@ import {
   type TaskDiff,
   type Worker,
 } from '@hive/core';
-import { hasAccess, useHive, type ModalState } from './context';
+import { hasAccess, useHive, usableWorkers, type ModalState } from './context';
+import { buildComparisonPlan, MAX_CANDIDATES, MIN_CANDIDATES } from './comparison';
 import { Modal, Select, useTask, type SelectOption } from './ui';
+import { taskDiffTab, useCode } from './code/store';
 
 export function ModalHost({ modal }: { modal: ModalState | null }) {
   if (!modal) return null;
@@ -257,14 +259,32 @@ function KeyModal({ provider }: { provider: ProviderConfig }) {
 }
 
 function MissionModal() {
-  const { closeModal, refresh, setDetail, go, summary } = useHive();
+  const { closeModal, refresh, setDetail, go, summary, workers, providers } = useHive();
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
+  const [compare, setCompare] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
   const task = useTask();
+  const candidates = usableWorkers(workers, providers).filter((worker) => worker.role !== 'queen');
+
+  function toggle(id: string) {
+    setPicked((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : current.length < MAX_CANDIDATES
+          ? [...current, id]
+          : current,
+    );
+  }
+
   return (
     <Modal
       title="Nova missão"
-      description={`Em ${summary?.workspace?.name ?? 'nenhum repositório'}. A Queen transforma o objetivo em tarefas.`}
+      description={
+        compare
+          ? 'Cada agente escolhido executa o objetivo numa worktree própria. Você aplica a melhor entrega.'
+          : `Em ${summary?.workspace?.name ?? 'nenhum repositório'}. A Queen transforma o objetivo em tarefas.`
+      }
       onClose={closeModal}
       wide
     >
@@ -272,10 +292,21 @@ function MissionModal() {
         onSubmit={(event) => {
           event.preventDefault();
           void task.run(async () => {
+            // Checked before the mission exists, so a bad choice leaves nothing behind.
+            const plan = compare
+              ? buildComparisonPlan(
+                  objective,
+                  candidates.filter((worker) => picked.includes(worker.id)),
+                )
+              : null;
             const created = await window.hive.invoke('mission.create', {
               title: title.trim(),
               objective: objective.trim(),
             });
+            if (plan) {
+              await window.hive.invoke('run.setPlan', { runId: created.runId, plan });
+              await window.hive.invoke('run.start', created.runId);
+            }
             setDetail(await window.hive.invoke('run.get', created.runId));
             await refresh();
             go('mission');
@@ -305,18 +336,51 @@ function MissionModal() {
             onChange={(event) => setObjective(event.target.value)}
           />
         </label>
+        <fieldset className="mode-choice">
+          <legend>Como executar</legend>
+          <label className="choice">
+            <input type="radio" name="mode" checked={!compare} onChange={() => setCompare(false)} />
+            Plano da Queen
+          </label>
+          <label className="choice">
+            <input type="radio" name="mode" checked={compare} onChange={() => setCompare(true)} />
+            Comparar agentes
+          </label>
+        </fieldset>
+        {compare && (
+          <fieldset className="agent-picks">
+            <legend>
+              Agentes ({picked.length} de {MAX_CANDIDATES}, mínimo {MIN_CANDIDATES})
+            </legend>
+            {candidates.length ? (
+              candidates.map((worker) => (
+                <label key={worker.id} className="choice">
+                  <input
+                    type="checkbox"
+                    checked={picked.includes(worker.id)}
+                    onChange={() => toggle(worker.id)}
+                  />
+                  {worker.name} <code>{worker.modelId}</code>
+                </label>
+              ))
+            ) : (
+              <p className="hint">Configure agentes com provedor e modelo na aba Agentes.</p>
+            )}
+          </fieldset>
+        )}
         <FormError error={task.error} />
         <div className="modal-actions">
           <button type="button" className="secondary" onClick={closeModal}>
             Cancelar
           </button>
-          <button disabled={task.running}>{task.running ? 'Criando…' : 'Criar missão'}</button>
+          <button disabled={task.running || (compare && picked.length < MIN_CANDIDATES)}>
+            {task.running ? 'Criando…' : compare ? 'Criar e comparar' : 'Criar missão'}
+          </button>
         </div>
       </form>
     </Modal>
   );
 }
-
 export function SetupResult({ setup }: { setup: RecommendedSetup }) {
   return (
     <ul className="setup-result">
@@ -497,8 +561,13 @@ function patchLineClass(line: string): string | undefined {
 }
 
 function DiffModal({ task }: { task: Task }) {
-  const { closeModal, refresh, setDetail, notify } = useHive();
+  const { closeModal, refresh, setDetail, notify, go } = useHive();
   const [diff, setDiff] = useState<TaskDiff | null>(null);
+  const openInEditor = (path: string) => {
+    useCode.getState().open(taskDiffTab(task.id, task.title, path));
+    go('code');
+    closeModal();
+  };
   const load = useTask();
   const act = useTask();
   useEffect(() => {
@@ -527,6 +596,13 @@ function DiffModal({ task }: { task: Task }) {
             <li key={file.path}>
               <span className={`diff-status s-${file.status[0]}`}>{file.status[0]}</span>
               <code>{file.path}</code>
+              <button
+                className="ghost"
+                title="Abrir lado a lado no editor"
+                onClick={() => openInEditor(file.path)}
+              >
+                Abrir no editor
+              </button>
               <small>
                 <span className="success-text">+{file.insertions}</span>{' '}
                 <span className="error-text">−{file.deletions}</span>

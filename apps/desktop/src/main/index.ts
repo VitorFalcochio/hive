@@ -10,14 +10,16 @@ import {
   type IpcResult,
 } from '@hive/core';
 import { HiveDatabase } from '@hive/persistence';
-import { errorMessage, secretRedactor } from '@hive/shared';
+import { HiveError, errorMessage, secretRedactor } from '@hive/shared';
 import { DesktopService } from './service';
+import { attachDesignInspector } from './design-inspector';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(process.env.HIVE_DATA_DIR || app.getPath('userData'));
 app.setPath('userData', dataDir);
 app.setPath('sessionData', path.join(dataDir, 'session'));
 let database: HiveDatabase | undefined;
+let desktopService: DesktopService | undefined;
 
 async function createWindow() {
   const window = new BrowserWindow({
@@ -41,6 +43,20 @@ async function createWindow() {
     },
   });
   window.removeMenu();
+  attachDesignInspector(window.webContents);
+  // The renderer blocks unload while the editor has unsaved files; let the user decide.
+  window.webContents.on('will-prevent-unload', (event) => {
+    const choice = dialog.showMessageBoxSync(window, {
+      type: 'warning',
+      buttons: ['Sair sem salvar', 'Cancelar'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Alterações não salvas',
+      message: 'Há arquivos com alterações não salvas no editor.',
+      detail: 'Se sair agora, essas alterações serão perdidas.',
+    });
+    if (choice === 0) event.preventDefault();
+  });
   window.once('ready-to-show', () => window.show());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -57,6 +73,7 @@ app
       for (const window of BrowserWindow.getAllWindows())
         window.webContents.send(PUSH_CHANNEL, push);
     });
+    desktopService = service;
     ipcMain.handle(
       INVOKE_CHANNEL,
       async (event, channel: string, input: unknown): Promise<IpcResult<unknown>> => {
@@ -71,7 +88,10 @@ app
         } catch (error) {
           return {
             ok: false,
-            error: { code: 'INTERNAL', message: secretRedactor.redact(errorMessage(error)) },
+            error: {
+              code: error instanceof HiveError ? error.code : 'INTERNAL',
+              message: secretRedactor.redact(errorMessage(error)),
+            },
           };
         }
       },
@@ -89,4 +109,7 @@ app
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('will-quit', () => database?.close());
+app.on('will-quit', () => {
+  desktopService?.dispose();
+  database?.close();
+});

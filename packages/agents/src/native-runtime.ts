@@ -19,6 +19,8 @@ import { executeTool, toolDefinitions, type ToolContext } from './tools';
 
 const MAX_SKILL_CHARS = 48_000;
 const MAX_TEXT_ONLY_REPLIES = 2;
+const WRAP_UP_PROMPT =
+  'The token budget for this task is almost used up. Do not call any more tools. Reply now with a final summary: what you did, what you found or changed, and what is still missing.';
 
 interface ActiveSession {
   controller: AbortController;
@@ -212,13 +214,20 @@ export class NativeAgentRuntime implements AgentRuntime {
       });
 
       let textOnlyReplies = 0;
+      // The prompt is resent in full on every step, so the budget is close when the next step
+      // would pass it. Then the agent is asked for its final summary without tools.
+      let wrappingUp = false;
+      let lastPromptTokens = 0;
       while (steps < limits.maxSteps) {
-        if (usage.promptTokens + usage.completionTokens >= limits.maxTokens) {
-          return outcome(
-            'failed',
-            '',
-            `Token budget of ${limits.maxTokens.toLocaleString('en-US')} reached.`,
-          );
+        const used = usage.promptTokens + usage.completionTokens;
+        if (!wrappingUp && used + lastPromptTokens >= limits.maxTokens) {
+          wrappingUp = true;
+          emit({
+            type: 'info',
+            level: 'warn',
+            message: `Perto do limite de ${limits.maxTokens.toLocaleString('en-US')} tokens; pedindo o resumo final.`,
+          });
+          messages.push({ role: 'user', content: WRAP_UP_PROMPT });
         }
         steps++;
         emit({
@@ -234,12 +243,18 @@ export class NativeAgentRuntime implements AgentRuntime {
           data: { step: steps, messages: messages.length },
         });
         const response = await input.chat.chat(
-          { model: input.model, messages, tools, temperature: limits.temperature },
+          {
+            model: input.model,
+            messages,
+            tools: wrappingUp ? undefined : tools,
+            temperature: limits.temperature,
+          },
           signal,
         );
         if (response.usage) {
           usage.promptTokens += response.usage.promptTokens;
           usage.completionTokens += response.usage.completionTokens;
+          lastPromptTokens = response.usage.promptTokens;
         }
         const calls = response.message.tool_calls ?? [];
         emit({
@@ -261,6 +276,15 @@ export class NativeAgentRuntime implements AgentRuntime {
           },
         });
         messages.push(response.message);
+
+        if (wrappingUp) {
+          const text = response.message.content?.trim() || 'Nenhum resumo foi produzido.';
+          return outcome(
+            'completed',
+            `${text}\n\n_Encerrado ao atingir o limite de ${limits.maxTokens.toLocaleString('en-US')} tokens._`,
+            null,
+          );
+        }
 
         if (!calls.length) {
           textOnlyReplies++;

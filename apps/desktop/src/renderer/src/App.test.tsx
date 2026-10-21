@@ -102,3 +102,45 @@ it('ao escolher o provedor de um agente, escolhe e testa o modelo automaticament
   expect(invoke).toHaveBeenCalledWith('worker.autoConfigure', { workerId: 'w1', providerId: 'p1' });
   expect(screen.getAllByText('z-ai/glm-5.3').length).toBeGreaterThan(0);
 });
+
+it('executa um comando do projeto na tela Rodar', async () => {
+  const workspace = {
+    id: 'ws1',
+    name: 'meu-app',
+    path: 'C:\\projetos\\meu-app',
+    defaultBranch: 'main',
+    createdAt: '2026-01-01',
+    lastOpenedAt: '2026-01-01',
+  };
+  const session = {
+    id: 'terminal-1',
+    workspaceId: workspace.id,
+    command: 'npm run dev',
+    cwd: workspace.path,
+    status: 'running',
+    output: 'Local: http://localhost:5173/',
+    startedAt: '2026-01-01T00:00:00.000Z',
+    endedAt: null,
+    exitCode: null,
+    previewUrls: ['http://localhost:5173/'],
+  };
+  const invoke = mount({
+    'dashboard.summary': () => ({ ...emptySummary, workspace }),
+    'workspace.list': () => [workspace],
+    'terminal.list': () => [],
+    'terminal.start': () => session,
+  });
+  await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: 'Rodar' }));
+  expect(screen.getByRole('heading', { name: 'Rodar projeto' })).toBeTruthy();
+  expect(screen.getByText('Aguardando o servidor local')).toBeTruthy();
+
+  fireEvent.submit(screen.getByLabelText('Comando').closest('form')!);
+  await waitFor(() => expect(screen.getByText('Executando')).toBeTruthy());
+  expect(invoke).toHaveBeenCalledWith('terminal.start', { command: 'npm run dev' });
+  await waitFor(() =>
+    expect((screen.getByLabelText('Endereço do preview') as HTMLInputElement).value).toBe(
+      'http://localhost:5173/',
+    ),
+  );
+});

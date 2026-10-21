@@ -1,4 +1,5 @@
 import { app, dialog, safeStorage, shell } from 'electron';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
   ipcContract,
@@ -12,19 +13,34 @@ import {
   type IpcInput,
   type RunDetail,
   type WorkerRole,
+  type Workspace,
 } from '@hive/core';
 import { HiveDatabase, Repositories } from '@hive/persistence';
 import { OpenAICompatibleClient, workerCompatibilityIssues } from '@hive/providers';
 import { newId, nowIso, maskSecret, secretRedactor, HiveError, errorMessage } from '@hive/shared';
-import { inspectRepository, listWorktrees, statusPorcelain } from '@hive/workspace';
+import {
+  git,
+  hiveCommitFlags,
+  inspectRepository,
+  listWorktrees,
+  statusPorcelain,
+} from '@hive/workspace';
 import { Scheduler, planMission, validatePlan } from '@hive/orchestrator';
 import { NativeAgentRuntime, type AgentRuntime } from '@hive/agents';
 import { SkillForgeAdapter } from '@hive/skills';
+import { FileService } from './files';
+import { TerminalManager } from './terminal';
+import { assistCode } from './code-assistant';
+import { startStaticServer, type StaticServer } from './static-server';
 
 export class DesktopService {
   readonly repos: Repositories;
   readonly scheduler: Scheduler;
+  readonly terminals: TerminalManager;
   private readonly planning = new Set<string>();
+  // Each open project keeps its own watcher and preview server, so switching tabs loses nothing.
+  private readonly fileServices = new Map<string, FileService>();
+  private readonly previewServers = new Map<string, StaticServer>();
 
   constructor(
     database: HiveDatabase,
@@ -82,6 +98,101 @@ export class DesktopService {
         });
     }
     this.scheduler.recover();
+    this.terminals = new TerminalManager((event) => this.push({ kind: 'terminal', event }));
+  }
+
+  dispose(): void {
+    this.terminals.dispose();
+    this.files.dispose();
+    for (const service of this.fileServices.values()) service.dispose();
+    for (const server of this.previewServers.values()) void server.close();
+  }
+
+  /** One static server per project; reused while the project stays open. */
+  private async servePreview(root: string): Promise<StaticServer> {
+    const running = this.previewServers.get(root);
+    if (running) return running;
+    const server = await startStaticServer(root);
+    this.previewServers.set(root, server);
+    return server;
+  }
+
+  /** Opens a Git repository as a project tab and focuses it. */
+  private async openRepository(folder: string): Promise<Workspace> {
+    const repo = await inspectRepository(folder);
+    const previous = this.repos.workspaces.list().find((item) => item.path === repo.root);
+    const workspace = this.repos.workspaces.put({
+      id: previous?.id ?? newId('ws'),
+      name: path.basename(repo.root),
+      path: repo.root,
+      defaultBranch: repo.branch ?? 'main',
+      createdAt: previous?.createdAt ?? nowIso(),
+      lastOpenedAt: nowIso(),
+    });
+    this.saveOpenedWorkspaceIds([...this.openedWorkspaceIds(), workspace.id]);
+    this.repos.setValue('activeWorkspace', workspace.id);
+    this.changed('workspace', workspace.id);
+    return workspace;
+  }
+
+  /**
+   * Makes a plain folder a local Git repository: the files already there become the first
+   * commit. Nothing is pushed anywhere, so no GitHub account or remote is needed.
+   */
+  private async initializeRepository(folder: string): Promise<Workspace> {
+    const info = await stat(folder).catch(() => null);
+    if (!info?.isDirectory())
+      throw new HiveError('NOT_FOUND', 'A pasta escolhida não existe mais.');
+    await git(folder, ['init', '-q', '-b', 'main']);
+    // .gitignore keeps dependency folders out of the first commit.
+    await git(folder, ['add', '-A'], { timeoutMs: 600_000 });
+    const email = await git(folder, ['config', 'user.email'], { allowFailure: true });
+    const identity = email.code === 0 && email.stdout.trim() ? [] : hiveCommitFlags;
+    await git(
+      folder,
+      [...identity, 'commit', '-q', '--allow-empty', '-m', 'Projeto iniciado no Hive'],
+      {
+        timeoutMs: 600_000,
+      },
+    );
+    return this.openRepository(folder);
+  }
+
+  /** File access for the project in the focused tab. */
+  get files(): FileService {
+    return this.filesFor(this.active());
+  }
+
+  private filesFor(workspace: Workspace | null): FileService {
+    const key = workspace?.id ?? '';
+    const existing = this.fileServices.get(key);
+    if (existing) return existing;
+    const service = new FileService(
+      () => workspace?.path ?? null,
+      (paths) => this.push({ kind: 'files', workspaceId: key, paths }),
+    );
+    service.watch();
+    this.fileServices.set(key, service);
+    return service;
+  }
+
+  /** Projects open as tabs. Stored as ids, in order; closed projects are dropped. */
+  private openedWorkspaceIds(): string[] {
+    const raw = this.repos.getValue('openWorkspaces');
+    let ids: unknown;
+    try {
+      ids = raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(ids)) return [];
+    return [...new Set(ids)].filter(
+      (id): id is string => typeof id === 'string' && this.repos.workspaces.get(id) !== null,
+    );
+  }
+
+  private saveOpenedWorkspaceIds(ids: string[]): void {
+    this.repos.setValue('openWorkspaces', JSON.stringify([...new Set(ids)]));
   }
 
   private changed(
@@ -207,36 +318,65 @@ export class DesktopService {
         return this.active();
       case 'workspace.pick': {
         const selected = await dialog.showOpenDialog({
-          title: 'Selecionar repositório Git',
+          title: 'Selecionar pasta do projeto',
           properties: ['openDirectory'],
         });
         if (selected.canceled || !selected.filePaths[0]) return null;
-        const repo = await inspectRepository(selected.filePaths[0]);
-        const previous = this.repos.workspaces.list().find((item) => item.path === repo.root);
-        const workspace = this.repos.workspaces.put({
-          id: previous?.id ?? newId('ws'),
-          name: path.basename(repo.root),
-          path: repo.root,
-          defaultBranch: repo.branch ?? 'main',
-          createdAt: previous?.createdAt ?? nowIso(),
-          lastOpenedAt: nowIso(),
-        });
+        const folder = selected.filePaths[0];
+        try {
+          return { status: 'opened', workspace: await this.openRepository(folder) };
+        } catch (error) {
+          // A plain folder is offered for initialization instead of failing.
+          if (error instanceof HiveError && error.code === 'NOT_A_GIT_REPO')
+            return { status: 'needs-init', path: folder, name: path.basename(folder) };
+          throw error;
+        }
+      }
+      case 'workspace.initialize':
+        return this.initializeRepository(parse(channel).path);
+      case 'workspace.activate': {
+        const workspace = this.repos.workspaces.require(parse(channel), 'Workspace');
+        await inspectRepository(workspace.path);
+        this.saveOpenedWorkspaceIds([...this.openedWorkspaceIds(), workspace.id]);
         this.repos.setValue('activeWorkspace', workspace.id);
         this.changed('workspace', workspace.id);
         return workspace;
       }
-      case 'workspace.activate': {
-        const workspace = this.repos.workspaces.require(parse(channel), 'Workspace');
-        await inspectRepository(workspace.path);
-        this.repos.setValue('activeWorkspace', workspace.id);
-        this.changed('workspace', workspace.id);
-        return workspace;
+      case 'workspace.tabs': {
+        // Projects from before tabs existed: the focused project opens as the first tab.
+        const active = this.active();
+        const ids = this.openedWorkspaceIds();
+        if (active && !ids.includes(active.id)) this.saveOpenedWorkspaceIds([...ids, active.id]);
+        return this.openedWorkspaceIds()
+          .map((id) => this.repos.workspaces.get(id))
+          .filter((item): item is Workspace => item !== null);
+      }
+      case 'workspace.close': {
+        const id = parse(channel);
+        const remaining = this.openedWorkspaceIds().filter((item) => item !== id);
+        this.saveOpenedWorkspaceIds(remaining);
+        const closed = this.repos.workspaces.get(id);
+        this.fileServices.get(id)?.dispose();
+        this.fileServices.delete(id);
+        if (closed) {
+          await this.previewServers.get(closed.path)?.close();
+          this.previewServers.delete(closed.path);
+        }
+        // Running commands of the closed project stop with its tab.
+        for (const session of this.terminals.list(id))
+          if (session.status === 'running' || session.status === 'stopping')
+            this.terminals.stop(session.id);
+        if (this.repos.getValue('activeWorkspace') === id)
+          this.repos.setValue('activeWorkspace', remaining[0] ?? null);
+        this.changed('workspace', id);
+        return;
       }
       case 'workspace.remove': {
         const id = parse(channel);
         this.repos.workspaces.delete(id);
         if (this.repos.getValue('activeWorkspace') === id)
           this.repos.setValue('activeWorkspace', null);
+        this.files.watch();
         this.changed('workspace', id);
         return;
       }
@@ -442,7 +582,12 @@ export class DesktopService {
         return result;
       }
       case 'mission.list':
-        return this.missionList();
+        return this.missionList(parse(channel).workspaceId);
+      case 'mission.pin': {
+        const { id: missionId, pinned } = parse(channel);
+        this.setMissionPinned(missionId, pinned);
+        return;
+      }
       case 'mission.create': {
         const value = parse(channel);
         const workspace = this.active();
@@ -581,9 +726,90 @@ export class DesktopService {
         return this.repos.approvals.list("status = 'pending'");
       case 'events.query':
         return this.repos.queryEvents(parse(channel));
+      case 'fs.list':
+        return this.files.list(parse(channel).path);
+      case 'fs.files':
+        return this.files.files();
+      case 'preview.serve': {
+        const workspace = this.active();
+        if (!workspace)
+          throw new HiveError('VALIDATION', 'Selecione um projeto antes de abrir uma página.');
+        const { path: relative } = parse(channel);
+        if (!/\.html?$/i.test(relative))
+          throw new HiveError('VALIDATION', 'Escolha um arquivo .html para abrir no preview.');
+        await this.files.absolute(relative);
+        const server = await this.servePreview(workspace.path);
+        const encoded = relative.split('/').map(encodeURIComponent).join('/');
+        return { url: `${server.origin}/${encoded}` };
+      }
+      case 'fs.read':
+        return this.files.read(parse(channel).path);
+      case 'fs.write': {
+        const value = parse(channel);
+        return this.files.write(value.path, value.content, value.expectedMtimeMs);
+      }
+      case 'fs.create': {
+        const value = parse(channel);
+        return this.files.create(value.path, value.kind);
+      }
+      case 'fs.rename': {
+        const value = parse(channel);
+        return this.files.rename(value.from, value.to);
+      }
+      case 'fs.trash':
+        // The recycle bin keeps deletions recoverable.
+        return shell.trashItem(await this.files.absolute(parse(channel).path));
+      case 'git.status':
+        return this.files.gitStatus();
+      case 'git.fileDiff':
+        return this.files.workingDiff(parse(channel).path);
+      case 'git.branches':
+        return this.files.branches();
+      case 'git.checkout':
+        await this.files.checkout(parse(channel));
+        this.changed('workspace', this.active()?.id ?? null);
+        return;
+      case 'task.fileDiff': {
+        const { taskId, path: file } = parse(channel);
+        const task = this.repos.tasks.require(taskId, 'Tarefa');
+        if (!task.startCommit || !task.result?.commit)
+          throw new HiveError('VALIDATION', 'Esta tarefa não tem alterações.');
+        const run = this.repos.runs.require(task.runId, 'Execução');
+        const workspace = this.repos.workspaces.require(run.workspaceId, 'Workspace');
+        return this.files.commitDiff(workspace.path, task.startCommit, task.result.commit, file);
+      }
+      case 'terminal.list': {
+        const workspace = this.active();
+        return workspace ? this.terminals.list(workspace.id) : [];
+      }
+      case 'terminal.start': {
+        const workspace = this.active();
+        if (!workspace)
+          throw new HiveError('VALIDATION', 'Selecione um projeto antes de executar.');
+        const value = parse(channel);
+        return this.terminals.start(workspace.id, workspace.path, value.command, value.cwd);
+      }
+      case 'terminal.stop':
+        return this.terminals.stop(parse(channel));
+      case 'terminal.clear':
+        return this.terminals.clear(parse(channel));
+      case 'code.assist': {
+        const value = parse(channel);
+        if (!this.active())
+          throw new HiveError('VALIDATION', 'Selecione um projeto antes de usar a IA no código.');
+        await this.files.absolute(value.path);
+        const worker = this.repos.workers.require(value.workerId, 'Agente');
+        if (!worker.providerId || !worker.modelId)
+          throw new HiveError('VALIDATION', 'Configure o provedor e o modelo deste agente.');
+        return assistCode(
+          this.client(worker.providerId),
+          { ...worker, providerId: worker.providerId, modelId: worker.modelId },
+          value,
+        );
+      }
       case 'dashboard.summary': {
         const workspace = this.active();
-        const recentMissions = this.missionList().slice(0, 8);
+        const recentMissions = this.missionList(workspace?.id ?? null).slice(0, 8);
         const runs = workspace ? this.repos.runs.list('workspace_id = ?', workspace.id) : [];
         const summary: DashboardSummary = {
           workspace,
@@ -692,12 +918,33 @@ export class DesktopService {
     return result;
   }
 
-  private missionList() {
-    const workspace = this.active();
-    if (!workspace) return [];
-    return this.repos.missions.list('workspace_id = ?', workspace.id).map((mission) => ({
+  /** Missions of one project, so every open project can show its own list in the sidebar. */
+  private missionList(workspaceId: string | null) {
+    if (!workspaceId) return [];
+    const pinned = new Set(this.pinnedMissionIds());
+    return this.repos.missions.list('workspace_id = ?', workspaceId).map((mission) => ({
       ...mission,
       lastRunStatus: this.repos.runs.list('mission_id = ?', mission.id)[0]?.status ?? null,
+      pinned: pinned.has(mission.id),
     }));
+  }
+
+  /** Pinned missions are kept as ids in settings; ids of deleted missions are ignored. */
+  private pinnedMissionIds(): string[] {
+    const raw = this.repos.getValue('pinnedMissions');
+    if (!raw) return [];
+    try {
+      const ids: unknown = JSON.parse(raw);
+      return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private setMissionPinned(id: string, pinned: boolean): void {
+    this.repos.missions.require(id, 'Missão');
+    const ids = this.pinnedMissionIds().filter((item) => item !== id);
+    this.repos.setValue('pinnedMissions', JSON.stringify(pinned ? [...ids, id] : ids));
+    this.changed('mission', id);
   }
 }

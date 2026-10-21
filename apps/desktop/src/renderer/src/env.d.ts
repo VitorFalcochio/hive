@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import type { HiveBridge } from '@hive/core';
 declare global {
   interface Window {

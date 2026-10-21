@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
   BookOpen,
+  ChevronDown,
+  Code2,
   Folder,
   FolderOpen,
   FolderPlus,
   Hexagon,
   Info,
+  Settings as SettingsIcon,
   LayoutGrid,
   Plug,
   Plus,
   ShieldQuestion,
+  SquareTerminal,
   X,
 } from 'lucide-react';
 import type {
@@ -20,17 +24,30 @@ import type {
   ProviderConfig,
   RunDetail,
   SkillSummary,
+  TerminalEvent,
+  Settings,
   Worker,
   Workspace,
 } from '@hive/core';
 import { Hive, hasAccess, message, type HiveContext, type ModalState, type View } from './context';
 import { MissionPage } from './mission';
+import { RunPage } from './run';
+import { hasUnsavedChanges, projectHasUnsavedChanges, useCode } from './code/store';
+import { ProjectTabs } from './project-tabs';
+import { SettingsPage } from './settings';
+import { MissionCards, type SidebarMission } from './mission-cards';
+
+// Monaco is large; it loads the first time the code view opens.
+const CodeView = lazy(() => import('./code/CodeView'));
 import { ModalHost } from './modals';
+import { SplashScreen } from './splash';
 import { AboutPage, AgentsPage, OverviewPage, ProvidersPage, SkillsPage } from './pages';
-import { Dot, runTone, statusLabels } from './ui';
+import { Dot } from './ui';
 
 const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   { view: 'overview', label: 'Visão geral', icon: LayoutGrid },
+  { view: 'code', label: 'Código', icon: Code2 },
+  { view: 'run', label: 'Rodar', icon: SquareTerminal },
   { view: 'agents', label: 'Agentes', icon: Bot },
   { view: 'providers', label: 'Provedores', icon: Plug },
   { view: 'skills', label: 'Skills', icon: BookOpen },
@@ -38,16 +55,26 @@ const navigation: { view: View; label: string; icon: typeof Bot }[] = [
 const viewTitles: Record<View, string> = {
   overview: 'Visão geral',
   mission: 'Missão',
+  code: 'Código',
+  run: 'Rodar projeto',
   agents: 'Agentes',
   providers: 'Provedores',
   skills: 'Skills',
   about: 'Sobre',
+  settings: 'Configurações',
 };
 
 export function App() {
   const [view, setView] = useState<View>('overview');
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [tabs, setTabs] = useState<Workspace[]>([]);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [missionsByProject, setMissionsByProject] = useState<Record<string, SidebarMission[]>>({});
+  // Projects whose mission list the user collapsed; every project starts expanded.
+  const [collapsedProjects, setCollapsedProjects] = useState<string[]>([]);
+  // Project in front; file events from other projects are ignored.
+  const focusedId = useRef<string | null>(null);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -60,20 +87,48 @@ export function App() {
   const noticeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const openRunId = useRef<string | null>(null);
   const eventListeners = useRef(new Set<(event: AgentEvent) => void>());
+  const fileListeners = useRef(new Set<(paths: string[]) => void>());
+  const terminalListeners = useRef(new Set<(event: TerminalEvent) => void>());
+  // The "reduce animations" setting is applied as a class, so every animation can be turned off at once.
+  useEffect(() => {
+    document.documentElement.classList.toggle('motion-reduce', settings?.reduceMotion === 'on');
+  }, [settings?.reduceMotion]);
   useEffect(() => {
     openRunId.current = detail?.run.id ?? null;
   }, [detail]);
 
   const refresh = useCallback(async () => {
-    const [dashboard, spaces, agents, endpoints, library, appInfo] = await Promise.all([
-      window.hive.invoke('dashboard.summary'),
-      window.hive.invoke('workspace.list'),
-      window.hive.invoke('worker.list'),
-      window.hive.invoke('provider.list'),
-      window.hive.invoke('skill.list'),
-      window.hive.invoke('app.info'),
-    ]);
+    const [dashboard, spaces, agents, endpoints, library, appInfo, openTabs, appSettings] =
+      await Promise.all([
+        window.hive.invoke('dashboard.summary'),
+        window.hive.invoke('workspace.list'),
+        window.hive.invoke('worker.list'),
+        window.hive.invoke('provider.list'),
+        window.hive.invoke('skill.list'),
+        window.hive.invoke('app.info'),
+        window.hive.invoke('workspace.tabs'),
+        window.hive.invoke('settings.get'),
+      ]);
+    // Every known project lists its own missions in the sidebar.
+    const lists = await Promise.all(
+      spaces.map(async (space) => {
+        const list = await window.hive
+          .invoke('mission.list', { workspaceId: space.id })
+          .catch(() => []);
+        return [space.id, list] as const;
+      }),
+    );
+    setMissionsByProject(Object.fromEntries(lists));
     setSummary(dashboard);
+    setTabs(openTabs);
+    setSettings(appSettings);
+    const nextFocus = dashboard.workspace?.id ?? null;
+    focusedId.current = nextFocus;
+    // Each project keeps its own editor state; the documents of the new one are checked on disk.
+    if (useCode.getState().project !== nextFocus) {
+      useCode.getState().switchTo(nextFocus);
+      void import('./code/monaco').then(({ syncFromDisk, openPaths }) => syncFromDisk(openPaths()));
+    }
     setWorkspaces(spaces);
     setWorkers(agents);
     setProviders(endpoints);
@@ -87,10 +142,30 @@ export function App() {
       if (fresh && openRunId.current === runId) setDetail(fresh);
     }
   }, []);
+  const onFiles = useCallback((listener: (paths: string[]) => void) => {
+    fileListeners.current.add(listener);
+    return () => {
+      fileListeners.current.delete(listener);
+    };
+  }, []);
+  // Closing the window with unsaved editor files asks first (see will-prevent-unload in main).
+  useEffect(() => {
+    const guard = (event: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges()) event.preventDefault();
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, []);
   const onEvent = useCallback((listener: (event: AgentEvent) => void) => {
     eventListeners.current.add(listener);
     return () => {
       eventListeners.current.delete(listener);
+    };
+  }, []);
+  const onTerminal = useCallback((listener: (event: TerminalEvent) => void) => {
+    terminalListeners.current.add(listener);
+    return () => {
+      terminalListeners.current.delete(listener);
     };
   }, []);
 
@@ -107,6 +182,15 @@ export function App() {
       if (!alive) return;
       if (push.kind === 'event') {
         for (const listener of eventListeners.current) listener(push.event);
+        return;
+      }
+      if (push.kind === 'files') {
+        if (push.workspaceId !== focusedId.current) return;
+        for (const listener of fileListeners.current) listener(push.paths);
+        return;
+      }
+      if (push.kind === 'terminal') {
+        for (const listener of terminalListeners.current) listener(push.event);
         return;
       }
       timer ??= setTimeout(() => {
@@ -145,6 +229,8 @@ export function App() {
       closeModal: () => setModal(null),
       go: setView,
       onEvent,
+      onFiles,
+      onTerminal,
       async openRun(runId) {
         try {
           setDetail(await window.hive.invoke('run.get', runId));
@@ -166,10 +252,20 @@ export function App() {
       },
       async pickWorkspace() {
         try {
-          const workspace = await window.hive.invoke('workspace.pick');
-          if (workspace) {
+          const picked = await window.hive.invoke('workspace.pick');
+          if (picked?.status === 'needs-init') {
+            const create = window.confirm(
+              `"${picked.name}" não é um repositório Git.\n\nO Hive vai criar um repositório local nessa pasta e registrar os arquivos atuais num commit inicial. Nada é enviado para a internet.\n\nContinuar?`,
+            );
+            if (!create) return;
+            const workspace = await window.hive.invoke('workspace.initialize', {
+              path: picked.path,
+            });
             setDetail(null);
-            notify(`Repositório ${workspace.name} aberto.`);
+            notify(`Repositório ${workspace.name} criado e aberto.`);
+          } else if (picked?.status === 'opened') {
+            setDetail(null);
+            notify(`Repositório ${picked.workspace.name} aberto.`);
           }
           await refresh();
         } catch (failure) {
@@ -177,13 +273,28 @@ export function App() {
         }
       },
     };
-  }, [summary, workspaces, workers, providers, skills, info, detail, refresh, onEvent]);
+  }, [
+    summary,
+    workspaces,
+    workers,
+    providers,
+    skills,
+    info,
+    detail,
+    refresh,
+    onEvent,
+    onFiles,
+    onTerminal,
+  ]);
 
   const activeWorkspace = summary?.workspace ?? null;
   const queen = workers.find((worker) => worker.role === 'queen');
   const connected = providers.filter(hasAccess);
   const page = view === 'mission' && !detail ? 'overview' : view;
   const approvals = summary?.pendingApprovals ?? [];
+  // The editor stays mounted after its first visit, so tabs and the tree survive navigation.
+  const [codeVisited, setCodeVisited] = useState(false);
+  if (page === 'code' && !codeVisited) setCodeVisited(true);
   const activeTasks = summary?.activeTasks.length ?? 0;
 
   async function activate(workspace: Workspace) {
@@ -197,6 +308,42 @@ export function App() {
       context.fail(failure);
     }
   }
+
+  /** Opens a mission; a mission of another project brings that project to the front first. */
+  async function openProjectMission(workspace: Workspace, id: string) {
+    if (workspace.id !== activeWorkspace?.id) await activate(workspace);
+    await context.openMission(id);
+  }
+
+  async function pinMission(id: string, pinned: boolean) {
+    try {
+      await window.hive.invoke('mission.pin', { id, pinned });
+      await refresh();
+    } catch (failure) {
+      context.fail(failure);
+    }
+  }
+
+  async function closeProject(workspace: Workspace) {
+    if (projectHasUnsavedChanges(workspace.id)) {
+      context.fail(
+        new Error(`Salve ou descarte as alterações de ${workspace.name} antes de fechar a aba.`),
+      );
+      return;
+    }
+    try {
+      if (workspace.id === activeWorkspace?.id) setDetail(null);
+      await window.hive.invoke('workspace.close', workspace.id);
+      await refresh();
+      const { disposeProjectDocs } = await import('./code/monaco');
+      disposeProjectDocs(workspace.id);
+      useCode.getState().dropProject(workspace.id);
+    } catch (failure) {
+      context.fail(failure);
+    }
+  }
+
+  if (!ready && !error) return <SplashScreen />;
 
   return (
     <Hive.Provider value={context}>
@@ -212,6 +359,13 @@ export function App() {
           </span>
         </div>
 
+        <ProjectTabs
+          tabs={tabs}
+          activeId={activeWorkspace?.id ?? null}
+          onActivate={(workspace) => void activate(workspace)}
+          onClose={(workspace) => void closeProject(workspace)}
+          onOpen={() => void context.pickWorkspace()}
+        />
         <aside className="sidebar">
           <nav aria-label="Navegação principal">
             {navigation.map(({ view: item, label, icon: Icon }) => (
@@ -245,40 +399,51 @@ export function App() {
             )}
             {workspaces.map((workspace) => {
               const active = workspace.id === activeWorkspace?.id;
-              const missions = active ? (summary?.recentMissions ?? []) : [];
+              const open = !collapsedProjects.includes(workspace.id);
+              const missions = missionsByProject[workspace.id] ?? [];
               return (
                 <div key={workspace.id} className={active ? 'tree-group active' : 'tree-group'}>
-                  <button className="tree-root" onClick={() => void activate(workspace)}>
-                    {active ? <FolderOpen size={14} /> : <Folder size={14} />}
-                    <span className="truncate">{workspace.name}</span>
-                    {active && <span className="count">{missions.length}</span>}
-                  </button>
-                  {active && (
-                    <>
-                      {missions.map((mission) => (
+                  <div className="tree-root-row">
+                    <button
+                      className="tree-toggle"
+                      aria-expanded={open}
+                      aria-label={open ? 'Recolher missões' : 'Expandir missões'}
+                      title={open ? 'Recolher missões' : 'Expandir missões'}
+                      onClick={() =>
+                        setCollapsedProjects((current) =>
+                          current.includes(workspace.id)
+                            ? current.filter((id) => id !== workspace.id)
+                            : [...current, workspace.id],
+                        )
+                      }
+                    >
+                      <ChevronDown size={13} className={open ? 'chevron open' : 'chevron'} />
+                    </button>
+                    <button className="tree-root" onClick={() => void activate(workspace)}>
+                      {active ? <FolderOpen size={14} /> : <Folder size={14} />}
+                      <span className="truncate">{workspace.name}</span>
+                      <span className="count">{missions.length}</span>
+                    </button>
+                  </div>
+                  {open && (
+                    <div className="tree-missions">
+                      <MissionCards
+                        missions={missions}
+                        selectedId={
+                          active && page === 'mission' ? (detail?.mission.id ?? null) : null
+                        }
+                        onOpen={(id) => void openProjectMission(workspace, id)}
+                        onPin={(id, pinned) => void pinMission(id, pinned)}
+                      />
+                      {active && (
                         <button
-                          key={mission.id}
-                          className={
-                            page === 'mission' && detail?.mission.id === mission.id
-                              ? 'tree-item selected'
-                              : 'tree-item'
-                          }
-                          onClick={() => void context.openMission(mission.id)}
+                          className="tree-item add"
+                          onClick={() => setModal({ kind: 'mission' })}
                         >
-                          <Dot tone={runTone(mission.lastRunStatus)} />
-                          <span className="tree-text">
-                            <span className="truncate">{mission.title}</span>
-                            <small>{statusLabels[mission.lastRunStatus ?? 'draft']}</small>
-                          </span>
+                          <Plus size={13} /> Nova missão
                         </button>
-                      ))}
-                      <button
-                        className="tree-item add"
-                        onClick={() => setModal({ kind: 'mission' })}
-                      >
-                        <Plus size={13} /> Nova missão
-                      </button>
-                    </>
+                      )}
+                    </div>
                   )}
                 </div>
               );
@@ -286,6 +451,12 @@ export function App() {
           </div>
 
           <div className="sidebar-bottom">
+            <button
+              className={page === 'settings' ? 'nav-item selected' : 'nav-item'}
+              onClick={() => setView('settings')}
+            >
+              <SettingsIcon size={15} /> Configurações
+            </button>
             <button
               className={page === 'about' ? 'nav-item selected' : 'nav-item'}
               onClick={() => setView('about')}
@@ -295,8 +466,11 @@ export function App() {
           </div>
         </aside>
 
-        <main className="content">
-          {!ready && !error && <p role="status">Carregando o Hive…</p>}
+        <main
+          className={
+            page === 'code' ? 'content code-mode' : page === 'run' ? 'content run-mode' : 'content'
+          }
+        >
           {approvals.length > 0 &&
             !(page === 'mission' && approvals.some((a) => a.runId === detail?.run.id)) && (
               <button
@@ -310,13 +484,22 @@ export function App() {
                 <span className="banner-action">Responder</span>
               </button>
             )}
-          <div className="page">
+          {codeVisited && (
+            <div className="code-host" hidden={page !== 'code'}>
+              <Suspense fallback={<p role="status">Carregando o editor…</p>}>
+                <CodeView />
+              </Suspense>
+            </div>
+          )}
+          <div className={page === 'run' ? 'page page-full' : 'page'} hidden={page === 'code'}>
             {page === 'overview' && <OverviewPage />}
             {page === 'mission' && <MissionPage />}
+            {page === 'run' && <RunPage key={activeWorkspace?.id ?? 'none'} />}
             {page === 'agents' && <AgentsPage />}
             {page === 'providers' && <ProvidersPage />}
             {page === 'skills' && <SkillsPage />}
             {page === 'about' && <AboutPage />}
+            {page === 'settings' && <SettingsPage settings={settings} onSaved={refresh} />}
           </div>
         </main>
 

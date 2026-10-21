@@ -30,6 +30,7 @@ function channel<O>() {
 }
 
 const id = z.string().min(1).max(100);
+const relPath = z.string().max(1_000);
 const none = z.undefined();
 
 export interface AppInfo {
@@ -89,6 +90,63 @@ export interface RecommendedSetup {
   unavailable: { modelId: string; message: string }[];
 }
 
+/* Editor: paths are relative to the workspace root, with forward slashes. */
+export interface FileEntry {
+  name: string;
+  path: string;
+  kind: 'file' | 'dir';
+}
+
+export interface FileContent {
+  path: string;
+  /** Null for binary or oversized files, which the editor does not open. */
+  content: string | null;
+  binary: boolean;
+  tooLarge: boolean;
+  size: number;
+  mtimeMs: number;
+}
+
+export interface FileDiffContent {
+  path: string;
+  original: string;
+  modified: string;
+}
+
+export interface GitStatusSummary {
+  branch: string | null;
+  files: { path: string; status: string }[];
+}
+
+export type TerminalStatus = 'running' | 'stopping' | 'exited' | 'failed' | 'stopped';
+
+export interface TerminalSession {
+  id: string;
+  workspaceId: string;
+  command: string;
+  cwd: string;
+  status: TerminalStatus;
+  output: string;
+  startedAt: string;
+  endedAt: string | null;
+  exitCode: number | null;
+  previewUrls: string[];
+}
+
+export type TerminalEvent =
+  | { type: 'started'; session: TerminalSession }
+  | { type: 'output'; sessionId: string; chunk: string; previewUrls: string[] }
+  | { type: 'state'; session: TerminalSession };
+
+export type CodeAssistantMode = 'explain' | 'review' | 'edit' | 'chat';
+
+export interface CodeAssistantResponse {
+  answer: string;
+  proposal: { replacement: string; summary: string } | null;
+  worker: { id: string; name: string; modelId: string };
+  usage: { promptTokens: number; completionTokens: number } | null;
+}
+
 export interface WorkerHistoryItem {
   task: Task;
   runId: string;
@@ -115,9 +173,14 @@ export const ipcContract = {
   'settings.update': channel<Settings>()(settingsSchema.partial()),
 
   'workspace.list': channel<Workspace[]>()(none),
-  'workspace.pick': channel<Workspace | null>()(none),
+  'workspace.pick': channel<WorkspacePick>()(none),
+  /** Turns a plain folder into a local Git repository with an initial commit, then opens it. */
+  'workspace.initialize': channel<Workspace>()(z.object({ path: z.string().min(1).max(4096) })),
   'workspace.activate': channel<Workspace>()(id),
   'workspace.active': channel<Workspace | null>()(none),
+  /** Projects open as tabs, in tab order. */
+  'workspace.tabs': channel<Workspace[]>()(none),
+  'workspace.close': channel<void>()(id),
   'workspace.remove': channel<void>()(id),
   'workspace.status': channel<WorkspaceStatus>()(id),
 
@@ -170,7 +233,10 @@ export const ipcContract = {
   ),
   'skill.deleteLocal': channel<void>()(z.string().min(1).max(64)),
 
-  'mission.list': channel<(Mission & { lastRunStatus: Run['status'] | null })[]>()(none),
+  'mission.list': channel<(Mission & { lastRunStatus: Run['status'] | null; pinned: boolean })[]>()(
+    z.object({ workspaceId: id }),
+  ),
+  'mission.pin': channel<void>()(z.object({ id, pinned: z.boolean() })),
   'mission.create': channel<MissionDetail & { runId: string }>()(
     z.object({ title: z.string().min(1).max(140), objective: z.string().min(1).max(10_000) }),
   ),
@@ -196,6 +262,56 @@ export const ipcContract = {
   'approval.pending': channel<Approval[]>()(none),
 
   'events.query': channel<AgentEvent[]>()(eventQuerySchema),
+
+  'fs.list': channel<FileEntry[]>()(z.object({ path: relPath })),
+  'fs.files': channel<string[]>()(none),
+  'preview.serve': channel<{ url: string }>()(z.object({ path: relPath })),
+  'fs.read': channel<FileContent>()(z.object({ path: relPath })),
+  'fs.write': channel<{ mtimeMs: number }>()(
+    z.object({
+      path: relPath,
+      content: z.string().max(20_000_000),
+      expectedMtimeMs: z.number().nullable(),
+    }),
+  ),
+  'fs.create': channel<void>()(z.object({ path: relPath, kind: z.enum(['file', 'dir']) })),
+  'fs.rename': channel<void>()(z.object({ from: relPath, to: relPath })),
+  'fs.trash': channel<void>()(z.object({ path: relPath })),
+  'git.status': channel<GitStatusSummary>()(none),
+  'git.fileDiff': channel<FileDiffContent>()(z.object({ path: relPath })),
+  'git.branches': channel<{ current: string | null; local: string[] }>()(none),
+  'git.checkout': channel<void>()(z.string().min(1).max(250)),
+  'task.fileDiff': channel<FileDiffContent>()(z.object({ taskId: id, path: relPath })),
+  'terminal.list': channel<TerminalSession[]>()(none),
+  'terminal.start': channel<TerminalSession>()(
+    z.object({ command: z.string().trim().min(1).max(2_000), cwd: relPath.optional() }),
+  ),
+  'terminal.stop': channel<TerminalSession>()(id),
+  'terminal.clear': channel<TerminalSession>()(id),
+  'code.assist': channel<CodeAssistantResponse>()(
+    z.object({
+      workerId: id,
+      mode: z.enum(['explain', 'review', 'edit', 'chat']),
+      path: relPath,
+      fileContent: z.string().max(1_000_000),
+      selection: z
+        .object({
+          startOffset: z.number().int().min(0),
+          endOffset: z.number().int().min(0),
+          text: z.string().max(200_000),
+        })
+        .nullable(),
+      instruction: z.string().trim().min(1).max(10_000),
+      history: z
+        .array(
+          z.object({
+            role: z.enum(['user', 'assistant']),
+            content: z.string().min(1).max(12_000),
+          }),
+        )
+        .max(12),
+    }),
+  ),
   'dashboard.summary': channel<DashboardSummary>()(none),
 } as const;
 
@@ -207,8 +323,17 @@ export type IpcOutput<C extends IpcChannel> = IpcContract[C]['output'];
 export const ipcChannels = Object.keys(ipcContract) as IpcChannel[];
 
 /** Push notifications from the main process to the renderer. */
+/** Result of picking a folder: opened, or a plain folder that must be initialized first. */
+export type WorkspacePick =
+  | { status: 'opened'; workspace: Workspace }
+  | { status: 'needs-init'; path: string; name: string }
+  | null;
+
 export type HivePush =
   | { kind: 'event'; event: AgentEvent }
+  /** Files changed on disk in a workspace that is open as a tab (relative paths). */
+  | { kind: 'files'; workspaceId: string; paths: string[] }
+  | { kind: 'terminal'; event: TerminalEvent }
   | {
       kind: 'changed';
       entity:

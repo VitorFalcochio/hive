@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HiveDatabase } from '@hive/persistence';
 import type {
   HivePush,
+  CodeAssistantResponse,
   MissionDetail,
   ProviderConfig,
   RecommendedSetup,
   RunDetail,
   Worker,
   Workspace,
+  WorkspacePick,
 } from '@hive/core';
 
 const mocks = vi.hoisted(() => ({ selected: '', encrypted: true }));
@@ -82,7 +84,9 @@ describe('desktop integrado aos serviços locais', () => {
     ]);
     mocks.selected = repo;
     const { service, pushes } = setup();
-    const workspace = (await service.invoke('workspace.pick', undefined)) as Workspace;
+    const picked = (await service.invoke('workspace.pick', undefined)) as WorkspacePick;
+    if (picked?.status !== 'opened') throw new Error('A pasta de teste devia abrir direto.');
+    const workspace = picked.workspace;
     expect(workspace.path.toLowerCase()).toBe(repo.toLowerCase());
     const provider = (await service.invoke('provider.save', {
       kind: 'openai-compatible',
@@ -141,6 +145,86 @@ describe('desktop integrado aos serviços locais', () => {
     expect(pushes.some((push) => push.kind === 'changed' && push.entity === 'run')).toBe(true);
     expect(await readFile(path.join(repo, 'README.md'), 'utf8')).toBe('# Teste\n');
     expect(git(['status', '--porcelain']).toString()).toBe('');
+  });
+
+  it('oferece iniciar uma pasta comum como repositório, com commit inicial dos arquivos', async () => {
+    const folder = await mkdtemp(path.join(os.tmpdir(), 'hive-plain-'));
+    await writeFile(path.join(folder, 'index.html'), '<h1>Oi</h1>');
+    // Temp folders can sit inside another repository; stop Git from looking above this folder.
+    vi.stubEnv('GIT_CEILING_DIRECTORIES', path.dirname(folder));
+    mocks.selected = folder;
+    const { service } = setup();
+    const picked = (await service.invoke('workspace.pick', undefined)) as WorkspacePick;
+    expect(picked).toMatchObject({ status: 'needs-init', path: folder });
+    const workspace = (await service.invoke('workspace.initialize', { path: folder })) as Workspace;
+    expect(workspace.path.toLowerCase()).toBe(folder.toLowerCase());
+    const log = execFileSync('git', ['log', '--format=%s'], { cwd: folder, windowsHide: true });
+    expect(log.toString().trim()).toBe('Projeto iniciado no Hive');
+    const tracked = execFileSync('git', ['ls-files'], { cwd: folder, windowsHide: true });
+    expect(tracked.toString()).toContain('index.html');
+  });
+
+  it('usa o agente configurado para propor uma edição sem alterar o arquivo', async () => {
+    const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-code-ai-'));
+    const git = (args: string[]) => execFileSync('git', args, { cwd: repo, windowsHide: true });
+    git(['init', '-b', 'main']);
+    const source = 'const value = 1;\n';
+    await writeFile(path.join(repo, 'app.ts'), source);
+    mocks.selected = repo;
+    const { service } = setup();
+    await service.invoke('workspace.pick', undefined);
+    const provider = (await service.invoke('provider.save', {
+      kind: 'openai-compatible',
+      name: 'Local',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      enabled: true,
+    })) as ProviderConfig;
+    const workers = (await service.invoke('worker.list', undefined)) as Worker[];
+    const reviewer = workers.find((worker) => worker.role === 'reviewer')!;
+    await service.invoke('worker.save', {
+      ...reviewer,
+      providerId: provider.id,
+      modelId: 'code-model',
+    });
+    const fakeFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    answer: 'Renomeei a variável.',
+                    replacement: 'total',
+                    summary: 'Renomear value para total',
+                  }),
+                },
+              },
+            ],
+            usage: { prompt_tokens: 20, completion_tokens: 8 },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal('fetch', fakeFetch);
+
+    const result = (await service.invoke('code.assist', {
+      workerId: reviewer.id,
+      mode: 'edit',
+      path: 'app.ts',
+      fileContent: source,
+      selection: { startOffset: 6, endOffset: 11, text: 'value' },
+      instruction: 'Use um nome que indique o total.',
+      history: [],
+    })) as CodeAssistantResponse;
+
+    expect(result.proposal).toEqual({
+      replacement: 'total',
+      summary: 'Renomear value para total',
+    });
+    expect(result.worker).toMatchObject({ id: reviewer.id, modelId: 'code-model' });
+    expect(await readFile(path.join(repo, 'app.ts'), 'utf8')).toBe(source);
+    expect(fakeFetch).toHaveBeenCalledOnce();
   });
 
   it('recusa salvar chave quando o armazenamento seguro não está disponível', async () => {

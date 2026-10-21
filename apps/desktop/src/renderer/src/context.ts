@@ -7,11 +7,21 @@ import type {
   RunDetail,
   SkillSummary,
   Task,
+  TerminalEvent,
   Worker,
   Workspace,
 } from '@hive/core';
 
-export type View = 'overview' | 'mission' | 'agents' | 'providers' | 'skills' | 'about';
+export type View =
+  | 'overview'
+  | 'mission'
+  | 'code'
+  | 'run'
+  | 'agents'
+  | 'providers'
+  | 'skills'
+  | 'settings'
+  | 'about';
 
 export type ModalState =
   | { kind: 'mission' }
@@ -41,6 +51,10 @@ export interface HiveContext {
   openRun(runId: string): Promise<void>;
   /** Live agent events pushed by the main process. Returns an unsubscribe function. */
   onEvent(listener: (event: AgentEvent) => void): () => void;
+  /** Workspace files changed on disk (relative paths). Returns an unsubscribe function. */
+  onFiles(listener: (paths: string[]) => void): () => void;
+  /** Output and state changes from workspace terminal processes. */
+  onTerminal(listener: (event: TerminalEvent) => void): () => void;
   pickWorkspace(): Promise<void>;
 }
 
@@ -57,3 +71,12 @@ export const message = (error: unknown) => (error instanceof Error ? error.messa
 /** Providers that can actually be called: a stored key, or a local server that needs none. */
 export const hasAccess = (provider: ProviderConfig) =>
   provider.enabled && (provider.hasCredential || provider.kind === 'openai-compatible');
+
+/** Agents that can answer now: a model, and a provider the user can reach. */
+export const usableWorkers = (workers: Worker[], providers: ProviderConfig[]) =>
+  workers.filter(
+    (worker) =>
+      worker.providerId &&
+      worker.modelId &&
+      providers.some((provider) => provider.id === worker.providerId && hasAccess(provider)),
+  );

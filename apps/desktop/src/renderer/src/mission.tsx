@@ -13,6 +13,7 @@ import {
 import type { AgentEvent, Approval, Task, TaskStatus, WorkerState } from '@hive/core';
 import { useHive } from './context';
 import { Dot, Empty, PageHeader, runTone, statusLabels, useTask } from './ui';
+import { applyCandidate, discardCandidates, isCandidate, summarizeCandidate } from './comparison';
 
 export const taskLabels: Record<TaskStatus, string> = {
   pending: 'Na fila',
@@ -33,6 +34,12 @@ const workerLabels: Partial<Record<WorkerState, string>> = {
   reviewing: 'Revisando',
   waiting_approval: 'Esperando sua aprovação',
 };
+const activeTaskStatuses = new Set<TaskStatus>([
+  'pending',
+  'blocked',
+  'running',
+  'waiting_approval',
+]);
 const taskTone = (status: TaskStatus) =>
   status === 'running'
     ? 'busy'
@@ -81,6 +88,7 @@ export function MissionPage() {
   const activity = useActivity(detail?.run.id ?? '');
   if (!detail) return null;
   const { run, tasks } = detail;
+  const candidates = tasks.filter(isCandidate);
   const queen = workers.find((worker) => worker.role === 'queen');
   const planning = plan.running || run.status === 'planning';
   const running = run.status === 'running';
@@ -194,6 +202,7 @@ export function MissionPage() {
         <p className="hint">{run.planNotes}</p>
       )}
 
+      {candidates.length > 0 && <ComparisonPanel candidates={candidates} onDone={reload} />}
       {tasks.length ? (
         <div className="task-list">
           {tasks.map((task) => (
@@ -382,5 +391,105 @@ function TaskCard({
         )}
       </div>
     </article>
+  );
+}
+
+function ComparisonPanel({
+  candidates,
+  onDone,
+}: {
+  candidates: Task[];
+  onDone: () => Promise<void>;
+}) {
+  const { workers } = useHive();
+  const action = useTask();
+  const applied = candidates.find((task) => task.status === 'approved');
+  const open = candidates.some((task) => !['approved', 'rejected'].includes(task.status));
+  const settled = candidates.every((task) => !activeTaskStatuses.has(task.status));
+  const run = (work: () => Promise<void>) =>
+    void action.run(async () => {
+      try {
+        await work();
+      } finally {
+        await onDone();
+      }
+    });
+
+  return (
+    <section className="card comparison">
+      <header className="comparison-header">
+        <div>
+          <strong>Comparação de agentes</strong>
+          <small>
+            {applied
+              ? `Aplicada: ${applied.title}`
+              : settled
+                ? 'Escolha a melhor entrega para aplicar no projeto.'
+                : 'Os agentes estão trabalhando nas próprias worktrees.'}
+          </small>
+        </div>
+        {!applied && open && (
+          <button
+            className="secondary"
+            disabled={action.running}
+            onClick={() => run(() => discardCandidates(candidates))}
+          >
+            <X size={13} /> Descartar todas
+          </button>
+        )}
+      </header>
+      <div className="comparison-grid">
+        {candidates.map((task) => {
+          const worker = workers.find((item) => item.id === task.workerId);
+          const summary = summarizeCandidate(task);
+          return (
+            <article key={task.id} className="candidate">
+              <header>
+                <strong>{worker?.name ?? task.title}</strong>
+                <span className="candidate-status">{taskLabels[task.status]}</span>
+              </header>
+              {summary ? (
+                <dl>
+                  <div>
+                    <dt>Arquivos</dt>
+                    <dd>{summary.filesChanged}</dd>
+                  </div>
+                  <div>
+                    <dt>Linhas</dt>
+                    <dd>
+                      <span className="success-text">+{summary.insertions}</span>{' '}
+                      <span className="error-text">−{summary.deletions}</span>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Comandos</dt>
+                    <dd>
+                      {summary.commandsPassed}/{summary.commandsRun} ok
+                    </dd>
+                  </div>
+                </dl>
+              ) : (
+                <p className="hint">Sem resultado ainda.</p>
+              )}
+              {task.result?.summary && <p className="candidate-summary">{task.result.summary}</p>}
+              {task.error && <p className="error-text">{task.error}</p>}
+              {!applied && task.status === 'completed' && (
+                <button
+                  disabled={action.running}
+                  onClick={() => run(() => applyCandidate(task, candidates))}
+                >
+                  <Check size={13} /> Aplicar este
+                </button>
+              )}
+            </article>
+          );
+        })}
+      </div>
+      {action.error && (
+        <p role="alert" className="form-error block">
+          {action.error}
+        </p>
+      )}
+    </section>
   );
 }
