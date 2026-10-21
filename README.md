@@ -1,6 +1,6 @@
 ﻿<div align="center">
 
-<img src="docs/assets/mascot.svg" width="144" alt="Mascote do Hive: abelhinha em pixel art" />
+<img src="design/image.png" width="100%" alt="Hive" />
 
 # Hive
 
