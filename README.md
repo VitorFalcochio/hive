@@ -42,14 +42,7 @@ Você acompanha a execução, abre o código, roda o projeto e revisa os diffs a
 
 ## Como funciona
 
-```mermaid
-flowchart LR
-    A["Você descreve a missão"] --> B["Queen gera o plano"]
-    B --> C["Agentes executam as tarefas"]
-    C --> D["Worktrees Git por tarefa"]
-    D --> E["Você revisa os diffs"]
-    E --> F["Aplicar ou descartar"]
-```
+![Fluxo de funcionamento do Hive: missão, planejamento pela Queen, execução dos agentes e revisão das entregas](design/fluxo.png)
 
 O scheduler respeita a ordem de dependência e o limite de tarefas simultâneas. O runtime nativo permite aos agentes ler, buscar e editar arquivos, consultar recursos de skills e executar comandos conforme a política de aprovação.
 
