@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises';
+import path from 'node:path';
 import * as pty from 'node-pty';
 import { killTree } from '@hive/agents';
 import type { TerminalEvent, TerminalSession, TerminalStatus } from '@hive/core';
@@ -16,6 +17,14 @@ interface ManagedSession {
   stopRequested: boolean;
   finished: boolean;
   scanTail: string;
+  size: { cols: number; rows: number };
+}
+
+/** What every terminal gets so the Hive commands (`agents`, `hive`) work in its shell. */
+export interface TerminalCommands {
+  /** Folder with the command shims, put first on PATH. */
+  binDir: string;
+  env: Record<string, string>;
 }
 
 /**
@@ -80,9 +89,17 @@ function copySession(session: TerminalSession): TerminalSession {
 
 export class TerminalManager {
   private readonly sessions = new Map<string, ManagedSession>();
+  /** Terminals running a Hive command: their keystrokes go to it, not to the shell. */
+  private readonly attached = new Map<string, (data: string) => void>();
+  private commands: TerminalCommands | null = null;
   private disposed = false;
 
   constructor(private readonly emit: (event: TerminalEvent) => void) {}
+
+  /** Terminals opened from now on get the Hive commands. */
+  enableCommands(commands: TerminalCommands): void {
+    this.commands = commands;
+  }
 
   list(workspaceId: string): TerminalSession[] {
     return [...this.sessions.values()]
@@ -115,8 +132,16 @@ export class TerminalManager {
     delete env.NO_COLOR;
     delete env.FORCE_COLOR;
 
+    const id = newId('terminal');
+    if (this.commands) {
+      Object.assign(env, this.commands.env, { HIVE_TERMINAL: id });
+      // Windows spells it Path; whatever the spelling, the shims come first.
+      const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
+      env[key] = [this.commands.binDir, env[key]].filter(Boolean).join(path.delimiter);
+    }
+
     const session: TerminalSession = {
-      id: newId('terminal'),
+      id,
       workspaceId,
       command,
       cwd,
@@ -149,6 +174,7 @@ export class TerminalManager {
       stopRequested: false,
       finished: false,
       scanTail: '',
+      size: { ...size },
     };
     this.sessions.set(session.id, managed);
     this.send({ type: 'started', session: copySession(session) });
@@ -183,14 +209,39 @@ export class TerminalManager {
   write(id: string, data: string): void {
     const managed = this.require(id);
     if (managed.finished || managed.session.status !== 'running') return;
-    managed.terminal.write(data);
+    const command = this.attached.get(id);
+    if (command) command(data);
+    else managed.terminal.write(data);
+  }
+
+  /**
+   * Sends the terminal's keystrokes to `onInput` until the returned function is called, while
+   * a Hive command runs in it. Its output still reaches the terminal through the shell.
+   */
+  attach(id: string, onInput: (data: string) => void): () => void {
+    const managed = this.require(id);
+    if (managed.finished) throw new HiveError('VALIDATION', 'O terminal já foi encerrado.');
+    if (this.attached.has(id))
+      throw new HiveError('CONFLICT', 'Já há um comando do Hive aberto neste terminal.');
+    this.attached.set(id, onInput);
+    return () => {
+      if (this.attached.get(id) === onInput) this.attached.delete(id);
+    };
+  }
+
+  /** The terminal's size and project, for a Hive command running in it. */
+  describe(id: string): { workspaceId: string; cwd: string; cols: number; rows: number } | null {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.finished) return null;
+    return { workspaceId: managed.session.workspaceId, cwd: managed.session.cwd, ...managed.size };
   }
 
   resize(id: string, cols: number, rows: number): void {
     const managed = this.require(id);
     if (managed.finished) return;
+    managed.size = { cols: Math.max(2, cols), rows: Math.max(2, rows) };
     try {
-      managed.terminal.resize(Math.max(2, cols), Math.max(2, rows));
+      managed.terminal.resize(managed.size.cols, managed.size.rows);
     } catch {
       // The process may exit between the check and the resize.
     }
@@ -237,6 +288,7 @@ export class TerminalManager {
   private finish(managed: ManagedSession, status: TerminalStatus, exitCode: number | null) {
     if (managed.finished) return;
     managed.finished = true;
+    this.attached.delete(managed.session.id);
     managed.session.status = status;
     managed.session.exitCode = exitCode;
     managed.session.endedAt = nowIso();

@@ -79,7 +79,8 @@ function MissionSection({
   onOpen(id: string): void;
   onPin(id: string, pinned: boolean): void;
 }) {
-  const [open, setOpen] = useState(tone !== 'done');
+  // Every section starts closed; the counts show what is inside.
+  const [open, setOpen] = useState(false);
   return (
     <section className={`mission-section tone-${tone}`}>
       <button

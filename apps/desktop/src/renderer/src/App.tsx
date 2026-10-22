@@ -11,6 +11,8 @@ import {
   Info,
   Settings as SettingsIcon,
   LayoutGrid,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plug,
   Plus,
   Search,
@@ -32,7 +34,7 @@ import type {
   Workspace,
 } from '@hive/core';
 import { Hive, hasAccess, message, type HiveContext, type ModalState, type View } from './context';
-import { MissionPage } from './mission';
+import { isWaiting, MissionPage } from './mission';
 import { RunPage } from './run';
 import { hasUnsavedChanges, projectHasUnsavedChanges, useCode } from './code/store';
 import { ProjectTabs } from './project-tabs';
@@ -46,7 +48,7 @@ const CodeView = lazy(() => import('./code/CodeView'));
 import { ModalHost } from './modals';
 import { SplashScreen } from './splash';
 import { AgentsPage } from './agents';
-import { Mascot } from './mascot';
+import { AgentBee } from './mascot';
 import { TokenMeter } from './token-meter';
 import { AboutPage, OverviewPage, ProvidersPage, SkillsPage } from './pages';
 import { Dot } from './ui';
@@ -61,6 +63,29 @@ const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   { view: 'providers', label: 'Provedores', icon: Plug },
   { view: 'skills', label: 'Skills', icon: BookOpen },
 ];
+/** A sidebar layout choice remembered on this machine; storage may be unavailable. */
+function useRemembered(key: string): [boolean, (value: boolean) => void] {
+  const [value, setValue] = useState(() => {
+    try {
+      return localStorage.getItem(key) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const remember = useCallback(
+    (next: boolean) => {
+      setValue(next);
+      try {
+        localStorage.setItem(key, next ? '1' : '0');
+      } catch {
+        // Only a convenience: the next visit starts expanded.
+      }
+    },
+    [key],
+  );
+  return [value, remember];
+}
+
 const viewTitles: Record<View, string> = {
   overview: 'Visão geral',
   search: 'Buscar',
@@ -82,6 +107,9 @@ export function App() {
   const [tabs, setTabs] = useState<Workspace[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [missionsByProject, setMissionsByProject] = useState<Record<string, SidebarMission[]>>({});
+  // The whole sidebar shrinks to an icon rail; the menu alone can shrink to one row of icons.
+  const [railed, setRailed] = useRemembered('hive.sidebar.railed');
+  const [menuCompact, setMenuCompact] = useRemembered('hive.sidebar.menuCompact');
   // Projects whose mission list the user collapsed; every project starts expanded.
   const [collapsedProjects, setCollapsedProjects] = useState<string[]>([]);
   // Project in front; file events from other projects are ignored.
@@ -306,19 +334,24 @@ export function App() {
   // The editor stays mounted after its first visit, so tabs and the tree survive navigation.
   const [codeVisited, setCodeVisited] = useState(false);
   if (page === 'code' && !codeVisited) setCodeVisited(true);
-  const activeTasks = summary?.activeTasks.length ?? 0;
 
-  // Ctrl+Shift+F searches the whole project from anywhere, as in VS Code.
+  // Ctrl+Shift+F searches the whole project from anywhere and Ctrl+B shows or hides the
+  // sidebar, as in VS Code.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (event.shiftKey && key === 'f') {
         event.preventDefault();
         setView('search');
+      } else if (!event.shiftKey && key === 'b') {
+        event.preventDefault();
+        setRailed(!railed);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [railed, setRailed]);
 
   async function activate(workspace: Workspace) {
     if (workspace.id === activeWorkspace?.id) return;
@@ -370,10 +403,20 @@ export function App() {
 
   return (
     <Hive.Provider value={context}>
-      <div className={`app-shell platform-${info?.platform ?? 'unknown'}`}>
+      <div
+        className={`app-shell platform-${info?.platform ?? 'unknown'}${railed ? ' sidebar-railed' : ''}`}
+      >
         <div className="titlebar">
           <span className="titlebar-brand">
             <Hexagon size={15} strokeWidth={2.4} /> hive
+            <button
+              className="icon-button sidebar-toggle"
+              aria-label={railed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
+              title={`${railed ? 'Expandir' : 'Recolher'} barra lateral (Ctrl+B)`}
+              onClick={() => setRailed(!railed)}
+            >
+              {railed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </button>
           </span>
           <span className="titlebar-path">
             {activeWorkspace?.name ?? 'sem repositório'}
@@ -390,15 +433,26 @@ export function App() {
           onOpen={() => void context.pickWorkspace()}
         />
         <aside className="sidebar">
-          <nav aria-label="Navegação principal">
+          <button
+            className="sidebar-section sidebar-section-toggle"
+            aria-expanded={!menuCompact}
+            title={menuCompact ? 'Expandir menu' : 'Recolher menu em ícones'}
+            onClick={() => setMenuCompact(!menuCompact)}
+          >
+            <span>Menu</span>
+            <ChevronDown size={13} className={menuCompact ? 'chevron' : 'chevron open'} />
+          </button>
+          <nav aria-label="Navegação principal" className={menuCompact ? 'compact' : undefined}>
             {navigation.map(({ view: item, label, icon: Icon }) => (
               <button
                 key={item}
                 className={page === item ? 'nav-item selected' : 'nav-item'}
                 aria-current={page === item ? 'page' : undefined}
+                aria-label={label}
+                title={railed || menuCompact ? label : undefined}
                 onClick={() => setView(item)}
               >
-                <Icon size={15} /> {label}
+                <Icon size={15} /> <span className="nav-label">{label}</span>
               </button>
             ))}
           </nav>
@@ -431,7 +485,13 @@ export function App() {
                   <button
                     className="tree-root"
                     aria-expanded={open}
-                    title={open && active ? 'Recolher missões' : 'Abrir projeto e missões'}
+                    title={
+                      railed
+                        ? workspace.name
+                        : open && active
+                          ? 'Recolher missões'
+                          : 'Abrir projeto e missões'
+                    }
                     onClick={() => {
                       const collapse = active && open;
                       setCollapsedProjects((current) =>
@@ -447,7 +507,7 @@ export function App() {
                     <span className="truncate">{workspace.name}</span>
                     <span className="count">{missions.length}</span>
                   </button>
-                  {open && (
+                  {open && !railed && (
                     <div className="tree-missions">
                       <MissionCards
                         missions={missions}
@@ -475,15 +535,17 @@ export function App() {
           <div className="sidebar-bottom">
             <button
               className={page === 'settings' ? 'nav-item selected' : 'nav-item'}
+              title={railed ? 'Configurações' : undefined}
               onClick={() => setView('settings')}
             >
-              <SettingsIcon size={15} /> Configurações
+              <SettingsIcon size={15} /> <span className="nav-label">Configurações</span>
             </button>
             <button
               className={page === 'about' ? 'nav-item selected' : 'nav-item'}
+              title={railed ? 'Sobre' : undefined}
               onClick={() => setView('about')}
             >
-              <Info size={15} /> Sobre
+              <Info size={15} /> <span className="nav-label">Sobre</span>
             </button>
           </div>
         </aside>
@@ -538,11 +600,14 @@ export function App() {
             Queen <code>{queen?.modelId ?? 'sem modelo'}</code>
           </span>
           <span className="spacer" />
-          {activeTasks > 0 && (
-            <span>
-              <Mascot size={18} mood="working" /> {activeTasks} tarefa(s) em execução
-            </span>
-          )}
+          <BusyBees
+            tasks={summary?.activeTasks ?? []}
+            chats={summary?.activeChats ?? []}
+            planning={summary?.recentRuns.find((run) => run.status === 'planning') ?? null}
+            workers={workers}
+            onOpenRun={(runId) => void context.openRun(runId)}
+            onOpenTerminal={() => setView('run')}
+          />
           {approvals.length > 0 && (
             <span className="warn-text">{approvals.length} aprovação(ões) pendente(s)</span>
           )}
@@ -575,5 +640,73 @@ export function App() {
         <ModalHost modal={modal} />
       </div>
     </Hive.Provider>
+  );
+}
+
+/**
+ * The agents at work, one bee each, flapping in its own colour: the Queen while she plans, every
+ * agent with a running task, and those answering in a terminal. A click opens where they work.
+ */
+function BusyBees({
+  tasks,
+  chats,
+  planning,
+  workers,
+  onOpenRun,
+  onOpenTerminal,
+}: {
+  tasks: DashboardSummary['activeTasks'];
+  chats: DashboardSummary['activeChats'];
+  planning: DashboardSummary['recentRuns'][number] | null;
+  workers: Worker[];
+  onOpenRun: (runId: string) => void;
+  onOpenTerminal: () => void;
+}) {
+  const queen = workers.find((worker) => worker.role === 'queen');
+  const busy = new Map<string, { worker: Worker; titles: string[]; working: boolean }>();
+  const add = (workerId: string | null, title: string, waiting: boolean) => {
+    const worker = workers.find((item) => item.id === workerId);
+    if (!worker) return;
+    const entry = busy.get(worker.id) ?? { worker, titles: [], working: false };
+    entry.titles.push(waiting ? `${title} (aguardando)` : title);
+    entry.working ||= !waiting;
+    busy.set(worker.id, entry);
+  };
+  for (const task of tasks) add(task.workerId, task.title, isWaiting(task));
+  for (const chat of chats)
+    add(
+      chat.workerId,
+      `no terminal: ${chat.title}`,
+      isWaiting({ status: 'running', workerState: chat.state }),
+    );
+  const runId = tasks[0]?.runId ?? planning?.id;
+  if (!runId && !chats.length) return null;
+  const parts = [
+    tasks.length ? `${tasks.length} tarefa(s) em execução` : '',
+    chats.length ? `${chats.length} no terminal` : '',
+  ].filter(Boolean);
+  const label = parts.length
+    ? parts.join(' · ')
+    : `Queen planejando ${planning?.missionTitle ?? ''}`.trim();
+  return (
+    <button
+      className="busy-bees"
+      title={runId ? 'Abrir execução' : 'Abrir os terminais'}
+      onClick={() => (runId ? onOpenRun(runId) : onOpenTerminal())}
+    >
+      <span className="busy-bees-swarm">
+        {planning && queen && !busy.has(queen.id) && (
+          <span title={`${queen.name}: planejando`}>
+            <AgentBee worker={queen} size={16} mood="working" />
+          </span>
+        )}
+        {[...busy.values()].map(({ worker, titles, working }) => (
+          <span key={worker.id} title={`${worker.name}: ${titles.join(', ')}`}>
+            <AgentBee worker={worker} size={16} mood={working ? 'working' : 'still'} />
+          </span>
+        ))}
+      </span>
+      {label}
+    </button>
   );
 }

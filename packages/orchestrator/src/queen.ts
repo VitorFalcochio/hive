@@ -1,5 +1,5 @@
 import { checkPlanGraph, planSchema, type Plan, type Worker } from '@hive/core';
-import type { ChatClient, ChatMessage } from '@hive/providers';
+import { withRetries, type ChatClient, type ChatMessage } from '@hive/providers';
 import { HiveError } from '@hive/shared';
 
 export interface PlanRequest {
@@ -105,9 +105,14 @@ export async function planMission(request: PlanRequest): Promise<PlanResult> {
   let lastError = 'unknown error';
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     request.onAttempt?.(attempt, attempt === 1 ? null : lastError);
-    const response = await request.chat.chat(
-      { model: request.model, messages, temperature: request.queen.limits.temperature ?? 0.2 },
-      request.signal,
+    // A rate limit or a provider hiccup is waited out a few times before planning gives up.
+    const response = await withRetries(
+      () =>
+        request.chat.chat(
+          { model: request.model, messages, temperature: request.queen.limits.temperature ?? 0.2 },
+          request.signal,
+        ),
+      { signal: request.signal, maxAttempts: 5 },
     );
     usage.promptTokens += response.usage?.promptTokens ?? 0;
     usage.completionTokens += response.usage?.completionTokens ?? 0;

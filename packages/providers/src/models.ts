@@ -9,6 +9,7 @@ interface RawModel {
   supported_parameters?: unknown;
   pricing?: { prompt?: unknown; completion?: unknown };
   active?: unknown;
+  architecture?: { input_modalities?: unknown };
 }
 
 /** Model families are not providers: Nemotron can be served by NVIDIA, OpenRouter and others. */
@@ -74,6 +75,11 @@ export function normalizeModels(endpoint: ProviderEndpoint, body: unknown): Mode
         tools: fromList(['tools']),
         structuredOutput: fromList(['structured_outputs', 'response_format']),
         reasoning: fromList(['reasoning', 'include_reasoning']),
+        vision: Array.isArray(raw.architecture?.input_modalities)
+          ? raw.architecture.input_modalities.includes('image')
+            ? 'yes'
+            : 'no'
+          : 'unknown',
       },
       capabilitySource: supported ? 'provider-metadata' : 'unverified',
       pricing:

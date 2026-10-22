@@ -1,4 +1,11 @@
-import type { ProviderKind, ToolName, WorkerRole } from './domain';
+import {
+  beeColorSchema,
+  type BeeColor,
+  type ProviderKind,
+  type ToolName,
+  type Worker,
+  type WorkerRole,
+} from './domain';
 
 export interface ProviderPreset {
   kind: ProviderKind;
@@ -232,6 +239,52 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     systemPrompt: '',
   },
 };
+
+export const beeColors: Record<BeeColor, { label: string; hex: string }> = {
+  gold: { label: 'Dourada', hex: '#f5b544' },
+  orange: { label: 'Laranja', hex: '#f97316' },
+  lime: { label: 'Lima', hex: '#a3e635' },
+  cyan: { label: 'Ciano', hex: '#22d3ee' },
+  violet: { label: 'Violeta', hex: '#a78bfa' },
+  fuchsia: { label: 'Fúcsia', hex: '#e879f9' },
+  indigo: { label: 'Índigo', hex: '#818cf8' },
+  silver: { label: 'Prata', hex: '#cbd5e1' },
+};
+
+const roleBeeColors: Record<Exclude<WorkerRole, 'custom'>, BeeColor> = {
+  queen: 'gold',
+  architect: 'violet',
+  frontend: 'cyan',
+  backend: 'orange',
+  qa: 'lime',
+  reviewer: 'fuchsia',
+};
+
+/**
+ * The colour an agent's bee is drawn in: the one picked for it, else its role's. Custom agents
+ * without a pick get a stable colour from their id, never the Queen's gold.
+ */
+export function beeColorOf(worker: Pick<Worker, 'id' | 'role' | 'beeColor'>): BeeColor {
+  if (worker.beeColor) return worker.beeColor;
+  if (worker.role !== 'custom') return roleBeeColors[worker.role];
+  const choices = beeColorSchema.options.filter((color) => color !== 'gold');
+  let hash = 0;
+  for (const char of worker.id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return choices[hash % choices.length]!;
+}
+
+/** The colour for a new custom agent: one no agent wears yet, else the least worn. */
+export function nextBeeColor(workers: Pick<Worker, 'id' | 'role' | 'beeColor'>[]): BeeColor {
+  const worn = new Map<BeeColor, number>();
+  for (const worker of workers) {
+    const color = beeColorOf(worker);
+    worn.set(color, (worn.get(color) ?? 0) + 1);
+  }
+  const choices = beeColorSchema.options.filter((color) => color !== 'gold');
+  return choices.reduce((best, color) =>
+    (worn.get(color) ?? 0) < (worn.get(best) ?? 0) ? color : best,
+  );
+}
 
 /** Which kind of work a role does, used to pick a suitable model. */
 type ModelTier = 'planner' | 'coder' | 'reviewer';

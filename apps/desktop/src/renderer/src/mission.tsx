@@ -16,6 +16,7 @@ import { useHive } from './context';
 import { Dot, Empty, PageHeader, runTone, statusLabels, useTask } from './ui';
 import { applyCandidate, discardCandidates, isCandidate, summarizeCandidate } from './comparison';
 import { useShift } from './shift';
+import { AgentBee } from './mascot';
 
 export const taskLabels: Record<TaskStatus, string> = {
   pending: 'Na fila',
@@ -28,6 +29,12 @@ export const taskLabels: Record<TaskStatus, string> = {
   approved: 'Aplicada',
   rejected: 'Descartada',
 };
+/** A task waiting on the user or the provider: its bee rests instead of flapping. */
+export const isWaiting = (task: Pick<Task, 'status' | 'workerState'>) =>
+  task.status === 'waiting_approval' ||
+  task.workerState === 'waiting_approval' ||
+  task.workerState === 'waiting_provider';
+
 const workerLabels: Partial<Record<WorkerState, string>> = {
   planning: 'Preparando a worktree',
   thinking: 'Pensando',
@@ -35,6 +42,7 @@ const workerLabels: Partial<Record<WorkerState, string>> = {
   testing: 'Testando',
   reviewing: 'Revisando',
   waiting_approval: 'Esperando sua aprovação',
+  waiting_provider: 'Aguardando o provedor',
 };
 const activeTaskStatuses = new Set<TaskStatus>([
   'pending',
@@ -262,6 +270,8 @@ export function MissionPage() {
 }
 
 function ApprovalCard({ approval, onDone }: { approval: Approval; onDone: () => Promise<void> }) {
+  const { workers } = useHive();
+  const worker = workers.find((item) => item.id === approval.workerId);
   const task = useTask();
   const answer = (approve: boolean, remember = false) =>
     void task.run(async () => {
@@ -275,8 +285,11 @@ function ApprovalCard({ approval, onDone }: { approval: Approval; onDone: () => 
   return (
     <article className="approval-card" role="alert">
       <div className="approval-head">
-        <ShieldQuestion size={15} />
-        <span className="approval-title">{approval.title}</span>
+        {worker ? <AgentBee worker={worker} size={18} mood="idle" /> : <ShieldQuestion size={15} />}
+        <span className="approval-title">
+          {worker && <strong>{worker.name} · </strong>}
+          {approval.title}
+        </span>
         <div className="approval-actions">
           <button className="ghost" disabled={task.running} onClick={() => answer(false)}>
             <X size={14} /> Negar
@@ -363,6 +376,13 @@ function TaskCard({
         </ul>
       ) : null}
       <small className="task-meta">
+        {worker && (
+          <AgentBee
+            worker={worker}
+            size={14}
+            mood={live && !isWaiting(task) ? 'working' : 'still'}
+          />
+        )}
         {worker?.name ?? 'Agente automático'}
         {task.dependsOn.length > 0 && ` · depende de ${task.dependsOn.join(', ')}`}
         {task.revision

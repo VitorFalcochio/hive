@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { providerPresets, recommendedModelCandidates } from './presets';
+import { workerSchema } from './domain';
+import { beeColorOf, nextBeeColor, providerPresets, recommendedModelCandidates } from './presets';
 
 describe('recommendedModelCandidates', () => {
   it('tenta os modelos gratuitos antes dos pagos', () => {
@@ -28,4 +29,47 @@ it('todo provedor tem URL de chave e resumo do plano', () => {
     expect(preset.keyUrl).toMatch(/^https:\/\//);
     expect(preset.free.summary.length).toBeGreaterThan(0);
   }
+});
+
+describe('cores das abelhas', () => {
+  it('usa a cor escolhida, senão a da função, e nunca o dourado da Queen num agente próprio', () => {
+    expect(beeColorOf({ id: 'a', role: 'frontend', beeColor: 'lime' })).toBe('lime');
+    expect(beeColorOf({ id: 'a', role: 'queen', beeColor: null })).toBe('gold');
+    expect(beeColorOf({ id: 'a', role: 'backend', beeColor: null })).toBe('orange');
+    for (const id of ['w1', 'w2', 'worker_xyz', ''])
+      expect(beeColorOf({ id, role: 'custom', beeColor: null })).not.toBe('gold');
+  });
+
+  it('sugere uma cor que ainda ninguém usa para um agente novo', () => {
+    const team = (['queen', 'architect', 'frontend', 'backend', 'qa', 'reviewer'] as const).map(
+      (role) => ({ id: role, role, beeColor: null }),
+    );
+    expect(['indigo', 'silver']).toContain(nextBeeColor(team));
+    expect(nextBeeColor([...team, { id: 'x', role: 'custom', beeColor: 'indigo' }])).toBe('silver');
+  });
+
+  it('lê agentes salvos antes das cores existirem', () => {
+    const stored = {
+      id: 'w',
+      name: 'Antigo',
+      role: 'qa',
+      description: '',
+      providerId: null,
+      modelId: null,
+      skills: [],
+      tools: [],
+      autoApproveCommands: [],
+      systemPrompt: '',
+      limits: {
+        maxSteps: 10,
+        maxTokens: 10_000,
+        commandTimeoutSec: 60,
+        taskTimeoutMin: 10,
+        temperature: null,
+      },
+      createdAt: '',
+      updatedAt: '',
+    };
+    expect(workerSchema.parse(stored).beeColor).toBeNull();
+  });
 });

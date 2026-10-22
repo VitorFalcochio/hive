@@ -70,6 +70,7 @@ async function setup(
     id: 'w1',
     name: 'Backend',
     role: 'backend',
+    beeColor: null,
     description: '',
     providerId: 'p1',
     modelId: 'm1',

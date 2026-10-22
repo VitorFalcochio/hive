@@ -6,6 +6,8 @@ import {
   rolePresets,
   defaultLimits,
   recommendedModelCandidates,
+  formatCost,
+  usageCost,
   type AutopilotStatus,
   type DashboardSummary,
   type RecommendedSetup,
@@ -37,6 +39,9 @@ import { NativeAgentRuntime, type AgentRuntime } from '@hive/agents';
 import { SkillForgeAdapter } from '@hive/skills';
 import { FileService } from './files';
 import { TerminalManager } from './terminal';
+import { TerminalAgents } from './terminal-agents';
+import { HiveTerminalApp } from './terminal-ui';
+import { startControlServer, writeCommandShims, type ControlServer } from './control-server';
 import { assistCode } from './code-assistant';
 import { startStaticServer, type StaticServer } from './static-server';
 import { locateElement } from './locate';
@@ -67,6 +72,8 @@ export class DesktopService {
   // Each open project keeps its own watcher and preview server, so switching tabs loses nothing.
   private readonly fileServices = new Map<string, FileService>();
   private readonly previewServers = new Map<string, StaticServer>();
+  private control: ControlServer | null = null;
+  private terminalAgents: TerminalAgents | null = null;
 
   constructor(
     database: HiveDatabase,
@@ -120,6 +127,7 @@ export class DesktopService {
           id: newId('worker'),
           name: preset.label,
           role,
+          beeColor: null,
           description: preset.description,
           providerId: null,
           modelId: null,
@@ -150,9 +158,69 @@ export class DesktopService {
     this.advanceShift();
   }
 
+  /**
+   * Gives Hive's terminals the `agents` and `hive` commands: a local endpoint they call, and
+   * the command scripts on their PATH. Terminals opened before this keep working without them.
+   */
+  async enableTerminalCommands(): Promise<void> {
+    const agents = new TerminalAgents({
+      repos: this.repos,
+      chatFor: (providerId) => this.client(providerId),
+      resolveSkills: async (names) => (await this.skills().resolve(names)).skills,
+      onWorkerChanged: (id) => this.changed('worker', id),
+      onChange: () => this.changed('chat'),
+    });
+    this.terminalAgents = agents;
+    this.control = await startControlServer(({ terminalId, command, argument, write, end }) => {
+      const terminal = this.terminals.describe(terminalId);
+      if (!terminal) throw new HiveError('NOT_FOUND', 'Este terminal não é do Hive.');
+      const workspace = this.repos.workspaces.require(terminal.workspaceId, 'Projeto');
+      let detachInput = () => {};
+      const app = new HiveTerminalApp(
+        {
+          write,
+          end: () => {
+            detachInput();
+            end();
+          },
+          size: () => this.terminals.describe(terminalId) ?? terminal,
+        },
+        {
+          workspace,
+          workers: () => this.repos.workers.list(),
+          turn: (workerId, request, history, handlers, signal) =>
+            agents.turn(workspace, workerId, request, history, handlers, signal),
+          cost: (workerId, usage) => {
+            const worker = this.repos.workers.get(workerId);
+            if (!worker?.providerId || !worker.modelId) return null;
+            const model = this.repos.getModel(worker.providerId, worker.modelId) ?? {
+              id: worker.modelId,
+              pricing: null,
+            };
+            const usd = usageCost(model, usage);
+            return usd === null ? null : formatCost(usd);
+          },
+        },
+      );
+      detachInput = this.terminals.attach(terminalId, (data) => app.input(data));
+      app.start(command === 'hive' && argument !== 'agents' ? 'help' : 'agents');
+      return () => {
+        detachInput();
+        app.dispose();
+      };
+    });
+    const binDir = path.join(this.dataDir, 'bin');
+    await writeCommandShims(binDir);
+    this.terminals.enableCommands({
+      binDir,
+      env: { HIVE_CONTROL: this.control.url, HIVE_TOKEN: this.control.token },
+    });
+  }
+
   dispose(): void {
     clearTimeout(this.shiftTimer);
     this.shiftTimer = undefined;
+    void this.control?.close();
     this.terminals.dispose();
     this.files.dispose();
     for (const service of this.fileServices.values()) service.dispose();
@@ -654,6 +722,7 @@ export class DesktopService {
         if (value.providerId) this.repos.providers.require(value.providerId, 'Provedor');
         const result = this.repos.workers.put({
           ...value,
+          beeColor: value.beeColor ?? null,
           id: previous?.id ?? newId('worker'),
           createdAt: previous?.createdAt ?? nowIso(),
           updatedAt: nowIso(),
@@ -851,6 +920,8 @@ export class DesktopService {
       }
       case 'fs.read':
         return this.files.read(parse(channel).path);
+      case 'fs.image':
+        return this.files.image(parse(channel).path);
       case 'fs.write': {
         const value = parse(channel);
         return this.files.write(value.path, value.content, value.expectedMtimeMs);
@@ -942,6 +1013,7 @@ export class DesktopService {
               ...task,
               workerName: this.repos.workers.get(task.workerId ?? '')?.name ?? null,
             })),
+          activeChats: this.terminalAgents?.activeChats() ?? [],
           pendingApprovals: this.repos.approvals.list("status = 'pending'"),
           providers: this.repos.providers.list(),
           recentRuns: runs.slice(0, 8).map((run) => ({

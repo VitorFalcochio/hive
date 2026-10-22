@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Check, CircleAlert, ExternalLink, Send } from 'lucide-react';
+import { Check, CircleAlert, ExternalLink, Eye, EyeOff, Send } from 'lucide-react';
 import {
   providerPresets,
   type ConnectionTest,
@@ -18,6 +18,8 @@ import { Modal, Select, useTask, type SelectOption } from './ui';
 import { taskDiffTab, useCode } from './code/store';
 import { draftKey, loadDraft, saveDraft } from './review';
 import { ReviewDiff } from './review-diff';
+import { ModelPicker } from './model-picker';
+import { AgentBee } from './mascot';
 
 export function ModalHost({ modal }: { modal: ModalState | null }) {
   if (!modal) return null;
@@ -515,8 +517,9 @@ function ModelModal({ worker }: { worker: Worker }) {
   return (
     <Modal
       title={`Modelo de ${worker.name}`}
-      description={`Escolha manual em ${provider?.name ?? 'nenhum provedor'}. Teste antes de salvar.`}
+      description={`Modelos de ${provider?.name ?? 'nenhum provedor'}, grátis primeiro. Teste antes de salvar.`}
       onClose={closeModal}
+      wide
     >
       <form
         onSubmit={(event) => {
@@ -529,25 +532,15 @@ function ModelModal({ worker }: { worker: Worker }) {
           });
         }}
       >
-        <label>
-          Modelo
-          <input
-            autoFocus
-            list="model-options"
-            maxLength={200}
-            value={modelId}
-            placeholder="ID do modelo"
-            onChange={(event) => {
-              setModelId(event.target.value);
-              setTest(null);
-            }}
-          />
-          <datalist id="model-options">
-            {models.map((model) => (
-              <option key={model.id} value={model.id} />
-            ))}
-          </datalist>
-        </label>
+        <ModelPicker
+          models={models}
+          value={id}
+          onChange={(next) => {
+            setModelId(next);
+            setTest(null);
+          }}
+        />
+        <VisionHint vision={models.find((model) => model.id === id)?.capabilities.vision} />
         {test && <p className={test.ok ? 'success-text' : 'form-error'}>{test.message}</p>}
         <FormError error={task.error} />
         <div className="modal-actions">
@@ -573,6 +566,24 @@ function ModelModal({ worker }: { worker: Worker }) {
       </form>
     </Modal>
   );
+}
+
+/** Whether the agent will see images it opens, as the provider's catalog says. */
+function VisionHint({ vision }: { vision: ModelInfo['capabilities']['vision'] | undefined }) {
+  if (vision === 'yes')
+    return (
+      <p className="field-hint vision-hint">
+        <Eye size={13} /> Este modelo enxerga imagens: o agente pode olhar prints, mockups e ícones.
+      </p>
+    );
+  if (vision === 'no')
+    return (
+      <p className="field-hint vision-hint">
+        <EyeOff size={13} /> Este modelo não enxerga imagens; o agente só saberá o nome e o tamanho
+        delas.
+      </p>
+    );
+  return null;
 }
 
 function DiffModal({ task }: { task: Task }) {
@@ -720,7 +731,8 @@ function DiffModal({ task }: { task: Task }) {
 const hiddenEventTypes = new Set(['model.request']);
 
 function ActivityModal({ task }: { task: Task }) {
-  const { closeModal, onEvent } = useHive();
+  const { closeModal, onEvent, workers } = useHive();
+  const worker = workers.find((item) => item.id === task.workerId);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [verbose, setVerbose] = useState(false);
   useEffect(() => {
@@ -744,6 +756,16 @@ function ActivityModal({ task }: { task: Task }) {
   );
   return (
     <Modal title={`Atividade · ${task.title}`} onClose={closeModal} size="xl">
+      {worker && (
+        <p className="activity-agent">
+          <AgentBee
+            worker={worker}
+            size={20}
+            mood={task.status === 'running' ? 'working' : 'still'}
+          />
+          {worker.name}
+        </p>
+      )}
       <label className="checkbox">
         <input type="checkbox" checked={verbose} onChange={(e) => setVerbose(e.target.checked)} />
         Mostrar detalhes técnicos

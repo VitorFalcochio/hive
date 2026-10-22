@@ -6,7 +6,14 @@ import {
   type CommandEvidence,
   type ToolName,
 } from '@hive/core';
-import type { ChatMessage, ToolDefinition } from '@hive/providers';
+import {
+  ProviderError,
+  withRetries,
+  type ChatMessage,
+  type ContentPart,
+  type RetryNotice,
+  type ToolDefinition,
+} from '@hive/providers';
 import { Emitter, HiveError, errorMessage, isAbortError, secretRedactor } from '@hive/shared';
 import type {
   AgentOutcome,
@@ -15,10 +22,20 @@ import type {
   AgentTaskInput,
   RuntimeEvent,
 } from './runtime';
-import { executeTool, toolDefinitions, type ToolContext } from './tools';
+import { executeTool, toolDefinitions, type ToolContext, type ToolImage } from './tools';
 
 const MAX_SKILL_CHARS = 48_000;
 const MAX_TEXT_ONLY_REPLIES = 2;
+/** Images are resent on every step, so only the latest ones stay attached. */
+const MAX_ATTACHED_IMAGES = 2;
+/**
+ * The whole conversation is sent again on every step, so a file read early on is paid for at
+ * each step after it. Outputs older than this many steps are cut down to their beginning.
+ */
+const KEEP_FULL_STEPS = 3;
+const COMPACT_OVER_CHARS = 1_500;
+const COMPACT_TO_CHARS = 400;
+const COMPACTED = '\n[… older output shortened to save tokens; call the tool again if you need it]';
 const WRAP_UP_PROMPT =
   'The token budget for this task is almost used up. Do not call any more tools. Reply now with a final summary: what you did, what you found or changed, and what is still missing.';
 
@@ -32,24 +49,41 @@ export function buildSystemPrompt(input: AgentTaskInput, root: string): string {
   const { worker, skills } = input;
   const role = rolePresets[worker.role]?.label ?? worker.role;
   const shell = process.platform === 'win32' ? 'cmd.exe (Windows)' : '/bin/sh';
-  const parts = [
-    `You are ${worker.name}, a ${role} on a Hive software team. You work autonomously with tools; there is no human in the conversation until you finish.`,
-    worker.systemPrompt.trim(),
-    [
-      '## Environment',
-      `- Your working directory is an isolated Git worktree of the project (${root}). Use paths relative to it. Files outside it are not accessible.`,
-      `- Shell commands run with ${shell} in that directory. Commands may need user approval and have a timeout.`,
-      '- Do not run git commit, push, merge, rebase or reset. Hive snapshots your changes and the user reviews them.',
-      '- Do not install global tools or modify files outside the project.',
-    ].join('\n'),
-    [
-      '## How to work',
-      '1. Explore the relevant files before editing. Read files before changing them.',
-      '2. Make focused, minimal changes that satisfy the acceptance criteria.',
-      "3. Verify with the project's own test, lint or build commands when they exist.",
-      '4. Call `finish` once with a summary: what changed (files), how you verified it (commands and results), and open issues.',
-    ].join('\n'),
-  ];
+  // 'project': the user talks to the agent from a terminal and watches it work in their folder.
+  const live = input.place === 'project';
+  // Every word here is paid on every step, so the terminal prompt is kept short.
+  const parts = live
+    ? [
+        `You are ${worker.name}, ${role} on a Hive team, talking with the user in a terminal. They see each tool call you make.`,
+        worker.systemPrompt.trim(),
+        [
+          '## Rules',
+          `- Project folder: ${root}. Paths are relative to it and edits apply at once. Shell: ${shell}; commands may need the user's approval.`,
+          '- No git commit, push, merge, rebase or reset unless asked. No global installs.',
+          '- Questions and small talk: answer in plain text without tools. A plain-text reply ends your turn.',
+          "- Work: read before editing, keep changes small, check with the project's tests or build when they exist, then reply with the answer itself (what changed, how you checked). Be brief: they saw the steps.",
+          "- Reply in the user's language. Images opened with read_file are shown to you: look at them, do not script pixel analysis.",
+        ].join('\n'),
+      ]
+    : [
+        `You are ${worker.name}, a ${role} on a Hive software team. You work autonomously with tools; there is no human in the conversation until you finish.`,
+        worker.systemPrompt.trim(),
+        [
+          '## Environment',
+          `- Your working directory is an isolated Git worktree of the project (${root}). Use paths relative to it. Files outside it are not accessible.`,
+          `- Shell commands run with ${shell} in that directory. Commands may need user approval and have a timeout.`,
+          '- Do not run git commit, push, merge, rebase or reset. Hive snapshots your changes and the user reviews them.',
+          '- Do not install global tools or modify files outside the project.',
+          '- Images opened with read_file (screenshots, mockups, icons) are shown to you when your model sees images: look at them rather than analysing pixels with scripts.',
+        ].join('\n'),
+        [
+          '## How to work',
+          '1. Explore the relevant files before editing. Read files before changing them.',
+          '2. Make focused, minimal changes that satisfy the acceptance criteria.',
+          "3. Verify with the project's own test, lint or build commands when they exist.",
+          '4. Call `finish` once with a summary: what changed (files), how you verified it (commands and results), and open issues.',
+        ].join('\n'),
+      ];
   if (skills.length) {
     let budget = MAX_SKILL_CHARS;
     const blocks: string[] = [];
@@ -73,14 +107,9 @@ export function buildSystemPrompt(input: AgentTaskInput, root: string): string {
 
 export function buildTaskPrompt(input: AgentTaskInput): string {
   const { task } = input;
-  const lines = [
-    `# Task: ${task.title}`,
-    '',
-    task.description,
-    '',
-    '## Acceptance criteria',
-    ...task.acceptanceCriteria.map((c) => `- ${c}`),
-  ];
+  const lines = [`# Task: ${task.title}`, '', task.description];
+  if (task.acceptanceCriteria.length)
+    lines.push('', '## Acceptance criteria', ...task.acceptanceCriteria.map((c) => `- ${c}`));
   if (task.upstream.length) {
     lines.push('', '## Completed upstream work (already present in your worktree)');
     for (const item of task.upstream) lines.push(`### ${item.title}`, item.summary.slice(0, 4000));
@@ -198,6 +227,7 @@ export class NativeAgentRuntime implements AgentRuntime {
         commandTimeoutMs: limits.commandTimeoutSec * 1000,
         commands,
         emit,
+        vision: true,
         requestApproval: async (request) => {
           emit({
             type: 'worker.state',
@@ -260,15 +290,70 @@ export class NativeAgentRuntime implements AgentRuntime {
           message: `Step ${steps}: calling ${input.model}`,
           data: { step: steps, messages: messages.length },
         });
-        const response = await input.chat.chat(
-          {
-            model: input.model,
+        // Rate limits and provider hiccups are waited out, not failed: the agent keeps its
+        // progress and tries again until the task's own time limit.
+        let waited = false;
+        const onRetry = (notice: RetryNotice) => {
+          waited = true;
+          emit({
+            type: 'worker.state',
+            level: 'debug',
+            message: 'Waiting for the provider',
+            data: { state: 'waiting_provider' },
+          });
+          emit({
+            type: 'info',
+            level: 'warn',
+            message: `${providerTrouble(notice.error)} Nova tentativa em ${formatDelay(notice.delayMs)} (tentativa ${notice.attempt}).`,
+            data: { error: excerpt(errorMessage(notice.error), 300), delayMs: notice.delayMs },
+          });
+        };
+        const request = async () => {
+          const response = await withRetries(
+            () =>
+              input.chat.chat(
+                {
+                  model: input.model,
+                  messages,
+                  tools: wrappingUp ? undefined : tools,
+                  temperature: limits.temperature,
+                },
+                signal,
+              ),
+            { signal, onRetry },
+          );
+          if (waited) {
+            waited = false;
+            emit({
+              type: 'worker.state',
+              level: 'info',
+              message: 'O provedor voltou a responder.',
+              data: { state: 'thinking' },
+            });
+          }
+          return response;
+        };
+        let response;
+        try {
+          response = await request();
+        } catch (error) {
+          // A model without vision rejects the request outright. The images are taken out and
+          // the step is retried once; from then on images are described instead of sent.
+          if (!ctx.vision || !hasImages(messages) || !isRejection(error)) throw error;
+          ctx.vision = false;
+          dropImages(
             messages,
-            tools: wrappingUp ? undefined : tools,
-            temperature: limits.temperature,
-          },
-          signal,
-        );
+            0,
+            'The image could not be shown: your model does not accept images.',
+          );
+          emit({
+            type: 'info',
+            level: 'warn',
+            message: `O modelo ${input.model} não aceita imagens; seguindo sem elas.`,
+            data: { error: excerpt(errorMessage(error), 300) },
+          });
+          response = await request();
+        }
         if (response.usage) {
           usage.promptTokens += response.usage.promptTokens;
           usage.completionTokens += response.usage.completionTokens;
@@ -305,6 +390,10 @@ export class NativeAgentRuntime implements AgentRuntime {
         }
 
         if (!calls.length) {
+          // In a terminal conversation a plain-text reply is the answer; insisting on tools
+          // would only buy a second, paid step that repeats it.
+          const text = response.message.content?.trim();
+          if (input.place === 'project' && text) return outcome('completed', text, null);
           textOnlyReplies++;
           if (textOnlyReplies >= MAX_TEXT_ONLY_REPLIES) {
             emit({
@@ -328,6 +417,7 @@ export class NativeAgentRuntime implements AgentRuntime {
         textOnlyReplies = 0;
 
         let finished: AgentOutcome | null = null;
+        const images: ToolImage[] = [];
         for (const call of calls) {
           let args: Record<string, unknown>;
           try {
@@ -397,11 +487,33 @@ export class NativeAgentRuntime implements AgentRuntime {
             type: 'tool.result',
             level: result.isError ? 'warn' : 'debug',
             message: `${name}: ${excerpt(result.output.split('\n')[0], 160)}`,
-            data: { tool: name, isError: result.isError, output: excerpt(result.output, 2000) },
+            data: {
+              tool: name,
+              isError: result.isError,
+              output: excerpt(result.output, 2000),
+              ...(result.image ? { image: result.image.path } : {}),
+            },
           });
           messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
+          if (result.image) images.push(result.image);
         }
         if (finished) return finished;
+        compactToolOutputs(messages, KEEP_FULL_STEPS);
+        // Tool messages carry text only, so the images follow them in a user message.
+        if (images.length) {
+          messages.push({
+            role: 'user',
+            content: images.flatMap((image): ContentPart[] => [
+              { type: 'text', text: `Image ${image.path}:` },
+              { type: 'image_url', image_url: { url: image.dataUrl } },
+            ]),
+          });
+          dropImages(
+            messages,
+            MAX_ATTACHED_IMAGES,
+            'An image was shown here earlier and is no longer attached; read the file again to look at it.',
+          );
+        }
       }
       return outcome(
         'failed',
@@ -416,6 +528,78 @@ export class NativeAgentRuntime implements AgentRuntime {
       return outcome('failed', '', secretRedactor.redact(errorMessage(error)));
     }
   }
+}
+
+/**
+ * Shortens long tool outputs from before the last `keep` steps (a step is one assistant
+ * message with tool calls). Each output is shortened once, so later prompts stay identical
+ * from there on and providers that cache prompt prefixes keep their cache.
+ */
+export function compactToolOutputs(messages: ChatMessage[], keep: number): void {
+  let steps = 0;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.role === 'assistant' && message.tool_calls?.length) steps++;
+    // Walking backwards, `steps` counts the steps newer than this output.
+    if (steps < keep || message.role !== 'tool') continue;
+    if (message.content.length <= COMPACT_OVER_CHARS || message.content.endsWith(COMPACTED))
+      continue;
+    messages[index] = {
+      ...message,
+      content: message.content.slice(0, COMPACT_TO_CHARS) + COMPACTED,
+    };
+  }
+}
+
+function hasImages(messages: ChatMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message.role === 'user' &&
+      Array.isArray(message.content) &&
+      message.content.some((part) => part.type === 'image_url'),
+  );
+}
+
+/** Replaces all but the `keep` most recent images with `note`. */
+function dropImages(messages: ChatMessage[], keep: number, note: string): void {
+  let kept = 0;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.role !== 'user' || !Array.isArray(message.content)) continue;
+    const parts = [...message.content];
+    for (let part = parts.length - 1; part >= 0; part--) {
+      if (parts[part]!.type !== 'image_url') continue;
+      if (kept < keep) kept++;
+      else parts[part] = { type: 'text', text: note };
+    }
+    messages[index] = { role: 'user', content: parts };
+  }
+}
+
+/**
+ * Whether the provider turned the request itself down, as models without vision do with images,
+ * rather than failing over keys, limits or availability.
+ */
+function isRejection(error: unknown): boolean {
+  if (!(error instanceof ProviderError) || error.status === null) return false;
+  return (
+    error.status >= 400 && error.status < 500 && ![401, 403, 404, 408, 429].includes(error.status)
+  );
+}
+
+/** What is wrong with the provider, in the words the task card shows. */
+function providerTrouble(error: unknown): string {
+  if (error instanceof ProviderError) {
+    if (error.status === 429) return 'Limite de uso do provedor atingido (429).';
+    if (error.status === null) return 'O provedor não respondeu.';
+    return `O provedor falhou (${error.status}).`;
+  }
+  return 'O provedor demorou demais para responder.';
+}
+
+function formatDelay(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
 }
 
 function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

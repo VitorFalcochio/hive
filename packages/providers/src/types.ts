@@ -6,9 +6,13 @@ export interface ToolCall {
   function: { name: string; arguments: string };
 }
 
+/** Part of a multimodal user message; images go as data URLs, which every vision API accepts. */
+export type ContentPart =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export type ChatMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string | ContentPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
 

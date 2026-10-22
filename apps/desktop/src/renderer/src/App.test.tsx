@@ -12,6 +12,7 @@ const emptySummary = {
   workspace: null,
   recentMissions: [],
   activeTasks: [],
+  activeChats: [],
   recentRuns: [],
   pendingApprovals: [],
   usage: { promptTokens: 0, completionTokens: 0, runsCounted: 0 },
@@ -34,6 +35,7 @@ const queen = {
   id: 'w1',
   name: 'Queen · Coordinator',
   role: 'queen',
+  beeColor: null,
   description: 'Coordena.',
   providerId: null as string | null,
   modelId: null as string | null,
@@ -141,7 +143,7 @@ it('cria um agente novo a partir de uma função base', async () => {
   );
 });
 
-it('executa um comando do projeto na tela Rodar', async () => {
+it('abre a tela Rodar com um terminal e o preview ao lado quando um servidor sobe', async () => {
   const workspace = {
     id: 'ws1',
     name: 'meu-app',
@@ -153,7 +155,7 @@ it('executa um comando do projeto na tela Rodar', async () => {
   const session = {
     id: 'terminal-1',
     workspaceId: workspace.id,
-    command: 'npm run dev',
+    command: '',
     cwd: workspace.path,
     status: 'running',
     output: 'Local: http://localhost:5173/',
@@ -171,11 +173,11 @@ it('executa um comando do projeto na tela Rodar', async () => {
   await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
   fireEvent.click(screen.getByRole('button', { name: 'Rodar' }));
   expect(screen.getByRole('heading', { name: 'Rodar projeto' })).toBeTruthy();
-  expect(screen.getByText('Aguardando o servidor local')).toBeTruthy();
 
-  fireEvent.submit(screen.getByLabelText('Comando').closest('form')!);
+  // With no terminal yet, the page opens a shell; the server it prints opens the preview.
   await waitFor(() => expect(screen.getByText('Executando')).toBeTruthy());
-  expect(invoke).toHaveBeenCalledWith('terminal.start', { command: 'npm run dev' });
+  expect(invoke).toHaveBeenCalledWith('terminal.start', { command: '' });
+  expect(invoke.mock.calls.filter(([channel]) => channel === 'terminal.start')).toHaveLength(1);
   await waitFor(() =>
     expect((screen.getByLabelText('Endereço do preview') as HTMLInputElement).value).toBe(
       'http://localhost:5173/',

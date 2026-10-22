@@ -18,6 +18,7 @@ import {
   type SkillValidation,
   type Task,
   type Worker,
+  type WorkerState,
   type Workspace,
 } from './domain';
 
@@ -73,10 +74,21 @@ export interface TaskDiff {
   truncated: boolean;
 }
 
+export interface ActiveChat {
+  id: string;
+  workspaceId: string;
+  workerId: string;
+  /** The request being answered, shortened. */
+  title: string;
+  state: WorkerState;
+}
+
 export interface DashboardSummary {
   workspace: Workspace | null;
   recentMissions: (Mission & { lastRunStatus: Run['status'] | null })[];
   activeTasks: (Task & { workerName: string | null })[];
+  /** Agents answering in a terminal (`agents`), in any open project. */
+  activeChats: ActiveChat[];
   recentRuns: (Run & { missionTitle: string })[];
   pendingApprovals: Approval[];
   usage: { promptTokens: number; completionTokens: number; runsCounted: number };
@@ -130,6 +142,33 @@ export interface FileContent {
   content: string | null;
   binary: boolean;
   tooLarge: boolean;
+  size: number;
+  mtimeMs: number;
+}
+
+/** Image formats the editor shows as a picture instead of text, by lowercase extension. */
+export const IMAGE_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+};
+
+/** MIME type of a path the editor shows as an image, or null for any other file. */
+export function imageType(path: string): string | null {
+  const dot = path.lastIndexOf('.');
+  return dot < 0 ? null : (IMAGE_TYPES[path.slice(dot).toLowerCase()] ?? null);
+}
+
+export interface ImageContent {
+  path: string;
+  mime: string;
+  /** Null when the image is larger than the viewer loads. */
+  dataUrl: string | null;
   size: number;
   mtimeMs: number;
 }
@@ -362,6 +401,7 @@ export const ipcContract = {
   ),
   'preview.serve': channel<{ url: string }>()(z.object({ path: relPath })),
   'fs.read': channel<FileContent>()(z.object({ path: relPath })),
+  'fs.image': channel<ImageContent>()(z.object({ path: relPath })),
   'fs.write': channel<{ mtimeMs: number }>()(
     z.object({
       path: relPath,
@@ -464,7 +504,8 @@ export type HivePush =
         | 'skill'
         | 'workspace'
         | 'settings'
-        | 'autopilot';
+        | 'autopilot'
+        | 'chat';
       id: string | null;
     };
 

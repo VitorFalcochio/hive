@@ -99,4 +99,28 @@ describe('shellFor', () => {
     });
     expect(shellFor('', 'darwin', {})).toEqual({ file: '/bin/sh', args: ['-l'] });
   });
+  it('dá aos terminais os comandos do Hive e desvia o teclado enquanto um deles roda', async () => {
+    const { manager } = setup();
+    manager.enableCommands({ binDir: 'hive-bin', env: { HIVE_CONTROL: 'http://x' } });
+    const node = JSON.stringify(process.execPath);
+    const session = await manager.start(
+      'ws-test',
+      process.cwd(),
+      `${node} -e "console.log(process.env.HIVE_TERMINAL, process.env.HIVE_CONTROL, (process.env.PATH ?? process.env.Path).split(require('path').delimiter)[0]); setTimeout(() => {}, 1500)"`,
+    );
+    await waitUntil(() =>
+      cleanTerminalOutput(manager.list('ws-test')[0]!.output).includes('http://x'),
+    );
+    expect(cleanTerminalOutput(manager.list('ws-test')[0]!.output)).toContain(
+      `${session.id} http://x hive-bin`,
+    );
+
+    const typed: string[] = [];
+    const detach = manager.attach(session.id, (data) => typed.push(data));
+    expect(() => manager.attach(session.id, () => undefined)).toThrow('Já há um comando');
+    manager.write(session.id, 'agents');
+    detach();
+    expect(typed).toEqual(['agents']);
+    expect(manager.describe(session.id)).toMatchObject({ workspaceId: 'ws-test', cols: 100 });
+  });
 });

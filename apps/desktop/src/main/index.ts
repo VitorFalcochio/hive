@@ -226,6 +226,10 @@ app
       return (width > 480 ? image.resize({ width: 480, quality: 'good' }) : image).toDataURL();
     };
     desktopService = service;
+    // Without them the terminals still work, only `agents` and `hive` are missing.
+    await service
+      .enableTerminalCommands()
+      .catch((error: unknown) => console.error('Comandos do terminal indisponíveis:', error));
     syncShift();
     ipcMain.handle(
       INVOKE_CHANNEL,

@@ -338,6 +338,99 @@ nav {
   border-top: 1px solid var(--border);
 }
 
+/* Sidebar toggles: the menu header collapses the menu to one row of icons, and the title bar
+   button (Ctrl+B) shrinks the whole sidebar to an icon rail. */
+.sidebar-toggle {
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+.sidebar-section-toggle {
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  height: auto;
+  padding-top: 0;
+  border: 0;
+  background: transparent;
+}
+.sidebar-section-toggle:hover {
+  background: transparent;
+  color: var(--foreground);
+}
+.sidebar-section-toggle .chevron {
+  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
+  transform: rotate(-90deg);
+}
+.sidebar-section-toggle .chevron.open {
+  transform: rotate(0deg);
+}
+nav.compact {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+nav.compact .nav-item {
+  justify-content: center;
+  padding: 0;
+}
+.sidebar-railed .nav-item {
+  justify-content: center;
+  width: 30px;
+  padding: 0;
+}
+nav.compact .nav-label,
+.sidebar-railed .nav-label {
+  display: none;
+}
+
+.app-shell.sidebar-railed {
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+.sidebar-railed .titlebar-brand {
+  width: auto;
+  padding-right: 12px;
+}
+.sidebar-railed .titlebar-brand .sidebar-toggle {
+  margin-left: 8px;
+}
+.sidebar-railed .sidebar {
+  align-items: center;
+  padding: 10px 6px 8px;
+}
+.sidebar-railed nav {
+  grid-template-columns: none;
+}
+.sidebar-railed .sidebar-section {
+  display: none;
+}
+.sidebar-railed .tree {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-railed .tree-group {
+  padding: 1px 0;
+}
+.sidebar-railed .tree-root {
+  justify-content: center;
+  width: 30px;
+  padding: 0;
+}
+.sidebar-railed .tree-group.active .tree-root {
+  background: var(--selected);
+}
+.sidebar-railed .tree-root .chevron,
+.sidebar-railed .tree-root .truncate,
+.sidebar-railed .tree-root .count,
+.sidebar-railed .tree-empty {
+  display: none;
+}
+.sidebar-railed .sidebar-bottom {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+}
+
 .content {
   min-width: 0;
   min-height: 0;
@@ -372,6 +465,28 @@ nav {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+/* Busy bees: the agents at work, each flapping in its own colour. */
+.busy-bees {
+  height: 22px;
+  gap: 8px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.busy-bees:hover {
+  background: var(--hover);
+}
+.busy-bees-swarm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.busy-bees-swarm > span {
+  display: inline-flex;
 }
 .statusbar code {
   font-size: 11px;
@@ -814,19 +929,82 @@ select:disabled {
   color: var(--muted-foreground);
 }
 .agent-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.agent-name-text {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
-.agent-name-cell > span,
+.agent-name-text > span,
 .agent-name-cell small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agent-name-cell > span {
+.agent-name-text > span {
   font-size: 13.5px;
   font-weight: 500;
+}
+/* Models that see images: an eye next to the model, and a hint in the model picker. */
+.vision-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.vision-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 0;
+}
+/* The agent's bee and its colour swatches, at the top of the profile. */
+.bee-picker {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.bee-picker-preview {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 56px;
+}
+.bee-picker-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.bee-picker-label {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.bee-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bee-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  outline: 1px solid rgb(0 0 0 / 35%);
+  outline-offset: -1px;
+}
+.bee-swatch:hover {
+  transform: scale(1.12);
+}
+.bee-swatch.selected {
+  box-shadow:
+    0 0 0 2px var(--background),
+    0 0 0 3.5px var(--foreground);
 }
 .agent-name-cell small {
   font-size: 12px;
@@ -1080,6 +1258,155 @@ dd {
 }
 .modal.wide {
   width: min(600px, 100%);
+}
+/* Model picker: a searchable list, free models first, with price, vision and context tags. */
+.model-picker {
+  display: grid;
+  gap: 8px;
+}
+.model-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--muted-foreground);
+}
+.model-search:focus-within {
+  border-color: var(--border-strong);
+}
+.model-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  font: 13px var(--font-mono);
+}
+.model-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.model-filter {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+}
+.model-filter:hover {
+  background: var(--hover);
+  color: var(--foreground);
+}
+.model-filter.selected {
+  border-color: var(--border-strong);
+  background: var(--selected);
+  color: var(--foreground);
+}
+.model-count {
+  margin-left: auto;
+  color: var(--subtle-foreground);
+  font: 11px var(--font-mono);
+}
+.model-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  overflow-x: hidden;
+  height: min(340px, 45vh);
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.model-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 8px 8px 4px;
+  background: var(--surface);
+  color: var(--subtle-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.model-row {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--foreground);
+  font-weight: 400;
+  text-align: left;
+}
+.model-row:hover {
+  background: var(--hover);
+}
+.model-row.selected {
+  background: var(--selected);
+}
+.model-row-check {
+  display: inline-flex;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--success);
+}
+.model-row-id {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12.5px var(--font-mono);
+}
+.model-row-tags {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.model-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font: 11px var(--font-mono);
+  white-space: nowrap;
+}
+.model-tag.free {
+  border-color: rgb(76 214 160 / 35%);
+  color: var(--success);
+}
+.model-tag.muted {
+  color: var(--subtle-foreground);
+}
+.model-empty {
+  margin: 0;
+  padding: 24px 8px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  text-align: center;
 }
 .modal-header {
   display: flex;
@@ -1363,10 +1690,15 @@ dd {
   margin: 0 0 8px;
 }
 .task-meta {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 4px;
 }
 .task-card .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   margin-top: 14px;
 }
@@ -1413,6 +1745,18 @@ dd {
   gap: 10px;
   min-height: 30px;
   color: var(--warning);
+}
+.activity-agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.approval-title strong {
+  color: var(--foreground);
+  font-weight: 600;
 }
 .approval-title {
   flex: 1;
@@ -1890,6 +2234,30 @@ pre.command {
   flex: 1;
   min-height: 0;
 }
+.image-viewer {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  /* Checkerboard so transparent pixels are visible on either theme. */
+  background: repeating-conic-gradient(var(--secondary) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+.image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  image-rendering: auto;
+}
+.image-viewer.actual {
+  place-items: start;
+}
+.image-viewer.actual img {
+  max-width: none;
+  max-height: none;
+  margin: auto;
+}
 .editor-empty {
   margin: auto;
   display: grid;
@@ -2274,150 +2642,209 @@ pre.command {
   padding: 0;
   overflow-y: auto;
 }
+/* Rodar: the page is all panes (terminals, agents, the preview), split like Orca or Windows
+   Terminal. Splits share their space through a thin divider that can be dragged. */
 .run-page {
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-height: 620px;
-  gap: 12px;
-  padding: 16px 20px;
+  min-height: 0;
+  overflow: hidden;
   box-sizing: border-box;
 }
-.run-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.run-header h1 {
-  margin: 0;
-  font-size: 15px;
-  white-space: nowrap;
-}
-.run-header .command-bar {
-  flex: 1;
-  min-width: 0;
-}
-.run-workspace {
-  max-width: 320px;
+.page.page-full:has(> .run-page) {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted-foreground);
-  font: 500 12px var(--font-mono);
 }
-.command-bar {
+.pane-split {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 44px;
-  padding: 4px 4px 4px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--subtle-foreground);
-  font: 14px var(--font-mono);
-}
-.command-bar input {
+  flex: 1;
   min-width: 0;
-  flex: 1;
-  height: 36px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--foreground);
-  font: 14px var(--font-mono);
-}
-.command-bar button {
-  height: 34px;
-  padding: 0 18px;
-  font-size: 13.5px;
-}
-/* The preview fills the page; the terminal is a panel docked under it that slides open. */
-.run-stack {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
   min-height: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  overflow: hidden;
-  background: var(--surface);
 }
-.run-panel {
+.pane-split.pane-column {
+  flex-direction: column;
+}
+.pane-slot {
   display: flex;
   min-width: 0;
   min-height: 0;
-  flex-direction: column;
-}
-.preview-panel {
-  flex: 1;
-}
-.terminal-dock {
-  position: relative;
   flex-shrink: 0;
   overflow: hidden;
-  border-top: 1px solid var(--border-strong);
-  transition: height 280ms cubic-bezier(0.2, 0, 0, 1);
 }
-.terminal-dock.dragging {
-  transition: none;
-  user-select: none;
+.pane-slot.grow {
+  flex: 1;
+  flex-shrink: 1;
 }
-.dock-resizer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 2;
-  height: 5px;
-  cursor: row-resize;
+.pane-divider {
+  flex-shrink: 0;
+  background: var(--border);
   transition: background 0.15s;
 }
-.dock-resizer:hover,
-.dragging .dock-resizer {
+.pane-split.pane-row > .pane-divider {
+  width: 1px;
+  cursor: col-resize;
+}
+.pane-split.pane-column > .pane-divider {
+  height: 1px;
+  cursor: row-resize;
+}
+/* A wider invisible grip around the 1px line. */
+.pane-divider {
+  position: relative;
+}
+.pane-divider::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  z-index: 3;
+}
+.pane-divider:hover,
+.resizing-columns .pane-split.pane-row > .pane-divider:hover,
+.resizing-rows .pane-split.pane-column > .pane-divider:hover {
   background: var(--ring);
 }
-.dock-header {
-  min-height: 40px;
-  cursor: pointer;
+.resizing-columns,
+.resizing-columns * {
+  cursor: col-resize !important;
   user-select: none;
 }
-.dock-toggle svg {
-  transition: transform 280ms cubic-bezier(0.2, 0, 0, 1);
+.resizing-rows,
+.resizing-rows * {
+  cursor: row-resize !important;
+  user-select: none;
 }
-.terminal-dock.collapsed .dock-toggle svg {
-  transform: rotate(180deg);
+/* While dragging, frames must not swallow the pointer. */
+.resizing-columns iframe,
+.resizing-rows iframe {
+  pointer-events: none;
 }
-.run-panel-header {
+.pane {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #0b0c0d;
+}
+.pane-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 48px;
-  padding: 0 10px 0 16px;
+  gap: 8px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--sidebar);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  user-select: none;
 }
-.run-panel-title,
-.run-actions,
+.pane.focused .pane-header {
+  color: var(--foreground);
+  box-shadow: inset 0 1px 0 var(--warning);
+}
+.pane-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pane-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.pane-title .terminal-status {
+  margin-left: 2px;
+  font-size: 11.5px;
+}
+.pane-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 1px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.pane:hover .pane-actions,
+.pane.focused .pane-actions {
+  opacity: 1;
+}
+.pane-actions .icon-button {
+  width: 24px;
+  height: 24px;
+}
+.preview-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.preview-pane .preview-address {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.preview-pane .preview-address input,
+.preview-pane .preview-address button,
+.preview-pane .preview-pages {
+  height: 28px;
+}
+.preview-pane .preview-address .icon-button {
+  width: 28px;
+  padding: 0;
+  border-color: transparent;
+}
+.pane-menu {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  min-width: 230px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+.pane-menu button {
+  justify-content: flex-start;
+  gap: 9px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.pane-menu button:hover,
+.pane-menu button:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.pane-menu button svg {
+  color: var(--muted-foreground);
+}
+.pane-menu kbd {
+  margin-left: auto;
+  color: var(--subtle-foreground);
+  font: 10.5px var(--font-mono);
+}
+.pane-menu hr {
+  margin: 4px 2px;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
 .terminal-status {
   display: flex;
   align-items: center;
-}
-.run-panel-title {
-  min-width: 0;
-  gap: 8px;
-  font-size: 13.5px;
-}
-.run-panel-title strong {
-  font-weight: 600;
-}
-.run-actions {
-  flex-shrink: 0;
-  gap: 4px;
 }
 .terminal-status {
   gap: 6px;
@@ -2425,46 +2852,7 @@ pre.command {
   color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 500;
-}
-.preview-host {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--selected);
-  color: var(--muted-foreground);
-  font: 500 11.5px var(--font-mono);
-}
-.terminal-tabs {
-  display: flex;
-  gap: 4px;
-  min-height: 42px;
-  padding: 6px 8px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--border);
-}
-.terminal-tabs button {
-  justify-content: flex-start;
-  min-width: 120px;
-  max-width: 200px;
-  height: 28px;
-  padding: 0 10px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted-foreground);
-  font: 500 12px var(--font-mono);
-}
-.terminal-tabs button:hover,
-.terminal-tabs button.selected {
-  background: var(--selected);
-  color: var(--foreground);
-}
-.terminal-tabs button span:not(.dot) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* The live terminal (xterm.js) fills the panel; xterm sizes its own canvas inside. */
+} /* The live terminal (xterm.js) fills the panel; xterm sizes its own canvas inside. */
 .xterm-host {
   flex: 1;
   min-height: 0;
@@ -2477,67 +2865,6 @@ pre.command {
 }
 .xterm-host .xterm-viewport {
   background: #0b0c0d !important;
-}
-/* Agents menu: opens a coding agent's command line in the project */
-.agent-menu {
-  position: relative;
-}
-.agent-menu-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-.agent-menu-button:hover,
-.agent-menu-button.open {
-  background: var(--hover);
-  color: var(--foreground);
-}
-.agent-menu-list {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 20;
-  display: grid;
-  gap: 2px;
-  width: 240px;
-  padding: 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface-2);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
-}
-.agent-menu-list button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  height: 32px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--foreground);
-  font-size: 13px;
-}
-.agent-menu-list button:hover {
-  background: var(--hover);
-}
-.agent-menu-list code {
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-}
-.agent-menu-list small {
-  padding: 6px 10px 2px;
-  color: var(--subtle-foreground);
-  font-size: 11px;
-  line-height: 1.4;
 }
 .terminal-placeholder,
 .preview-placeholder,
@@ -2810,27 +3137,6 @@ pre.command {
   font-family: var(--font-mono);
   font-size: 11px;
 }
-
-/* Terminal empty state: quick commands to fill the first session */
-.terminal-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  max-width: 320px;
-  margin-top: 6px;
-}
-.terminal-suggestions button {
-  height: 30px;
-  padding: 0 11px;
-  border-color: var(--border-strong);
-  background: transparent;
-  color: var(--foreground);
-}
-.terminal-suggestions code {
-  font: 12px var(--font-mono);
-}
-
 /* Design Mode: toggle between the main styles and the full computed list */
 .design-more {
   height: 26px;
@@ -3329,7 +3635,7 @@ pre.command {
 .mission-cards {
   display: grid;
   gap: 4px;
-  padding: 2px 4px 6px 14px;
+  padding: 2px 4px 6px 32px;
 }
 .mission-section {
   display: grid;
@@ -4387,6 +4693,10 @@ pre.command {
 }
 .mascot-idle .mascot-wing {
   animation: mascot-flutter 3.4s ease-in-out infinite;
+}
+.mascot-still .mascot-hover,
+.mascot-still .mascot-eyes {
+  animation: none;
 }
 .mascot-working .mascot-hover {
   animation-duration: 0.9s;

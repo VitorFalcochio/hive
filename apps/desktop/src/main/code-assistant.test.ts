@@ -7,6 +7,7 @@ const worker: Worker & { providerId: string; modelId: string } = {
   id: 'worker-reviewer',
   name: 'Reviewer',
   role: 'reviewer',
+  beeColor: null,
   description: 'Revisa código.',
   providerId: 'provider-1',
   modelId: 'model-1',

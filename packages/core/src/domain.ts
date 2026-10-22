@@ -36,6 +36,8 @@ export const modelCapabilitiesSchema = z.object({
   tools: capabilitySchema,
   structuredOutput: capabilitySchema,
   reasoning: capabilitySchema,
+  /** Accepts images as input. Catalogs cached before Hive knew about vision read as unknown. */
+  vision: capabilitySchema.default('unknown'),
 });
 export type ModelCapabilities = z.infer<typeof modelCapabilitiesSchema>;
 
@@ -96,6 +98,8 @@ export const workerStateSchema = z.enum([
   'testing',
   'reviewing',
   'waiting_approval',
+  /** Waiting out a rate limit or an unavailable provider before trying again. */
+  'waiting_provider',
   'completed',
   'failed',
   'cancelled',
@@ -123,10 +127,25 @@ export const executionLimitsSchema = z.object({
 });
 export type ExecutionLimits = z.infer<typeof executionLimitsSchema>;
 
+/** Body colour of an agent's bee. Status colours (green, red, blue) are left out on purpose. */
+export const beeColorSchema = z.enum([
+  'gold',
+  'orange',
+  'lime',
+  'cyan',
+  'violet',
+  'fuchsia',
+  'indigo',
+  'silver',
+]);
+export type BeeColor = z.infer<typeof beeColorSchema>;
+
 export const workerSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(60),
   role: workerRoleSchema,
+  /** Null follows the role's colour; agents saved before colours existed read as null. */
+  beeColor: beeColorSchema.nullable().default(null),
   description: z.string().max(500),
   providerId: z.string().nullable(),
   modelId: z.string().nullable(),
@@ -289,6 +308,19 @@ export const planSchema = z.object({
   tasks: z.array(planTaskSchema).min(1).max(12),
 });
 export type Plan = z.infer<typeof planSchema>;
+
+/** One request answered by an agent in a terminal conversation (`agents`), for token use. */
+export const chatTurnSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  workerId: z.string(),
+  status: z.enum(['completed', 'failed', 'cancelled']),
+  promptTokens: z.number().int().min(0),
+  completionTokens: z.number().int().min(0),
+  startedAt: z.string(),
+  finishedAt: z.string(),
+});
+export type ChatTurn = z.infer<typeof chatTurnSchema>;
 
 /* ---------------------------------------------------------------- Events and approvals */
 

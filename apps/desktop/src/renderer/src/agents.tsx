@@ -1,8 +1,22 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
-import { Check, ChevronRight, Plus, SlidersHorizontal, Sparkles, Trash2, X } from 'lucide-react';
+import {
+  Check,
+  ChevronRight,
+  Eye,
+  Plus,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   allTools,
+  beeColorOf,
+  beeColors,
+  beeColorSchema,
+  nextBeeColor,
   rolePresets,
+  type BeeColor,
   type RecommendedSetup,
   type ToolName,
   type Worker,
@@ -11,6 +25,7 @@ import {
 } from '@hive/core';
 import { hasAccess, useHive } from './context';
 import { Dot, PageHeader, Select, useTask } from './ui';
+import { AgentBee, Mascot } from './mascot';
 
 const roleOrder: WorkerRole[] = [
   'queen',
@@ -113,8 +128,11 @@ export function AgentsPage() {
               {roleLabels[worker.role]}
             </span>
             <span role="cell" className="agent-name-cell">
-              <span>{worker.name}</span>
-              <small>{worker.description || 'Sem descrição'}</small>
+              <AgentBee worker={worker} size={22} />
+              <span className="agent-name-text">
+                <span>{worker.name}</span>
+                <small>{worker.description || 'Sem descrição'}</small>
+              </span>
             </span>
             <AgentModel worker={worker} />
             <span role="cell">
@@ -200,8 +218,10 @@ function NewAgent({
   onCreated: (id: string) => void;
   onClose: () => void;
 }) {
-  const { refresh, notify } = useHive();
+  const { workers, refresh, notify } = useHive();
   const [draft, setDraft] = useState<WorkerInput | null>(null);
+  // A custom agent without a pick wears the colour fewest agents wear, chosen when it is created.
+  const suggested = nextBeeColor(workers);
   const task = useTask();
 
   // New agents start from the limits chosen in Configurações.
@@ -210,6 +230,7 @@ function NewAgent({
       setDraft({
         name: '',
         role: 'custom',
+        beeColor: null,
         description: '',
         providerId: null,
         modelId: null,
@@ -240,6 +261,7 @@ function NewAgent({
         void task.run(async () => {
           const created = await window.hive.invoke('worker.save', {
             ...draft,
+            beeColor: draft.beeColor ?? (draft.role === 'custom' ? suggested : null),
             name: draft.name.trim(),
             description: draft.description.trim(),
           });
@@ -272,6 +294,11 @@ function NewAgent({
               .map((role) => ({ value: role, label: roleLabels[role] }))}
           />
         </label>
+        <BeePicker
+          value={draft.beeColor}
+          fallback={draft.role === 'custom' ? suggested : beeColorOf({ ...draft, id: '' })}
+          onChange={(beeColor) => patch({ beeColor })}
+        />
         <ProfileFields value={draft} onChange={patch} />
       </section>
       <ToolsSection tools={draft.tools} commands={draft.autoApproveCommands} onChange={patch} />
@@ -301,6 +328,7 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
   );
   const dirty =
     draft.name !== worker.name ||
+    draft.beeColor !== worker.beeColor ||
     draft.description !== worker.description ||
     draft.systemPrompt !== worker.systemPrompt ||
     draft.tools.join() !== worker.tools.join() ||
@@ -356,6 +384,11 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
     >
       <section className="agent-section">
         <h3>Perfil</h3>
+        <BeePicker
+          value={draft.beeColor}
+          fallback={beeColorOf({ ...draft, beeColor: null })}
+          onChange={(beeColor) => patch({ beeColor })}
+        />
         <ProfileFields value={draft} onChange={patch} />
       </section>
       <ToolsSection tools={draft.tools} commands={draft.autoApproveCommands} onChange={patch} />
@@ -401,6 +434,7 @@ function AgentModel({ worker }: { worker: Worker }) {
   }
 
   const failed = setup && !setup.assignments[0]?.modelId;
+  const sees = useSees(worker);
   return (
     <>
       <span role="cell">
@@ -426,6 +460,11 @@ function AgentModel({ worker }: { worker: Worker }) {
             <code className={worker.modelId ? undefined : 'unset'}>
               {worker.modelId ?? 'sem modelo'}
             </code>
+            {sees && (
+              <span className="vision-badge" title="Este modelo enxerga imagens">
+                <Eye size={13} aria-label="Enxerga imagens" />
+              </span>
+            )}
             {setup && !failed && (
               <span className="success-text">
                 <Check size={13} /> testado
@@ -449,6 +488,71 @@ function AgentModel({ worker }: { worker: Worker }) {
         )}
       </span>
     </>
+  );
+}
+
+/** Whether the agent's model accepts images, from the provider's cached catalog. */
+function useSees(worker: Worker): boolean {
+  const [sees, setSees] = useState(false);
+  const { providerId, modelId } = worker;
+  useEffect(() => {
+    if (!providerId || !modelId) return setSees(false);
+    let active = true;
+    void window.hive
+      .invoke('provider.models', { providerId, refresh: false })
+      .then((models) => {
+        if (active)
+          setSees(models.find((model) => model.id === modelId)?.capabilities.vision === 'yes');
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [providerId, modelId]);
+  return sees;
+}
+
+/**
+ * The agent's bee and the colours it can wear. `fallback` is the colour it wears with no pick
+ * (its role's), which "Cor da função" goes back to.
+ */
+function BeePicker({
+  value,
+  fallback,
+  onChange,
+}: {
+  value: BeeColor | null;
+  fallback: BeeColor;
+  onChange: (color: BeeColor | null) => void;
+}) {
+  const current = value ?? fallback;
+  return (
+    <div className="bee-picker">
+      <span className="bee-picker-preview">
+        <Mascot size={44} color={beeColors[current].hex} />
+      </span>
+      <div className="bee-picker-body">
+        <span className="bee-picker-label">
+          Cor da abelha · {beeColors[current].label}
+          {value === null && <span className="optional"> (da função)</span>}
+        </span>
+        <div className="bee-swatches" role="radiogroup" aria-label="Cor da abelha">
+          {beeColorSchema.options.map((color) => (
+            <button
+              key={color}
+              type="button"
+              role="radio"
+              aria-checked={color === current}
+              aria-label={beeColors[color].label}
+              title={beeColors[color].label}
+              className={color === current ? 'bee-swatch selected' : 'bee-swatch'}
+              style={{ background: beeColors[color].hex }}
+              onClick={() => onChange(color === fallback ? null : color)}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -83,6 +83,16 @@ describe('FileService', { timeout: 30_000 }, () => {
     expect(read).toMatchObject({ binary: true, content: null });
   });
 
+  it('entrega imagens como data URL e recusa outros formatos', async () => {
+    const { root, files } = await setup();
+    const pixels = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2]);
+    await writeFile(path.join(root, 'logo.PNG'), pixels);
+    const image = await files.image('logo.PNG');
+    expect(image).toMatchObject({ path: 'logo.PNG', mime: 'image/png', size: pixels.length });
+    expect(image.dataUrl).toBe(`data:image/png;base64,${pixels.toString('base64')}`);
+    await expect(files.image('a.txt')).rejects.toThrow('não suportado');
+  });
+
   it('busca no projeto inteiro respeitando o .gitignore e incluindo arquivos novos', async () => {
     const { root, files } = await setup();
     await writeFile(path.join(root, '.gitignore'), 'ignorado.txt\n');

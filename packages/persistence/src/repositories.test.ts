@@ -56,3 +56,28 @@ it('soma só os tokens das tarefas que terminaram a partir do horário dado', ()
     completionTokens: 300,
   });
 });
+
+it('soma também as conversas com agentes no terminal', () => {
+  const db = new HiveDatabase(':memory:');
+  databases.push(db);
+  const repos = new Repositories(db);
+  repos.tasks.put(task('today', '2026-10-21T09:00:00.000Z', 1_000));
+  const turn = (id: string, finishedAt: string, tokens: number) =>
+    repos.chatTurns.put({
+      id,
+      workspaceId: 'ws',
+      workerId: 'w',
+      status: 'completed',
+      promptTokens: tokens,
+      completionTokens: tokens / 10,
+      startedAt: finishedAt,
+      finishedAt,
+    });
+  turn('yesterday', '2026-10-20T23:00:00.000Z', 9_000);
+  turn('today', '2026-10-21T10:00:00.000Z', 500);
+
+  expect(repos.usageSince('2026-10-21T03:00:00.000Z')).toEqual({
+    promptTokens: 1_500,
+    completionTokens: 150,
+  });
+});

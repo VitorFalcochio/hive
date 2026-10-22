@@ -6,14 +6,17 @@ import type {
   FileEntry,
   FileDiffContent,
   GitStatusSummary,
+  ImageContent,
   SearchMatch,
   SearchOptions,
   SearchResult,
 } from '@hive/core';
+import { imageType } from '@hive/core';
 import { HiveError, resolveInside, toPosixRelative } from '@hive/shared';
 import { git, inspectRepository, statusPorcelain } from '@hive/workspace';
 
 const MAX_EDITABLE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 /** Folders that are noise in an explorer and in change notifications. */
 const HIDDEN = new Set(['.git']);
 const QUIET = new Set(['.git', 'node_modules', '.local', 'dist', 'out', '.next', 'coverage']);
@@ -172,6 +175,19 @@ export class FileService {
     const buffer = await readFile(full);
     if (isBinary(buffer)) return { ...base, content: null, binary: true, tooLarge: false };
     return { ...base, content: buffer.toString('utf8'), binary: false, tooLarge: false };
+  }
+
+  /** An image as a data URL, for the editor's image viewer. */
+  async image(relative: string): Promise<ImageContent> {
+    const { full, rel } = await this.resolve(relative);
+    const mime = imageType(rel);
+    if (!mime) throw new HiveError('VALIDATION', 'Formato de imagem não suportado.');
+    const info = await stat(full);
+    if (!info.isFile()) throw new HiveError('VALIDATION', 'Não é um arquivo.');
+    const base = { path: rel, mime, size: info.size, mtimeMs: info.mtimeMs };
+    if (info.size > MAX_IMAGE_BYTES) return { ...base, dataUrl: null };
+    const buffer = await readFile(full);
+    return { ...base, dataUrl: `data:${mime};base64,${buffer.toString('base64')}` };
   }
 
   /**

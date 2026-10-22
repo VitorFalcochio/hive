@@ -30,6 +30,11 @@ export interface AgentTaskInput {
   chat: ChatClient;
   /** Absolute path of the isolated worktree. All file tools are confined to it. */
   worktreePath: string;
+  /**
+   * 'project' when the agent works in the user's own folder with the user watching from a
+   * terminal (no worktree, no snapshot); missions use the default 'worktree'.
+   */
+  place?: 'worktree' | 'project';
   skills: ResolvedSkill[];
   limits: ExecutionLimits;
   /** Asks the user whether a command may run. Resolves false when denied. */

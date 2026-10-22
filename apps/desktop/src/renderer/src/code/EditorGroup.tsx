@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Columns2, FileDiff, Rows2, X } from 'lucide-react';
-import { message } from '../context';
+import { Columns2, FileDiff, Maximize, Rows2, Scan, X } from 'lucide-react';
+import { imageType, type ImageContent } from '@hive/core';
+import { message, useHive } from '../context';
 import {
   diffModel,
   editorOptions,
@@ -96,7 +97,9 @@ export function EditorGroup({
       </div>
       <div className="editor-body">
         {active ? (
-          active.kind === 'file' ? (
+          active.kind === 'file' && imageType(active.path) ? (
+            <ImagePane key={`${index}:${active.id}`} path={active.path} />
+          ) : active.kind === 'file' ? (
             <FilePane
               key={`${index}:${active.id}`}
               path={active.path}
@@ -230,6 +233,90 @@ function FilePane({
       ) : (
         <div ref={host} className="monaco-host" />
       )}
+    </>
+  );
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Images open as a picture, fitted to the pane or at real size, and follow changes on disk. */
+function ImagePane({ path }: { path: string }) {
+  const { onFiles } = useHive();
+  const [image, setImage] = useState<ImageContent | null>(null);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [actualSize, setActualSize] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let disposed = false;
+    const load = () =>
+      window.hive
+        .invoke('fs.image', { path })
+        .then((content) => {
+          if (disposed) return;
+          setError('');
+          setImage(content);
+        })
+        .catch((failure: unknown) => {
+          if (!disposed) setError(message(failure));
+        });
+    void load();
+    const off = onFiles((paths) => {
+      if (paths.includes(path)) void load();
+    });
+    return () => {
+      disposed = true;
+      off();
+    };
+  }, [path, onFiles]);
+
+  if (error)
+    return (
+      <div className="editor-empty">
+        <p>{error}</p>
+      </div>
+    );
+  if (!image) return null;
+  if (!image.dataUrl)
+    return (
+      <div className="editor-empty">
+        <p>Imagem grande demais para visualizar ({formatBytes(image.size)}).</p>
+      </div>
+    );
+  return (
+    <>
+      <div className="diff-header">
+        <span className="truncate">
+          {dimensions ? `${dimensions.width} × ${dimensions.height} px · ` : ''}
+          {formatBytes(image.size)}
+        </span>
+        <button
+          className="icon-button"
+          title={actualSize ? 'Ajustar à área' : 'Tamanho real'}
+          aria-label={actualSize ? 'Ajustar à área' : 'Tamanho real'}
+          onClick={() => setActualSize((value) => !value)}
+        >
+          {actualSize ? <Maximize size={14} /> : <Scan size={14} />}
+        </button>
+      </div>
+      <div className={actualSize ? 'image-viewer actual' : 'image-viewer'}>
+        <img
+          src={image.dataUrl}
+          alt={path}
+          draggable={false}
+          onLoad={(event) =>
+            setDimensions({
+              width: event.currentTarget.naturalWidth,
+              height: event.currentTarget.naturalHeight,
+            })
+          }
+          onError={() => setError('Não foi possível decodificar esta imagem.')}
+        />
+      </div>
     </>
   );
 }

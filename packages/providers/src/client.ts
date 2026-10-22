@@ -1,6 +1,7 @@
 import { HiveError, errorMessage, secretRedactor } from '@hive/shared';
 import type { ModelInfo } from '@hive/core';
 import { normalizeModels } from './models';
+import { ProviderError, parseRetryAfter } from './retry';
 import type { ChatClient, ChatRequest, ChatResponse, ProviderEndpoint, ToolCall } from './types';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -54,9 +55,9 @@ export class OpenAICompatibleClient implements ChatClient {
           'TIMEOUT',
           `Provider did not respond within ${Math.round(timeoutMs / 1000)}s.`,
         );
-      throw new HiveError(
-        'PROVIDER',
+      throw new ProviderError(
         `Could not reach ${this.endpoint.baseUrl}: ${secretRedactor.redact(errorMessage(error))}`,
+        null,
       );
     }
     if (!response.ok) throw await this.httpError(response);
@@ -90,6 +91,7 @@ export class OpenAICompatibleClient implements ChatClient {
     }
     detail = secretRedactor.redact(detail).slice(0, 500);
     const status = response.status;
+    const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
     if (status === 401 || status === 403) {
       return new HiveError(
         'PROVIDER_AUTH',
@@ -97,13 +99,17 @@ export class OpenAICompatibleClient implements ChatClient {
       );
     }
     if (status === 429)
-      return new HiveError('PROVIDER', `Rate limited or out of quota (429). ${detail}`.trim());
-    if (status === 404)
-      return new HiveError(
-        'PROVIDER',
-        `Not found (404) — check the endpoint and model id. ${detail}`.trim(),
+      return new ProviderError(
+        `Rate limited or out of quota (429). ${detail}`.trim(),
+        status,
+        retryAfter,
       );
-    return new HiveError('PROVIDER', `Provider error ${status}. ${detail}`.trim());
+    if (status === 404)
+      return new ProviderError(
+        `Not found (404) — check the endpoint and model id. ${detail}`.trim(),
+        status,
+      );
+    return new ProviderError(`Provider error ${status}. ${detail}`.trim(), status, retryAfter);
   }
 
   async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
@@ -143,12 +149,13 @@ export class OpenAICompatibleClient implements ChatClient {
         finish_reason?: string | null;
       }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };
-      error?: { message?: string };
+      error?: { message?: string; code?: unknown };
     };
+    // Gateways report upstream failures (an upstream 429, say) in a 200 body.
     if (body.error)
-      throw new HiveError(
-        'PROVIDER',
+      throw new ProviderError(
         secretRedactor.redact(body.error.message ?? 'Provider returned an error.'),
+        typeof body.error.code === 'number' ? body.error.code : 400,
       );
     const choice = body.choices?.[0];
     if (!choice?.message)

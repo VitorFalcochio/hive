@@ -1,6 +1,7 @@
 import {
   agentEventSchema,
   approvalSchema,
+  chatTurnSchema,
   defaultSettings,
   missionSchema,
   modelInfoSchema,
@@ -12,6 +13,7 @@ import {
   workspaceSchema,
   type AgentEvent,
   type Approval,
+  type ChatTurn,
   type EventQuery,
   type Mission,
   type ModelInfo,
@@ -96,6 +98,7 @@ export class Repositories {
   readonly runs: JsonTable<Run>;
   readonly tasks: JsonTable<Task>;
   readonly approvals: JsonTable<Approval>;
+  readonly chatTurns: JsonTable<ChatTurn>;
 
   constructor(private readonly db: HiveDatabase) {
     this.workspaces = new JsonTable(db, 'workspaces', workspaceSchema, (w) => ({ path: w.path }));
@@ -116,6 +119,9 @@ export class Repositories {
       run_id: a.runId,
       task_id: a.taskId,
       status: a.status,
+    }));
+    this.chatTurns = new JsonTable(db, 'chat_turns', chatTurnSchema, (c) => ({
+      workspace_id: c.workspaceId,
     }));
   }
 
@@ -313,6 +319,12 @@ export class Repositories {
       if (!task.finishedAt || task.finishedAt < since) continue;
       promptTokens += task.result?.usage.promptTokens ?? 0;
       completionTokens += task.result?.usage.completionTokens ?? 0;
+    }
+    // Conversations with agents in the terminal spend tokens too.
+    for (const turn of this.chatTurns.list('updated_at >= ?', since)) {
+      if (turn.finishedAt < since) continue;
+      promptTokens += turn.promptTokens;
+      completionTokens += turn.completionTokens;
     }
     return { promptTokens, completionTokens };
   }

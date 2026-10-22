@@ -2,6 +2,7 @@ import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   commandMatchesAllowList,
+  imageType,
   type CommandEvidence,
   type ToolName,
   type Worker,
@@ -14,6 +15,12 @@ import type { RuntimeEvent } from './runtime';
 
 const MAX_TOOL_OUTPUT = 24_000;
 const MAX_READ_BYTES = 512 * 1024;
+/** Lines read_file returns when no range is given. */
+const READ_WINDOW = 400;
+/** Vision APIs reject large images (OpenAI and Gemini at about 20 MB, others lower). */
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+/** Formats every vision API accepts; BMP, ICO and AVIF are not widely supported. */
+const VISION_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const SKIP_DIRS = new Set([
   '.git',
   'node_modules',
@@ -35,11 +42,21 @@ export interface ToolContext {
   requestApproval: (request: { command: string }) => Promise<boolean>;
   emit: (event: RuntimeEvent) => void;
   commands: CommandEvidence[];
+  /** False once the model turned an image down; images are then described, not sent. */
+  vision: boolean;
+}
+
+export interface ToolImage {
+  path: string;
+  mime: string;
+  dataUrl: string;
 }
 
 export interface ToolOutcome {
   output: string;
   isError: boolean;
+  /** An image the model should look at, sent right after the tool results. */
+  image?: ToolImage;
 }
 
 function truncate(text: string, limit = MAX_TOOL_OUTPUT): string {
@@ -90,7 +107,8 @@ export const toolDefinitions: Record<ToolName | 'finish', ToolDefinition> = {
     type: 'function',
     function: {
       name: 'read_file',
-      description: 'Read a text file. Optionally pass a 1-based line range.',
+      description:
+        'Read a text file, optionally a 1-based line range. Images (PNG, JPEG, GIF, WebP) are shown to you so you can look at them: screenshots, mockups, icons, diagrams.',
       parameters: {
         type: 'object',
         properties: {
@@ -216,6 +234,34 @@ async function listDir(ctx: ToolContext, args: Record<string, unknown>): Promise
   return lines.join('\n') || '(empty directory)';
 }
 
+/** An image file for the model to see, or why it cannot be shown. */
+async function readImage(ctx: ToolContext, file: string, mime: string): Promise<ToolOutcome> {
+  const relative = toPosixRelative(ctx.root, file);
+  const info = await lstat(file);
+  const size = `${Math.max(1, Math.round(info.size / 1024))} KB`;
+  if (!ctx.vision)
+    return {
+      output: `${relative} is an image (${mime}, ${size}). Your model cannot see images, so its contents are not available.`,
+      isError: false,
+    };
+  if (!VISION_TYPES.has(mime))
+    return {
+      output: `${relative} is an image (${mime}, ${size}) in a format that cannot be shown. PNG, JPEG, GIF and WebP can.`,
+      isError: false,
+    };
+  if (info.size > MAX_IMAGE_BYTES)
+    return {
+      output: `${relative} is an image of ${size}, larger than the 4 MB that can be shown.`,
+      isError: true,
+    };
+  const data = (await readFile(file)).toString('base64');
+  return {
+    output: `${relative} is an image (${mime}, ${size}). It is attached in the next message.`,
+    isError: false,
+    image: { path: relative, mime, dataUrl: `data:${mime};base64,${data}` },
+  };
+}
+
 async function readTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
   const file = await resolveInside(ctx.root, str(args, 'path'));
   const info = await lstat(file);
@@ -226,12 +272,14 @@ async function readTool(ctx: ToolContext, args: Record<string, unknown>): Promis
   if (await isBinary(file)) return '(binary file — not shown)';
   const lines = (await readFile(file, 'utf8')).split(/\r?\n/);
   const start = Math.max(1, Number(args.start_line ?? 1));
-  const end = Math.min(lines.length, Number(args.end_line ?? Math.min(lines.length, start + 1999)));
+  // A whole file is rarely needed, and every line read is paid again on later steps.
+  const end = Math.min(lines.length, Number(args.end_line ?? start + READ_WINDOW - 1));
   const body = lines
     .slice(start - 1, end)
     .map((line, index) => `${String(start + index).padStart(5)}  ${line}`)
     .join('\n');
-  return `${toPosixRelative(ctx.root, file)} (lines ${start}-${end} of ${lines.length})\n${body}`;
+  const more = end < lines.length ? `; pass start_line=${end + 1} to read on` : '';
+  return `${toPosixRelative(ctx.root, file)} (lines ${start}-${end} of ${lines.length}${more})\n${body}`;
 }
 
 async function searchTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
@@ -409,8 +457,12 @@ export async function executeTool(
     switch (name) {
       case 'list_dir':
         return { output: await listDir(ctx, args), isError: false };
-      case 'read_file':
+      case 'read_file': {
+        const file = await resolveInside(ctx.root, str(args, 'path'));
+        const mime = imageType(file);
+        if (mime) return await readImage(ctx, file, mime);
         return { output: truncate(await readTool(ctx, args)), isError: false };
+      }
       case 'search':
         return { output: truncate(await searchTool(ctx, args)), isError: false };
       case 'write_file':

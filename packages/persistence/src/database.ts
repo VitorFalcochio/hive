@@ -42,6 +42,10 @@ const migrations: string[] = [
   CREATE INDEX events_task ON events(task_id, seq);
   CREATE INDEX events_worker ON events(worker_id, seq);
   `,
+  `
+  CREATE TABLE chat_turns (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL);
+  CREATE INDEX chat_turns_updated ON chat_turns(updated_at);
+  `,
 ];
 
 export class HiveDatabase {
