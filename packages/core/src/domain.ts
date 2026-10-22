@@ -140,12 +140,26 @@ export const beeColorSchema = z.enum([
 ]);
 export type BeeColor = z.infer<typeof beeColorSchema>;
 
+/** The soldier bees every agent but the Queen leads as captain, one at work at a time. */
+export const soldierRoleSchema = z.enum(['scout', 'builder', 'tester', 'reviewer', 'researcher']);
+export type SoldierRole = z.infer<typeof soldierRoleSchema>;
+
+export const soldierSchema = z.object({
+  role: soldierRoleSchema,
+  enabled: z.boolean(),
+  /** Null works with the captain's model, on the captain's provider. */
+  modelId: z.string().nullable(),
+});
+export type Soldier = z.infer<typeof soldierSchema>;
+
 export const workerSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(60),
   role: workerRoleSchema,
   /** Null follows the role's colour; agents saved before colours existed read as null. */
   beeColor: beeColorSchema.nullable().default(null),
+  /** Only soldiers changed from the defaults are stored; read the full squad with `squadOf`. */
+  squad: z.array(soldierSchema).default([]),
   description: z.string().max(500),
   providerId: z.string().nullable(),
   modelId: z.string().nullable(),

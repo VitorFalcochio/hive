@@ -128,6 +128,7 @@ export class DesktopService {
           name: preset.label,
           role,
           beeColor: null,
+          squad: [],
           description: preset.description,
           providerId: null,
           modelId: null,
@@ -723,6 +724,7 @@ export class DesktopService {
         const result = this.repos.workers.put({
           ...value,
           beeColor: value.beeColor ?? null,
+          squad: value.squad ?? [],
           id: previous?.id ?? newId('worker'),
           createdAt: previous?.createdAt ?? nowIso(),
           updatedAt: nowIso(),

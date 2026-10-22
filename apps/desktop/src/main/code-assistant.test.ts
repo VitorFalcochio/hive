@@ -8,6 +8,7 @@ const worker: Worker & { providerId: string; modelId: string } = {
   name: 'Reviewer',
   role: 'reviewer',
   beeColor: null,
+  squad: [],
   description: 'Revisa código.',
   providerId: 'provider-1',
   modelId: 'model-1',

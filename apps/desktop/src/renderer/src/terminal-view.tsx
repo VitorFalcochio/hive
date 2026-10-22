@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import type { TerminalSession } from '@hive/core';
@@ -65,6 +66,15 @@ export function TerminalView({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(element);
+    // The GPU renderer draws block characters edge to edge, so the pixel bees have no gaps
+    // between rows; without WebGL the default renderer still works.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      terminal.loadAddon(webgl);
+    } catch {
+      // No WebGL here.
+    }
     terminalRef.current = terminal;
     terminal.write(initialOutput.current);
 

@@ -3,7 +3,7 @@ import type { AgentOutcome } from '@hive/agents';
 import type { Worker, Workspace } from '@hive/core';
 import { cleanTerminalOutput } from './terminal';
 import type { Exchange, TurnHandlers } from './terminal-agents';
-import { describeTool, HiveTerminalApp, splitKeys } from './terminal-ui';
+import { CursorTracker, describeTool, fitStyled, HiveTerminalApp, splitKeys } from './terminal-ui';
 
 const workspace = { id: 'ws', name: 'crew.os', path: 'C:\\projetos\\crew.os' } as Workspace;
 const worker = (id: string, name: string, role: Worker['role'], modelId: string | null) =>
@@ -29,7 +29,7 @@ function setup(turn = vi.fn()) {
     { write: (text) => (screen += text), size: () => ({ cols: 100, rows: 30 }), end },
     { workspace, workers: () => workers, turn, cost: () => 'grátis' },
   );
-  return { app, end, turn, screen: () => cleanTerminalOutput(screen) };
+  return { app, end, turn, raw: () => screen, screen: () => cleanTerminalOutput(screen) };
 }
 
 describe('terminal do Hive', () => {
@@ -37,6 +37,50 @@ describe('terminal do Hive', () => {
     expect(splitKeys('a\x1b[Bç\r')).toEqual(['a', '\x1b[B', 'ç', '\r']);
     expect(describeTool('run_command', { command: 'npm test' })).toBe('$ npm test');
     expect(describeTool('replace_in_file', { path: 'src/app.ts' })).toBe('Editando src/app.ts');
+  });
+
+  it('corta linhas coloridas sem quebrar as cores', () => {
+    const line = '\x1b[1mFrontend\x1b[0m \x1b[90m· modelo-longo\x1b[0m';
+    expect(fitStyled(line, 100)).toBe(line);
+    expect(cleanTerminalOutput(fitStyled(line, 12))).toBe('Frontend · …');
+    expect(fitStyled(line, 12)).toContain('\x1b[90m');
+  });
+
+  it('segue o cursor, inclusive quando a linha quebra', () => {
+    const cursor = new CursorTracker(() => 10);
+    cursor.feed('a\r\nb\r\n');
+    expect(cursor.line).toBe(2);
+    cursor.feed('0123456789\r\n');
+    expect(cursor.line).toBe(3);
+    cursor.feed('0123456789xy\r\n');
+    expect(cursor.line).toBe(5);
+    cursor.feed('\x1b[2A\x1b[1m\x1b7oi\x1b8');
+    expect(cursor.line).toBe(3);
+  });
+
+  it('bate as asas da abelha lá de cima enquanto o agente trabalha', async () => {
+    let finish: (value: AgentOutcome) => void = () => undefined;
+    const turn = vi.fn(() => new Promise<AgentOutcome>((resolve) => (finish = resolve)));
+    const { app, raw } = setup(turn);
+    app.start('agents');
+    app.input('\x1b[B\r');
+    app.input('oi\r');
+    await vi.waitFor(() => expect(turn).toHaveBeenCalled());
+    // Saved cursor, up to the bee, and back.
+    expect(raw()).toMatch(
+      new RegExp(`${String.fromCharCode(27)}7${String.fromCharCode(27)}\\[\\d+A`),
+    );
+    finish(outcome('Oi!'));
+    await vi.waitFor(() => expect(raw()).toContain('Oi!'));
+  });
+
+  it('apaga a lista depois da escolha e mostra a abelha pequena', () => {
+    const { app, raw, screen } = setup();
+    app.start('agents');
+    app.input('\r');
+    // Up over the title (3 lines), the big bee (7) and the list (3 bees, a blank, the hint).
+    expect(raw()).toContain('\x1b[15A\x1b[J');
+    expect(screen()).toContain('Trabalhando direto em');
   });
 
   it('lista as abelhas, escolhe com as setas e conversa com a escolhida', async () => {

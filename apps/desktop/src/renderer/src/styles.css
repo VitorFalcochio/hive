@@ -1153,6 +1153,86 @@ textarea.mono {
   font-size: 12px;
   color: var(--subtle-foreground);
 }
+/* Squad: each captain's soldiers, under its row and in its drawer. */
+.agent-tr:has(.agent-squad) {
+  row-gap: 2px;
+}
+.agent-squad {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-left: 6px;
+}
+.agent-squad::before {
+  content: '';
+  width: 8px;
+  height: 9px;
+  margin-top: -9px;
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-bottom-left-radius: 3px;
+}
+.agent-squad-bees {
+  display: inline-flex;
+  gap: 9px;
+  padding: 3px 0 4px;
+}
+.agent-squad small {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--subtle-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.soldier-bee {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.soldier-bee.off {
+  opacity: 0.3;
+  filter: grayscale(1);
+}
+.soldier-insignia {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  padding: 1px;
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--foreground);
+  line-height: 0;
+}
+.soldier-bee.working .soldier-insignia {
+  color: var(--warning);
+}
+.squad-list {
+  display: grid;
+}
+.squad-soldier {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 210px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.squad-soldier:last-child {
+  border-bottom: 0;
+}
+.squad-soldier .tool-option {
+  align-items: center;
+}
+.squad-soldier.off .tool-option > span {
+  opacity: 0.6;
+}
+.squad-model {
+  margin: 0;
+}
 .agent-unsaved {
   margin-right: auto;
   font-size: 12.5px;

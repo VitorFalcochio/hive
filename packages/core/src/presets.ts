@@ -1,7 +1,10 @@
 import {
   beeColorSchema,
+  soldierRoleSchema,
   type BeeColor,
   type ProviderKind,
+  type Soldier,
+  type SoldierRole,
   type ToolName,
   type Worker,
   type WorkerRole,
@@ -283,6 +286,33 @@ export function nextBeeColor(workers: Pick<Worker, 'id' | 'role' | 'beeColor'>[]
   const choices = beeColorSchema.options.filter((color) => color !== 'gold');
   return choices.reduce((best, color) =>
     (worn.get(color) ?? 0) < (worn.get(best) ?? 0) ? color : best,
+  );
+}
+
+/** The squad in the order the captain usually calls on it. */
+export const soldierRoles: SoldierRole[] = soldierRoleSchema.options;
+
+export const soldierPresets: Record<SoldierRole, { label: string; detail: string }> = {
+  scout: { label: 'Batedora', detail: 'Explora o projeto e acha onde mexer. Só lê.' },
+  builder: { label: 'Operária', detail: 'Escreve e edita o código.' },
+  tester: { label: 'Testadora', detail: 'Roda testes e comandos para conferir o trabalho.' },
+  reviewer: { label: 'Revisora', detail: 'Revisa o que mudou antes da entrega. Só lê.' },
+  researcher: {
+    label: 'Pesquisadora',
+    detail: 'Entra quando falta informação: documentação, APIs, exemplos.',
+  },
+};
+
+/** An agent's whole squad, defaults filled in, in `soldierRoles` order. The Queen has none. */
+export function squadOf(worker: Pick<Worker, 'role' | 'squad'>): Soldier[] {
+  if (worker.role === 'queen') return [];
+  return soldierRoles.map(
+    (role) =>
+      worker.squad?.find((soldier) => soldier.role === role) ?? {
+        role,
+        enabled: true,
+        modelId: null,
+      },
   );
 }
 

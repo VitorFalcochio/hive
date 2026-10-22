@@ -14,10 +14,16 @@ import {
   beeColorOf,
   beeColors,
   beeColorSchema,
+  compareByPrice,
+  isFreeModel,
   nextBeeColor,
   rolePresets,
+  soldierPresets,
+  squadOf,
   type BeeColor,
   type RecommendedSetup,
+  type Soldier,
+  type SoldierRole,
   type ToolName,
   type Worker,
   type WorkerInput,
@@ -25,7 +31,7 @@ import {
 } from '@hive/core';
 import { hasAccess, useHive } from './context';
 import { Dot, PageHeader, Select, useTask } from './ui';
-import { AgentBee, Mascot } from './mascot';
+import { AgentBee, Mascot, SoldierBee } from './mascot';
 
 const roleOrder: WorkerRole[] = [
   'queen',
@@ -145,12 +151,42 @@ export function AgentsPage() {
                 <ChevronRight size={15} />
               </button>
             </span>
+            <SquadLine worker={worker} />
           </div>
         ))}
       </div>
       {selected === 'new' && <NewAgent onCreated={setSelected} onClose={close} />}
       {current && <AgentDetail key={current.id} worker={current} onClose={close} />}
     </>
+  );
+}
+
+/** The captain's soldiers, in a line under its row. */
+function SquadLine({ worker }: { worker: Worker }) {
+  const squad = squadOf(worker);
+  if (!squad.length) return null;
+  const enabled = squad.filter((soldier) => soldier.enabled).length;
+  const status =
+    enabled === squad.length
+      ? 'Esquadrão pronto'
+      : enabled
+        ? `${enabled} de ${squad.length} soldadas ligadas`
+        : 'Esquadrão desligado';
+  return (
+    <span role="cell" className="agent-squad" aria-label={`Esquadrão de ${worker.name}`}>
+      <span className="agent-squad-bees">
+        {squad.map((soldier) => (
+          <SoldierBee
+            key={soldier.role}
+            captain={worker}
+            role={soldier.role}
+            enabled={soldier.enabled}
+            size={19}
+          />
+        ))}
+      </span>
+      <small>{status}</small>
+    </span>
   );
 }
 
@@ -231,6 +267,7 @@ function NewAgent({
         name: '',
         role: 'custom',
         beeColor: null,
+        squad: [],
         description: '',
         providerId: null,
         modelId: null,
@@ -332,6 +369,7 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
     draft.description !== worker.description ||
     draft.systemPrompt !== worker.systemPrompt ||
     draft.tools.join() !== worker.tools.join() ||
+    JSON.stringify(draft.squad) !== JSON.stringify(worker.squad) ||
     draft.autoApproveCommands.join('\n') !== worker.autoApproveCommands.join('\n');
   const patch = (next: Partial<Worker>) => setDraft((value) => ({ ...value, ...next }));
 
@@ -391,6 +429,9 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
         />
         <ProfileFields value={draft} onChange={patch} />
       </section>
+      {worker.role !== 'queen' && (
+        <SquadSection captain={draft} onChange={(squad) => patch({ squad })} />
+      )}
       <ToolsSection tools={draft.tools} commands={draft.autoApproveCommands} onChange={patch} />
       {task.error && (
         <p role="alert" className="form-error">
@@ -398,6 +439,95 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
         </p>
       )}
     </Drawer>
+  );
+}
+
+const CAPTAIN_MODEL = '';
+
+/** Switch soldiers on and off and, if wanted, give one a free model of its own. */
+function SquadSection({
+  captain,
+  onChange,
+}: {
+  captain: Worker;
+  onChange: (squad: Soldier[]) => void;
+}) {
+  const [free, setFree] = useState<string[]>([]);
+  const { providerId } = captain;
+  useEffect(() => {
+    if (!providerId) return setFree([]);
+    let active = true;
+    void window.hive
+      .invoke('provider.models', { providerId, refresh: false })
+      .then((models) => {
+        if (active)
+          setFree(
+            models
+              .filter((model) => isFreeModel(model))
+              .sort(compareByPrice)
+              .map((model) => model.id),
+          );
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [providerId]);
+
+  const squad = squadOf(captain);
+  // Soldiers back at the defaults are dropped, so only real choices are stored.
+  const update = (role: SoldierRole, next: Partial<Soldier>) =>
+    onChange(
+      squad
+        .map((soldier) => (soldier.role === role ? { ...soldier, ...next } : soldier))
+        .filter((soldier) => !soldier.enabled || soldier.modelId),
+    );
+
+  return (
+    <section className="agent-section">
+      <h3>Esquadrão</h3>
+      <p className="field-hint">
+        {captain.name} é a capitã: escolhe qual soldada trabalha em cada momento. Elas trocam
+        resumos curtos entre si, então gastam poucos tokens.
+      </p>
+      <div className="squad-list">
+        {squad.map((soldier) => (
+          <div key={soldier.role} className={`squad-soldier${soldier.enabled ? '' : ' off'}`}>
+            <label className="tool-option">
+              <input
+                type="checkbox"
+                checked={soldier.enabled}
+                onChange={(event) => update(soldier.role, { enabled: event.target.checked })}
+              />
+              <SoldierBee
+                captain={captain}
+                role={soldier.role}
+                enabled={soldier.enabled}
+                size={22}
+              />
+              <span>
+                {soldierPresets[soldier.role].label}
+                <small>{soldierPresets[soldier.role].detail}</small>
+              </span>
+            </label>
+            <label className="squad-model">
+              <span className="sr-only">Modelo da {soldierPresets[soldier.role].label}</span>
+              <Select
+                value={soldier.modelId ?? CAPTAIN_MODEL}
+                disabled={!soldier.enabled || !providerId}
+                onChange={(modelId) => update(soldier.role, { modelId: modelId || null })}
+                options={[
+                  { value: CAPTAIN_MODEL, label: 'Modelo da capitã' },
+                  ...[...new Set([...(soldier.modelId ? [soldier.modelId] : []), ...free])].map(
+                    (id) => ({ value: id, label: id }),
+                  ),
+                ]}
+              />
+            </label>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

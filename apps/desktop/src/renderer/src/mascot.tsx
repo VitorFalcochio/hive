@@ -1,46 +1,22 @@
-import { beeColorOf, beeColors, type Worker } from '@hive/core';
+import { BookOpen, Eye, FlaskConical, Search, Wrench, type LucideIcon } from 'lucide-react';
+import {
+  beeColorOf,
+  beeColors,
+  beeCrown,
+  beeGrid,
+  beePalette,
+  soldierPresets,
+  type SoldierRole,
+  type Worker,
+} from '@hive/core';
 
 /**
- * Hive's mascot: a pixel-art bee. Each character of the grid is one pixel; the wings, eyes and
- * body are separate groups so they can be animated (flapping, blinking, hovering).
+ * Hive's mascot: the pixel-art bee from `beeGrid`. The wings, eyes and body are separate groups
+ * so they can be animated (flapping, blinking, hovering).
  */
-const grid = [
-  '...y........y...',
-  '....a......a....',
-  '.....yyyyyy.....',
-  '.ww.yyyyyyyy.ww.',
-  'wwwyykkyykkyywww',
-  'wwwyykkyykkyywww',
-  '.wwyyyyyyyyyyww.',
-  '...kkkkkkkkkk...',
-  '...yyyyyyyyyy...',
-  '...kkkkkkkkkk...',
-  '....yyyyyyyy....',
-  '.....k.kk.k.....',
-];
-
-const colors: Record<string, string> = {
-  y: '#f5b544',
-  a: '#c98a1e',
-  k: '#1c1d21',
-  w: '#e9ecf2',
-  c: '#ffe27a',
-};
-
-/** The Queen's crown, drawn over the top rows between the antennae. */
-const crown = ['.....c.cc.c.....', '.....cccccc.....'];
-
-/** The antennae are the body colour about a fifth darker, as gold is to its shade. */
-function shade(hex: string): string {
-  const value = parseInt(hex.slice(1), 16);
-  const channel = (shift: number) => Math.round(((value >> shift) & 255) * 0.78);
-  return `#${((channel(16) << 16) | (channel(8) << 8) | channel(0)).toString(16).padStart(6, '0')}`;
-}
-
-/** Colours of a bee whose body is `body`; the stripes, eyes and wings never change. */
-function paletteFor(body: string | undefined): Record<string, string> {
-  return body ? { ...colors, y: body, a: shade(body) } : colors;
-}
+const grid = beeGrid;
+const paletteFor = beePalette;
+const colors = beePalette();
 
 const EYE_ROWS = new Set([4, 5]);
 const WIDTH = grid[0]!.length;
@@ -54,7 +30,7 @@ function partOf(cell: string, x: number, y: number): Part {
   return 'body';
 }
 
-const crownPixels = crown.flatMap((row, y) =>
+const crownPixels = beeCrown.flatMap((row, y) =>
   [...row].flatMap((cell, x) => (cell === 'c' ? [{ x, y, cell }] : [])),
 );
 
@@ -135,6 +111,47 @@ export function Mascot({
         </g>
       </g>
     </svg>
+  );
+}
+
+const insignias: Record<SoldierRole, LucideIcon> = {
+  scout: Search,
+  builder: Wrench,
+  tester: FlaskConical,
+  reviewer: Eye,
+  researcher: BookOpen,
+};
+
+/**
+ * A soldier: a small bee in its captain's colour, without the crown, wearing its role's insignia.
+ * The one at work flaps its wings; a soldier switched off is drawn faded.
+ */
+export function SoldierBee({
+  captain,
+  role,
+  enabled = true,
+  working = false,
+  size = 16,
+}: {
+  captain: Pick<Worker, 'id' | 'role' | 'beeColor'>;
+  role: SoldierRole;
+  enabled?: boolean;
+  working?: boolean;
+  size?: number;
+}) {
+  const Insignia = insignias[role];
+  const state = working ? ' working' : enabled ? '' : ' off';
+  return (
+    <span className={`soldier-bee${state}`} title={soldierPresets[role].label}>
+      <Mascot
+        size={size}
+        mood={working ? 'working' : 'still'}
+        color={beeColors[beeColorOf(captain)].hex}
+      />
+      <span className="soldier-insignia" aria-hidden>
+        <Insignia size={Math.max(9, Math.round(size * 0.55))} strokeWidth={2.5} />
+      </span>
+    </span>
   );
 }
 

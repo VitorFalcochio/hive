@@ -66,6 +66,7 @@ describe('conversas no terminal', () => {
       name: 'Frontend',
       role: 'frontend',
       beeColor: null,
+      squad: [],
       description: '',
       providerId: 'p',
       modelId: 'm',

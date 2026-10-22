@@ -2,6 +2,7 @@ import type { AgentOutcome, RuntimeEvent } from '@hive/agents';
 import { beeColorOf, beeColors, type Worker, type WorkerRole, type Workspace } from '@hive/core';
 import { errorMessage } from '@hive/shared';
 import type { ApprovalAnswer, Exchange, TurnHandlers } from './terminal-agents';
+import { BEE_COLUMNS, SMALL_BEE_COLUMNS, beeLines, besideBee } from './terminal-bee';
 
 /** Where the app draws: the shell's terminal, through the command that launched it. */
 export interface TerminalHost {
@@ -67,9 +68,77 @@ const stateLabels: Record<string, string> = {
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
+/** Below this width the bee and its text no longer fit side by side. */
+const MIN_BEE_COLUMNS = 50;
+
+/** The blank line, title and blank line `openPicker` writes above the list. */
+const PICKER_TITLE_LINES = 3;
+
 function fit(text: string, width: number): string {
   if (width <= 1) return '';
   return text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width);
+}
+
+const colorCodes = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+
+/**
+ * `fit` for text with colours in it: cuts at `width` visible characters, keeping the escape
+ * codes intact, so a line never wraps (and the lines redrawn in place stay where they were).
+ */
+export function fitStyled(text: string, width: number): string {
+  if ([...text.replace(colorCodes, '')].length <= width) return text;
+  // Colour codes and visible characters, one token each.
+  const tokens = text.split(colorCodes);
+  const codes = text.match(colorCodes) ?? [];
+  let out = '';
+  let room = width - 1;
+  tokens.forEach((plain, index) => {
+    const kept = [...plain].slice(0, Math.max(0, room));
+    room -= kept.length;
+    out += kept.join('') + (codes[index] ?? '');
+  });
+  return `${out}…${reset}`;
+}
+
+const csi = new RegExp(`^${String.fromCharCode(27)}\\[([0-9;?]*)([A-Za-z])`);
+
+/**
+ * Follows the cursor as text goes out, in lines counted from the start, so a line written
+ * earlier (the agent's bee) can be found again and redrawn in place. A character past the last
+ * column wraps to the next line, as in the terminal.
+ */
+export class CursorTracker {
+  line = 0;
+  private column = 0;
+
+  constructor(private readonly columns: () => number) {}
+
+  feed(text: string): void {
+    const columns = this.columns();
+    for (let index = 0; index < text.length;) {
+      if (text[index] === '\x1b') {
+        const sequence = csi.exec(text.slice(index));
+        if (sequence) {
+          const count = Number(sequence[1]) || 1;
+          if (sequence[2] === 'A') this.line -= count;
+          else if (sequence[2] === 'B') this.line += count;
+          index += sequence[0].length;
+        } else index += 2; // ESC 7, ESC 8 and the like: no movement to follow.
+        continue;
+      }
+      const character = String.fromCodePoint(text.codePointAt(index)!);
+      if (character === '\r') this.column = 0;
+      else if (character === '\n') this.line++;
+      else if (character >= ' ') {
+        if (this.column >= columns) {
+          this.line++;
+          this.column = 0;
+        }
+        this.column++;
+      }
+      index += character.length;
+    }
+  }
 }
 
 // Arrows and other keys that arrive as escape sequences (CSI or SS3).
@@ -137,13 +206,24 @@ export class HiveTerminalApp {
   private typedIndex = 0;
   private abort: AbortController | null = null;
   private answer: ((answer: ApprovalAnswer) => void) | null = null;
-  private spinner: { timer: ReturnType<typeof setInterval>; frame: number; text: string } | null =
-    null;
+  private spinner: {
+    timer: ReturnType<typeof setInterval>;
+    frame: number;
+    text: string;
+    /** Lines the working bee takes on screen now; 0 while it is off. */
+    lines: number;
+    startedAt: number;
+  } | null = null;
+  private readonly cursor: CursorTracker;
+  /** The line of the conversation's bee, the one that flaps while the agent works. */
+  private beeLine: number | null = null;
 
   constructor(
     private readonly host: TerminalHost,
     private readonly services: TerminalAppServices,
-  ) {}
+  ) {
+    this.cursor = new CursorTracker(() => host.size().cols);
+  }
 
   start(command: string): void {
     if (command === 'agents') this.openPicker();
@@ -178,7 +258,9 @@ export class HiveTerminalApp {
   }
 
   private write(text: string) {
-    if (this.mode !== 'closed') this.host.write(text);
+    if (this.mode === 'closed') return;
+    this.host.write(text);
+    this.cursor.feed(text);
   }
 
   private end() {
@@ -243,7 +325,11 @@ export class HiveTerminalApp {
         : `${red}sem modelo${reset}`;
       return `${marker} ${color}●${reset} ${selected ? bold : ''}${name}${reset}${dim}${fit(roleLabels[worker.role], roleWidth)}${reset}${model}`;
     });
+    // The highlighted bee, large, above the list.
+    const chosen = this.choices[this.pickIndex]!;
+    const portrait = cols >= MIN_BEE_COLUMNS ? [...this.portrait(chosen, true), ''] : [];
     const lines = [
+      ...portrait,
       ...rows,
       '',
       this.pickNote || `${dim}↑↓ escolhe · Enter conversa · Esc sai${reset}`,
@@ -252,6 +338,12 @@ export class HiveTerminalApp {
     if (this.pickLines) this.write(`\x1b[${this.pickLines}A`);
     for (const line of lines) this.write(`${clearLine}${line}${newline}`);
     this.pickLines = lines.length;
+  }
+
+  /** Once a bee is picked the list has done its job: it goes, with the title above it. */
+  private erasePicker() {
+    this.write(`\r\x1b[${this.pickLines + PICKER_TITLE_LINES}A\x1b[J`);
+    this.pickLines = 0;
   }
 
   private pickKey(key: string) {
@@ -270,11 +362,13 @@ export class HiveTerminalApp {
       }
       if (this.worker?.id !== chosen.id) this.history = [];
       this.worker = chosen;
+      this.erasePicker();
       this.write(showCursor);
       this.greet();
     } else if (key === '\x1b' || key === 'q' || key === '\x03' || key === '\x04') {
       if (this.worker) {
         // Back to the conversation that was going on.
+        this.erasePicker();
         this.write(showCursor);
         this.prompt();
       } else this.end();
@@ -287,14 +381,52 @@ export class HiveTerminalApp {
     return this.worker ? rgb(beeColors[beeColorOf(this.worker)].hex) : yellow;
   }
 
+  /** The agent's bee with its name, role and description beside it. */
+  private portrait(worker: Worker, wingsUp = false): string[] {
+    const { cols } = this.host.size();
+    const room = Math.max(10, cols - BEE_COLUMNS - 6);
+    const color = rgb(beeColors[beeColorOf(worker)].hex);
+    return besideBee(this.bee(worker, wingsUp), [
+      '',
+      `${color}${bold}${fit(worker.name, room).trimEnd()}${reset}`,
+      `${gray}${fit(`${roleLabels[worker.role]} · ${worker.modelId ?? 'sem modelo'}`, room).trimEnd()}${reset}`,
+      worker.description ? `${dim}${fit(worker.description, room).trimEnd()}${reset}` : '',
+    ]);
+  }
+
+  private bee(worker: Worker, wingsUp = false, small = false): string[] {
+    return beeLines({
+      body: beeColors[beeColorOf(worker)].hex,
+      crowned: worker.role === 'queen',
+      wingsUp,
+      small,
+    });
+  }
+
+  /** The small bee with a few lines beside it, as in the conversation. */
+  private besideSmallBee(text: string[], wingsUp = false): string[] {
+    const room = Math.max(10, this.host.size().cols - SMALL_BEE_COLUMNS - 5);
+    return besideBee(
+      this.bee(this.worker!, wingsUp, true),
+      text.map((line) => fitStyled(line, room)),
+      { width: SMALL_BEE_COLUMNS, gap: 2 },
+    );
+  }
+
   private greet() {
     const worker = this.worker!;
+    const name = `${this.color()}${bold}${worker.name}${reset} ${gray}· ${worker.modelId}${reset}`;
+    const where = `${dim}Trabalhando direto em ${this.services.workspace.path}. Escreva o que precisa e tecle Enter.${reset}`;
+    const keys = `${dim}/agentes troca de abelha · /nova recomeça · /sair sai · Ctrl+C interrompe${reset}`;
+    const wide = this.host.size().cols >= MIN_BEE_COLUMNS;
+    // The blank line comes first, then the bee.
+    this.beeLine = wide ? this.cursor.line + 1 : null;
     this.write(
       [
         '',
-        `${this.color()}●${reset} ${bold}${worker.name}${reset} ${gray}· ${worker.modelId}${reset}`,
-        `${dim}  Trabalhando direto em ${this.services.workspace.path}. Escreva o que precisa e tecle Enter.${reset}`,
-        `${dim}  /agentes troca de abelha · /nova recomeça · /sair sai · Ctrl+C interrompe${reset}`,
+        ...(wide
+          ? this.besideSmallBee([name, where, keys])
+          : [`${this.color()}●${reset} ${name}`, `  ${where}`, `  ${keys}`]),
         '',
       ].join(newline),
     );
@@ -430,10 +562,10 @@ export class HiveTerminalApp {
     );
   }
 
-  /** A line of the transcript, kept above the spinner while one is turning. */
+  /** A line of the transcript, kept above the working bee while one is flying. */
   private print(line: string) {
-    if (this.spinner) this.write(`${clearLine}${line}${newline}`);
-    else this.write(`${line}${newline}`);
+    this.eraseSpinner();
+    this.write(`${line}${newline}`);
     this.drawSpinner();
   }
 
@@ -527,6 +659,8 @@ export class HiveTerminalApp {
     this.spinner = {
       frame: 0,
       text,
+      lines: 0,
+      startedAt: Date.now(),
       timer: setInterval(() => {
         if (!this.spinner) return;
         this.spinner.frame = (this.spinner.frame + 1) % spinnerFrames.length;
@@ -536,18 +670,63 @@ export class HiveTerminalApp {
     this.drawSpinner();
   }
 
+  /**
+   * The agent at work: its bee flapping its wings with what it is doing beside it, redrawn in
+   * place. Narrow terminals get a one-line spinner instead.
+   */
   private drawSpinner() {
     if (!this.spinner || !this.worker) return;
-    const frame = spinnerFrames[this.spinner.frame]!;
-    this.write(
-      `${clearLine}${this.color()}${frame}${reset} ${dim}${this.worker.name} está ${this.spinner.text}… (Ctrl+C interrompe)${reset}`,
-    );
+    const { frame, text, startedAt } = this.spinner;
+    const { cols } = this.host.size();
+    const seconds = Math.floor((Date.now() - startedAt) / 1000);
+    const doing = `${this.color()}${spinnerFrames[frame]}${reset} ${dim}está ${text}… ${seconds}s${reset}`;
+    // The conversation's bee flaps up there; only once it has scrolled away does one come down.
+    const flapping = this.drawConversationBee(frame % 2 === 0);
+    const rows =
+      cols >= MIN_BEE_COLUMNS && !flapping
+        ? this.besideSmallBee(
+            [
+              `${this.color()}${bold}${this.worker.name}${reset}`,
+              doing,
+              `${dim}Ctrl+C interrompe${reset}`,
+            ],
+            frame % 2 === 0,
+          )
+        : [`${doing} ${dim}(Ctrl+C interrompe)${reset}`];
+    const up = this.spinner.lines > 1 ? `\x1b[${this.spinner.lines - 1}A` : '';
+    this.write(`\r${up}${rows.map((row) => `${clearLine}${row}`).join(newline)}`);
+    this.spinner.lines = rows.length;
+  }
+
+  /**
+   * Redraws the bee at the top of the conversation in place (over its own cells, the text beside
+   * it stays), the cursor coming back where it was. False when it is no longer on screen.
+   */
+  private drawConversationBee(wingsUp: boolean): boolean {
+    if (this.beeLine === null || !this.worker || this.mode === 'closed') return false;
+    const up = this.cursor.line - this.beeLine;
+    const bee = this.bee(this.worker, wingsUp, true);
+    if (up < bee.length || up >= this.host.size().rows) return false;
+    const rows = bee.map((row) => `\r  ${row}`).join('\x1b[B');
+    this.host.write(`\x1b7\x1b[${up}A${rows}\x1b8`);
+    return true;
+  }
+
+  /** Takes the working bee off the screen, leaving the cursor where it started. */
+  private eraseSpinner() {
+    if (!this.spinner?.lines) return;
+    const up = this.spinner.lines > 1 ? `\x1b[${this.spinner.lines - 1}A` : '';
+    this.write(`\r${up}\x1b[J`);
+    this.spinner.lines = 0;
   }
 
   private stopSpinner() {
     if (!this.spinner) return;
     clearInterval(this.spinner.timer);
+    this.eraseSpinner();
     this.spinner = null;
-    this.write(`${clearLine}${showCursor}`);
+    // Wings at rest, not frozen mid-flap.
+    this.drawConversationBee(false);
+    this.write(showCursor);
   }
 }

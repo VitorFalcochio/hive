@@ -36,6 +36,7 @@ const queen = {
   name: 'Queen · Coordinator',
   role: 'queen',
   beeColor: null,
+  squad: [],
   description: 'Coordena.',
   providerId: null as string | null,
   modelId: null as string | null,

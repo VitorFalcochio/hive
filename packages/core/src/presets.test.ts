@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { workerSchema } from './domain';
-import { beeColorOf, nextBeeColor, providerPresets, recommendedModelCandidates } from './presets';
+import {
+  beeColorOf,
+  nextBeeColor,
+  providerPresets,
+  recommendedModelCandidates,
+  soldierRoles,
+  squadOf,
+} from './presets';
 
 describe('recommendedModelCandidates', () => {
   it('tenta os modelos gratuitos antes dos pagos', () => {
@@ -71,5 +78,22 @@ describe('cores das abelhas', () => {
       updatedAt: '',
     };
     expect(workerSchema.parse(stored).beeColor).toBeNull();
+    expect(workerSchema.parse(stored).squad).toEqual([]);
+  });
+});
+
+describe('esquadrão', () => {
+  it('dá às capitãs as cinco soldadas, ligadas, e guarda só o que mudou', () => {
+    const squad = squadOf({
+      role: 'frontend',
+      squad: [{ role: 'tester', enabled: false, modelId: 'x:free' }],
+    });
+    expect(squad.map((soldier) => soldier.role)).toEqual(soldierRoles);
+    expect(squad[0]).toEqual({ role: 'scout', enabled: true, modelId: null });
+    expect(squad[2]).toEqual({ role: 'tester', enabled: false, modelId: 'x:free' });
+  });
+
+  it('não dá esquadrão para a Queen', () => {
+    expect(squadOf({ role: 'queen', squad: [] })).toEqual([]);
   });
 });
