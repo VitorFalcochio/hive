@@ -1,5 +1,13 @@
 import type { AgentOutcome, RuntimeEvent } from '@hive/agents';
-import { beeColorOf, beeColors, type Worker, type WorkerRole, type Workspace } from '@hive/core';
+import {
+  beeColorOf,
+  beeColors,
+  soldierPresets,
+  soldierRoleSchema,
+  type Worker,
+  type WorkerRole,
+  type Workspace,
+} from '@hive/core';
 import { errorMessage } from '@hive/shared';
 import type { ApprovalAnswer, Exchange, TurnHandlers } from './terminal-agents';
 import { BEE_COLUMNS, SMALL_BEE_COLUMNS, beeLines, besideBee } from './terminal-bee';
@@ -571,19 +579,30 @@ export class HiveTerminalApp {
 
   private show(event: RuntimeEvent) {
     const data = event.data ?? {};
+    // A soldier's lines carry her name; what she says is her report to the captain, not the answer.
+    const soldier = soldierRoleSchema.safeParse(data.soldier);
+    const tag = soldier.success ? `${dim}${soldierPresets[soldier.data].label}${reset} ` : '';
     switch (event.type) {
       case 'model.response': {
         const content = typeof data.content === 'string' ? data.content.trim() : '';
-        if (content) this.said = content;
-        if (content)
-          this.print(`${this.color()}●${reset} ${content.replace(/\r?\n/g, `${newline}  `)}`);
+        if (!content) break;
+        if (soldier.success) {
+          this.print(`  ${tag}${dim}${content.split(/\r?\n/)[0]!.slice(0, 160)}${reset}`);
+          break;
+        }
+        this.said = content;
+        this.print(`${this.color()}●${reset} ${content.replace(/\r?\n/g, `${newline}  `)}`);
         break;
       }
       case 'tool.call': {
         const tool = typeof data.tool === 'string' ? data.tool : '';
         if (!tool || tool === 'finish') break;
+        if (tool === 'call_soldiers') {
+          this.print(`  ${gray}⎿${reset} ${event.message}`);
+          break;
+        }
         const args = (data.args ?? {}) as Record<string, unknown>;
-        this.print(`  ${gray}⎿${reset} ${describeTool(tool, args)}`);
+        this.print(`  ${gray}⎿${reset} ${tag}${describeTool(tool, args)}`);
         break;
       }
       case 'command.finished': {

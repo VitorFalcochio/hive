@@ -1,22 +1,36 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Check,
+  ChevronDown,
+  Coins,
   FileDiff,
+  FileText,
   History,
   Play,
   RotateCcw,
   ShieldQuestion,
   Sparkles,
   Square,
+  SquareTerminal,
   Timer,
   X,
 } from 'lucide-react';
-import type { AgentEvent, Approval, Task, TaskStatus, WorkerState } from '@hive/core';
+import {
+  soldierPresets,
+  soldierRoleSchema,
+  type AgentEvent,
+  type Approval,
+  type SoldierRole,
+  type Task,
+  type TaskStatus,
+  type WorkerState,
+} from '@hive/core';
 import { useHive } from './context';
 import { Dot, Empty, PageHeader, runTone, statusLabels, useTask } from './ui';
 import { applyCandidate, discardCandidates, isCandidate, summarizeCandidate } from './comparison';
 import { useShift } from './shift';
-import { AgentBee } from './mascot';
+import { AgentBee, SoldierBee } from './mascot';
+import { Markdown } from './markdown';
 
 export const taskLabels: Record<TaskStatus, string> = {
   pending: 'Na fila',
@@ -62,9 +76,26 @@ const taskTone = (status: TaskStatus) =>
           : 'idle';
 
 /** Latest user-meaningful message per task, from the live event stream. */
+/** Who is at work in each task: the captain's soldiers between their start and end events. */
+export type Squads = Record<string, SoldierRole[]>;
+
+export function trackSquad(squads: Squads, event: AgentEvent): Squads {
+  const taskId = event.taskId!;
+  const current = squads[taskId] ?? [];
+  // A new session of the task starts with no soldier out.
+  if (event.type === 'session.started')
+    return current.length ? { ...squads, [taskId]: [] } : squads;
+  const role = soldierRoleSchema.safeParse(event.data?.soldier);
+  const phase = event.data?.phase;
+  if (!role.success || (phase !== 'start' && phase !== 'end')) return squads;
+  const others = current.filter((soldier) => soldier !== role.data);
+  return { ...squads, [taskId]: phase === 'start' ? [...others, role.data] : others };
+}
+
 function useActivity(runId: string) {
   const { onEvent } = useHive();
   const [latest, setLatest] = useState<Record<string, string>>({});
+  const [squads, setSquads] = useState<Squads>({});
   useEffect(() => {
     if (!runId) return;
     let alive = true;
@@ -75,27 +106,34 @@ function useActivity(runId: string) {
       .then((events) => {
         if (!alive) return;
         const next: Record<string, string> = {};
-        for (const event of events) if (keep(event)) next[event.taskId!] = event.message;
+        let squadsNow: Squads = {};
+        for (const event of events) {
+          if (!keep(event)) continue;
+          next[event.taskId!] = event.message;
+          squadsNow = trackSquad(squadsNow, event);
+        }
         setLatest(next);
+        setSquads(squadsNow);
       })
       .catch(() => undefined);
     const off = onEvent((event) => {
-      if (event.runId === runId && keep(event))
-        setLatest((current) => ({ ...current, [event.taskId!]: event.message }));
+      if (event.runId !== runId || !keep(event)) return;
+      setLatest((current) => ({ ...current, [event.taskId!]: event.message }));
+      setSquads((current) => trackSquad(current, event));
     });
     return () => {
       alive = false;
       off();
     };
   }, [runId, onEvent]);
-  return latest;
+  return { latest, squads };
 }
 
 export function MissionPage() {
   const { detail, setDetail, workers, refresh } = useHive();
   const plan = useTask();
   const action = useTask();
-  const activity = useActivity(detail?.run.id ?? '');
+  const { latest: activity, squads } = useActivity(detail?.run.id ?? '');
   const [shift, setShift] = useShift();
   if (!detail) return null;
   const { run, tasks } = detail;
@@ -254,6 +292,7 @@ export function MissionPage() {
               task={task}
               tasks={tasks}
               activity={activity[task.id]}
+              soldiers={squads[task.id] ?? []}
               onChange={reload}
             />
           ))}
@@ -333,17 +372,21 @@ function TaskCard({
   task,
   tasks,
   activity,
+  soldiers,
   onChange,
 }: {
   task: Task;
   tasks: Task[];
   activity: string | undefined;
+  /** Soldiers the captain has out right now, in the order she called them. */
+  soldiers: SoldierRole[];
   onChange: () => Promise<void>;
 }) {
   const { workers, openModal } = useHive();
   const action = useTask();
   const worker = workers.find((item) => item.id === task.workerId);
   const live = task.status === 'running' || task.status === 'waiting_approval';
+  const out = live ? soldiers : [];
   const call = (work: () => Promise<unknown>) =>
     void action.run(async () => {
       try {
@@ -380,10 +423,21 @@ function TaskCard({
           <AgentBee
             worker={worker}
             size={14}
-            mood={live && !isWaiting(task) ? 'working' : 'still'}
+            // While her soldiers fly, the captain waits for their reports.
+            mood={live && !isWaiting(task) && !out.length ? 'working' : 'still'}
           />
         )}
         {worker?.name ?? 'Agente automático'}
+        {worker && out.length > 0 && (
+          <span
+            className="task-squad"
+            aria-label={`Trabalhando: ${out.map((role) => soldierPresets[role].label).join(', ')}`}
+          >
+            {out.map((role) => (
+              <SoldierBee key={role} captain={worker} role={role} working size={13} />
+            ))}
+          </span>
+        )}
         {task.dependsOn.length > 0 && ` · depende de ${task.dependsOn.join(', ')}`}
         {task.revision
           ? ` · revisão ${task.revision.round}`
@@ -399,14 +453,31 @@ function TaskCard({
       )}
       {result && !live && (
         <div className="task-result">
-          {result.summary && <p className="summary">{result.summary}</p>}
-          <small>
-            {result.filesChanged.length
-              ? `${result.filesChanged.length} arquivo(s) · +${result.insertions} −${result.deletions}`
-              : 'Nenhum arquivo alterado'}
-            {result.commands.length > 0 && ` · ${result.commands.length} comando(s)`}
-            {` · ${(result.usage.promptTokens + result.usage.completionTokens).toLocaleString('pt-BR')} tokens`}
-          </small>
+          {result.summary && <ResultSummary text={result.summary} />}
+          <div className="result-stats">
+            <span className="stat">
+              <FileText size={13} />
+              {result.filesChanged.length
+                ? `${result.filesChanged.length} ${result.filesChanged.length === 1 ? 'arquivo' : 'arquivos'}`
+                : 'Nenhum arquivo alterado'}
+            </span>
+            {result.filesChanged.length > 0 && (
+              <span className="stat mono">
+                <span className="success-text">+{result.insertions}</span>
+                <span className="error-text">−{result.deletions}</span>
+              </span>
+            )}
+            {result.commands.length > 0 && (
+              <span className="stat">
+                <SquareTerminal size={13} />
+                {result.commands.length} {result.commands.length === 1 ? 'comando' : 'comandos'}
+              </span>
+            )}
+            <span className="stat">
+              <Coins size={13} />
+              {compactNumber(result.usage.promptTokens + result.usage.completionTokens)} tokens
+            </span>
+          </div>
         </div>
       )}
       {task.error && !live && <p className="form-error">{task.error}</p>}
@@ -468,6 +539,50 @@ function TaskCard({
   );
 }
 
+/** Tokens in the short form the result line has room for: 380,8 mil, 1,2 mi. */
+function compactNumber(value: number): string {
+  return new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 }).format(
+    value,
+  );
+}
+
+const candidateTones: Partial<Record<TaskStatus, 'busy' | 'ok' | 'error' | 'idle'>> = {
+  running: 'busy',
+  waiting_approval: 'busy',
+  completed: 'ok',
+  approved: 'ok',
+  failed: 'error',
+};
+
+/**
+ * An agent's final summary, drawn from its Markdown. Long ones open folded, with a fade and a
+ * button to read the rest.
+ */
+function ResultSummary({ text, compact = false }: { text: string; compact?: boolean }) {
+  const body = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(false);
+  useLayoutEffect(() => {
+    const element = body.current;
+    if (element && !open) setLong(element.scrollHeight > element.clientHeight + 4);
+  }, [text, open]);
+  return (
+    <div
+      className={`result-summary${compact ? ' compact' : ''}${open ? ' open' : ''}${long && !open ? ' folded' : ''}`}
+    >
+      <div ref={body} className="result-summary-body">
+        <Markdown source={text} />
+      </div>
+      {(long || open) && (
+        <button className="link result-summary-toggle" onClick={() => setOpen(!open)}>
+          <ChevronDown size={13} />
+          {open ? 'Mostrar menos' : 'Ler resumo completo'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ComparisonPanel({
   candidates,
   onDone,
@@ -496,7 +611,7 @@ function ComparisonPanel({
           <strong>Comparação de agentes</strong>
           <small>
             {applied
-              ? `Aplicada: ${applied.title}`
+              ? `Aplicada a entrega de ${workers.find((item) => item.id === applied.workerId)?.name ?? applied.title}.`
               : settled
                 ? 'Escolha a melhor entrega para aplicar no projeto.'
                 : 'Os agentes estão trabalhando nas próprias worktrees.'}
@@ -516,14 +631,28 @@ function ComparisonPanel({
         {candidates.map((task) => {
           const worker = workers.find((item) => item.id === task.workerId);
           const summary = summarizeCandidate(task);
+          const working = activeTaskStatuses.has(task.status);
+          const tone = candidateTones[task.status] ?? 'idle';
           return (
-            <article key={task.id} className="candidate">
+            <article
+              key={task.id}
+              className={`candidate${task.status === 'approved' ? ' chosen' : ''}${task.status === 'rejected' ? ' dropped' : ''}`}
+            >
               <header>
-                <strong>{worker?.name ?? task.title}</strong>
-                <span className="candidate-status">{taskLabels[task.status]}</span>
+                {worker && (
+                  <AgentBee worker={worker} size={26} mood={working ? 'working' : 'still'} />
+                )}
+                <div className="candidate-who">
+                  <strong>{worker?.name ?? task.title}</strong>
+                  {worker?.modelId && <small className="mono">{worker.modelId}</small>}
+                </div>
+                <span className={`candidate-status tone-${tone}`}>
+                  {task.status === 'approved' && <Check size={12} />}
+                  {taskLabels[task.status]}
+                </span>
               </header>
               {summary ? (
-                <dl>
+                <dl className="candidate-metrics">
                   <div>
                     <dt>Arquivos</dt>
                     <dd>{summary.filesChanged}</dd>
@@ -531,22 +660,28 @@ function ComparisonPanel({
                   <div>
                     <dt>Linhas</dt>
                     <dd>
-                      <span className="success-text">+{summary.insertions}</span>{' '}
+                      <span className="success-text">+{summary.insertions}</span>
                       <span className="error-text">−{summary.deletions}</span>
                     </dd>
                   </div>
                   <div>
                     <dt>Comandos</dt>
-                    <dd>
-                      {summary.commandsPassed}/{summary.commandsRun} ok
+                    <dd
+                      className={summary.commandsPassed < summary.commandsRun ? 'error-text' : ''}
+                    >
+                      {summary.commandsRun
+                        ? `${summary.commandsPassed}/${summary.commandsRun}`
+                        : '—'}
                     </dd>
                   </div>
                 </dl>
               ) : (
-                <p className="hint">Sem resultado ainda.</p>
+                <p className="candidate-waiting">
+                  {working ? 'Trabalhando na própria worktree…' : 'Sem resultado.'}
+                </p>
               )}
-              {task.result?.summary && <p className="candidate-summary">{task.result.summary}</p>}
-              {task.error && <p className="error-text">{task.error}</p>}
+              {task.result?.summary && <ResultSummary text={task.result.summary} compact />}
+              {task.error && <p className="error-text candidate-error">{task.error}</p>}
               {!applied && task.status === 'completed' && (
                 <button
                   disabled={action.running}

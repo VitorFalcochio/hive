@@ -292,16 +292,71 @@ export function nextBeeColor(workers: Pick<Worker, 'id' | 'role' | 'beeColor'>[]
 /** The squad in the order the captain usually calls on it. */
 export const soldierRoles: SoldierRole[] = soldierRoleSchema.options;
 
-export const soldierPresets: Record<SoldierRole, { label: string; detail: string }> = {
-  scout: { label: 'Batedora', detail: 'Explora o projeto e acha onde mexer. Só lê.' },
-  builder: { label: 'Operária', detail: 'Escreve e edita o código.' },
-  tester: { label: 'Testadora', detail: 'Roda testes e comandos para conferir o trabalho.' },
-  reviewer: { label: 'Revisora', detail: 'Revisa o que mudou antes da entrega. Só lê.' },
+export interface SoldierPreset {
+  label: string;
+  detail: string;
+  /** What she is for, told to the captain and to her in English. */
+  brief: string;
+  /** Her tools at most; she never gets one her captain lacks. */
+  tools: ToolName[];
+}
+
+const lookTools: ToolName[] = ['list_dir', 'read_file', 'search'];
+
+export const soldierPresets: Record<SoldierRole, SoldierPreset> = {
+  scout: {
+    label: 'Batedora',
+    detail: 'Explora o projeto e acha onde mexer. Só lê.',
+    brief: 'explores the project and finds the files and code that matter. Read-only.',
+    tools: lookTools,
+  },
+  builder: {
+    label: 'Operária',
+    detail: 'Escreve e edita o código.',
+    brief: 'writes and edits code following precise instructions.',
+    tools: [...lookTools, 'write_file', 'replace_in_file'],
+  },
+  tester: {
+    label: 'Testadora',
+    detail: 'Roda testes e comandos para conferir o trabalho.',
+    brief: 'runs tests, builds and other commands, and reports exact results.',
+    tools: [...lookTools, 'run_command'],
+  },
+  reviewer: {
+    label: 'Revisora',
+    detail: 'Revisa o que mudou antes da entrega. Só lê.',
+    brief: 'reviews changed code for defects and risks. Read-only.',
+    tools: lookTools,
+  },
   researcher: {
     label: 'Pesquisadora',
     detail: 'Entra quando falta informação: documentação, APIs, exemplos.',
+    brief:
+      'digs up missing information in the project: docs, APIs, config, usage examples. Read-only.',
+    tools: lookTools,
   },
 };
+
+/** Soldiers that change the worktree; two of them never work at the same time. */
+export function soldierWrites(role: SoldierRole): boolean {
+  return soldierPresets[role].tools.some((tool) => !readOnlyTools.includes(tool));
+}
+
+/**
+ * The soldiers a captain can call: enabled ones left with at least one tool once her own tools
+ * cap theirs.
+ */
+export function callableSoldiers(
+  worker: Pick<Worker, 'role' | 'squad' | 'tools'>,
+): { soldier: Soldier; tools: ToolName[] }[] {
+  return squadOf(worker)
+    .filter((soldier) => soldier.enabled)
+    .map((soldier) => ({
+      soldier,
+      tools: soldierPresets[soldier.role].tools.filter((tool) => worker.tools.includes(tool)),
+    }))
+    .filter(({ tools }) => tools.length > 0);
+}
 
 /** An agent's whole squad, defaults filled in, in `soldierRoles` order. The Queen has none. */
 export function squadOf(worker: Pick<Worker, 'role' | 'squad'>): Soldier[] {

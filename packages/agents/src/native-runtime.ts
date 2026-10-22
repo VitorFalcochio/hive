@@ -1,14 +1,21 @@
 import { realpath } from 'node:fs/promises';
 import {
+  callableSoldiers,
   rolePresets,
+  soldierPresets,
+  soldierWrites,
   stateForTool,
   toolNameSchema,
   type CommandEvidence,
+  type ExecutionLimits,
+  type SoldierRole,
   type ToolName,
+  type Worker,
 } from '@hive/core';
 import {
   ProviderError,
   withRetries,
+  type ChatClient,
   type ChatMessage,
   type ContentPart,
   type RetryNotice,
@@ -36,6 +43,10 @@ const KEEP_FULL_STEPS = 3;
 const COMPACT_OVER_CHARS = 1_500;
 const COMPACT_TO_CHARS = 400;
 const COMPACTED = '\n[… older output shortened to save tokens; call the tool again if you need it]';
+/** A soldier's job is one focused piece of the task, so her loop is short. */
+const SOLDIER_MAX_STEPS = 15;
+/** Reports go back into the captain's prompt, which is resent on every step. */
+const SOLDIER_REPORT_CHARS = 2_500;
 const WRAP_UP_PROMPT =
   'The token budget for this task is almost used up. Do not call any more tools. Reply now with a final summary: what you did, what you found or changed, and what is still missing.';
 
@@ -84,6 +95,7 @@ export function buildSystemPrompt(input: AgentTaskInput, root: string): string {
           '4. Call `finish` once with a summary: what changed (files), how you verified it (commands and results), and open issues.',
         ].join('\n'),
       ];
+  parts.push(buildSquadPrompt(callableSoldiers(worker)));
   if (skills.length) {
     let budget = MAX_SKILL_CHARS;
     const blocks: string[] = [];
@@ -198,7 +210,7 @@ export class NativeAgentRuntime implements AgentRuntime {
     const { limits, worker } = input;
     const timeout = AbortSignal.timeout(limits.taskTimeoutMin * 60_000);
     const signal = AbortSignal.any([session.controller.signal, timeout]);
-    let steps = 0;
+    const progress = { steps: 0 };
     const outcome = (
       status: AgentOutcome['status'],
       summary: string,
@@ -207,18 +219,14 @@ export class NativeAgentRuntime implements AgentRuntime {
       status,
       summary,
       error,
-      steps,
+      steps: progress.steps,
       usage,
       commands,
     });
 
     try {
       const root = await realpath(input.worktreePath);
-      const allowed = new Set<ToolName>(worker.tools);
-      const tools: ToolDefinition[] = [
-        ...worker.tools.map((name) => toolDefinitions[name]),
-        toolDefinitions.finish,
-      ];
+      const env: LoopEnv = { chat: input.chat, limits, signal, usage };
       const ctx: ToolContext = {
         root,
         worker,
@@ -245,9 +253,11 @@ export class NativeAgentRuntime implements AgentRuntime {
           return approved;
         },
       };
-      const messages: ChatMessage[] = [
-        { role: 'system', content: buildSystemPrompt(input, root) },
-        { role: 'user', content: buildTaskPrompt(input) },
+      const squad = callableSoldiers(worker);
+      const tools: ToolDefinition[] = [
+        ...worker.tools.map((name) => toolDefinitions[name]),
+        ...(squad.length ? [callSoldiersDefinition(squad.map(({ soldier }) => soldier.role))] : []),
+        toolDefinitions.finish,
       ];
       emit({
         type: 'session.started',
@@ -257,269 +267,29 @@ export class NativeAgentRuntime implements AgentRuntime {
           model: input.model,
           tools: worker.tools,
           skills: input.skills.map((s) => s.name),
+          squad: squad.map(({ soldier }) => soldier.role),
           runtime: this.id,
         },
       });
-
-      let textOnlyReplies = 0;
-      // The prompt is resent in full on every step, so the budget is close when the next step
-      // would pass it. Then the agent is asked for its final summary without tools.
-      let wrappingUp = false;
-      let lastPromptTokens = 0;
-      while (steps < limits.maxSteps) {
-        const used = usage.promptTokens + usage.completionTokens;
-        if (!wrappingUp && used + lastPromptTokens >= limits.maxTokens) {
-          wrappingUp = true;
-          emit({
-            type: 'info',
-            level: 'warn',
-            message: `Perto do limite de ${limits.maxTokens.toLocaleString('en-US')} tokens; pedindo o resumo final.`,
-          });
-          messages.push({ role: 'user', content: WRAP_UP_PROMPT });
-        }
-        steps++;
-        emit({
-          type: 'worker.state',
-          level: 'debug',
-          message: 'Thinking',
-          data: { state: 'thinking' },
-        });
-        emit({
-          type: 'model.request',
-          level: 'debug',
-          message: `Step ${steps}: calling ${input.model}`,
-          data: { step: steps, messages: messages.length },
-        });
-        // Rate limits and provider hiccups are waited out, not failed: the agent keeps its
-        // progress and tries again until the task's own time limit.
-        let waited = false;
-        const onRetry = (notice: RetryNotice) => {
-          waited = true;
-          emit({
-            type: 'worker.state',
-            level: 'debug',
-            message: 'Waiting for the provider',
-            data: { state: 'waiting_provider' },
-          });
-          emit({
-            type: 'info',
-            level: 'warn',
-            message: `${providerTrouble(notice.error)} Nova tentativa em ${formatDelay(notice.delayMs)} (tentativa ${notice.attempt}).`,
-            data: { error: excerpt(errorMessage(notice.error), 300), delayMs: notice.delayMs },
-          });
-        };
-        const request = async () => {
-          const response = await withRetries(
-            () =>
-              input.chat.chat(
-                {
-                  model: input.model,
-                  messages,
-                  tools: wrappingUp ? undefined : tools,
-                  temperature: limits.temperature,
-                },
-                signal,
-              ),
-            { signal, onRetry },
-          );
-          if (waited) {
-            waited = false;
-            emit({
-              type: 'worker.state',
-              level: 'info',
-              message: 'O provedor voltou a responder.',
-              data: { state: 'thinking' },
-            });
-          }
-          return response;
-        };
-        let response;
-        try {
-          response = await request();
-        } catch (error) {
-          // A model without vision rejects the request outright. The images are taken out and
-          // the step is retried once; from then on images are described instead of sent.
-          if (!ctx.vision || !hasImages(messages) || !isRejection(error)) throw error;
-          ctx.vision = false;
-          dropImages(
-            messages,
-            0,
-            'The image could not be shown: your model does not accept images.',
-          );
-          emit({
-            type: 'info',
-            level: 'warn',
-            message: `O modelo ${input.model} não aceita imagens; seguindo sem elas.`,
-            data: { error: excerpt(errorMessage(error), 300) },
-          });
-          response = await request();
-        }
-        if (response.usage) {
-          usage.promptTokens += response.usage.promptTokens;
-          usage.completionTokens += response.usage.completionTokens;
-          lastPromptTokens = response.usage.promptTokens;
-        }
-        const calls = response.message.tool_calls ?? [];
-        emit({
-          type: 'model.response',
-          level: 'info',
-          message: response.message.content?.trim()
-            ? excerpt(response.message.content.trim(), 300)
-            : calls.length
-              ? `Calling ${calls.map((c) => c.function.name).join(', ')}`
-              : '(empty response)',
-          data: {
-            step: steps,
-            content: excerpt(response.message.content, 4000),
-            reasoning: excerpt(response.reasoning, 2000),
-            toolCalls: calls.map((call) => call.function.name),
-            usage: response.usage,
-            latencyMs: response.latencyMs,
-            finishReason: response.finishReason,
-          },
-        });
-        messages.push(response.message);
-
-        if (wrappingUp) {
-          const text = response.message.content?.trim() || 'Nenhum resumo foi produzido.';
-          return outcome(
-            'completed',
-            `${text}\n\n_Encerrado ao atingir o limite de ${limits.maxTokens.toLocaleString('en-US')} tokens._`,
-            null,
-          );
-        }
-
-        if (!calls.length) {
-          // In a terminal conversation a plain-text reply is the answer; insisting on tools
-          // would only buy a second, paid step that repeats it.
-          const text = response.message.content?.trim();
-          if (input.place === 'project' && text) return outcome('completed', text, null);
-          textOnlyReplies++;
-          if (textOnlyReplies >= MAX_TEXT_ONLY_REPLIES) {
-            emit({
-              type: 'info',
-              level: 'warn',
-              message: 'Model stopped calling tools; treating its last reply as the final summary.',
-            });
-            return outcome(
-              'completed',
-              response.message.content?.trim() || 'No summary provided.',
-              null,
-            );
-          }
-          messages.push({
-            role: 'user',
-            content:
-              'Continue using the tools to complete the task. When you are done, call `finish` with your summary.',
-          });
-          continue;
-        }
-        textOnlyReplies = 0;
-
-        let finished: AgentOutcome | null = null;
-        const images: ToolImage[] = [];
-        for (const call of calls) {
-          let args: Record<string, unknown>;
-          try {
-            args = parseArguments(call.function.arguments);
-          } catch (error) {
-            messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: `Error: invalid JSON arguments (${errorMessage(error)}).`,
-            });
-            continue;
-          }
-          if (call.function.name === 'finish') {
-            const summary =
-              typeof args.summary === 'string' && args.summary.trim()
-                ? args.summary.trim()
-                : 'No summary provided.';
-            const success = args.success !== false;
-            emit({
-              type: 'tool.call',
-              level: 'info',
-              message: 'finish',
-              data: { tool: 'finish', success },
-            });
-            messages.push({ role: 'tool', tool_call_id: call.id, content: 'Recorded.' });
-            finished = success
-              ? outcome('completed', summary, null)
-              : outcome(
-                  'failed',
-                  summary,
-                  'The agent reported that it could not complete the task.',
-                );
-            break;
-          }
-          const parsedName = toolNameSchema.safeParse(call.function.name);
-          if (!parsedName.success || !allowed.has(parsedName.data)) {
-            messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: `Error: tool "${call.function.name}" is not available to you.`,
-            });
-            emit({
-              type: 'tool.call',
-              level: 'warn',
-              message: `Rejected unavailable tool ${call.function.name}`,
-              data: { tool: call.function.name },
-            });
-            continue;
-          }
-          const name = parsedName.data;
-          const command =
-            name === 'run_command' && typeof args.command === 'string' ? args.command : undefined;
-          emit({
-            type: 'worker.state',
-            level: 'debug',
-            message: stateForTool(name, command),
-            data: { state: stateForTool(name, command) },
-          });
-          emit({
-            type: 'tool.call',
-            level: 'info',
-            message: describeCall(name, args),
-            data: { tool: name, args: summarizeArgs(args) },
-          });
-          const result = await executeTool(ctx, name, args);
-          emit({
-            type: 'tool.result',
-            level: result.isError ? 'warn' : 'debug',
-            message: `${name}: ${excerpt(result.output.split('\n')[0], 160)}`,
-            data: {
-              tool: name,
-              isError: result.isError,
-              output: excerpt(result.output, 2000),
-              ...(result.image ? { image: result.image.path } : {}),
-            },
-          });
-          messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
-          if (result.image) images.push(result.image);
-        }
-        if (finished) return finished;
-        compactToolOutputs(messages, KEEP_FULL_STEPS);
-        // Tool messages carry text only, so the images follow them in a user message.
-        if (images.length) {
-          messages.push({
-            role: 'user',
-            content: images.flatMap((image): ContentPart[] => [
-              { type: 'text', text: `Image ${image.path}:` },
-              { type: 'image_url', image_url: { url: image.dataUrl } },
-            ]),
-          });
-          dropImages(
-            messages,
-            MAX_ATTACHED_IMAGES,
-            'An image was shown here earlier and is no longer attached; read the file again to look at it.',
-          );
-        }
-      }
-      return outcome(
-        'failed',
-        '',
-        `Step limit of ${limits.maxSteps} reached before the task was finished.`,
-      );
+      const result = await runLoop(env, {
+        model: input.model,
+        messages: [
+          { role: 'system', content: buildSystemPrompt(input, root) },
+          { role: 'user', content: buildTaskPrompt(input) },
+        ],
+        tools,
+        allowed: new Set<ToolName>(worker.tools),
+        ctx,
+        maxSteps: limits.maxSteps,
+        textEnds: input.place === 'project',
+        progress,
+        extraTools: squad.length
+          ? {
+              call_soldiers: (args) => callSoldiers(env, ctx, { input, root, squad }, args),
+            }
+          : {},
+      });
+      return outcome(result.status, result.summary, result.error);
     } catch (error) {
       if (session.controller.signal.aborted) return outcome('cancelled', '', 'Cancelled by user.');
       if (timeout.aborted)
@@ -528,6 +298,486 @@ export class NativeAgentRuntime implements AgentRuntime {
       return outcome('failed', '', secretRedactor.redact(errorMessage(error)));
     }
   }
+}
+
+/** What every loop of one session shares: the provider, the limits and the token count. */
+interface LoopEnv {
+  chat: ChatClient;
+  limits: ExecutionLimits;
+  signal: AbortSignal;
+  /** Summed over the captain and all her soldiers; the token budget applies to the total. */
+  usage: { promptTokens: number; completionTokens: number };
+}
+
+interface LoopOptions {
+  model: string;
+  messages: ChatMessage[];
+  tools: ToolDefinition[];
+  allowed: Set<ToolName>;
+  /** Its `emit` is where this loop's events go. */
+  ctx: ToolContext;
+  maxSteps: number;
+  /** A plain-text reply is the final answer instead of a nudge to keep using tools. */
+  textEnds: boolean;
+  progress: { steps: number };
+  /** Tools the loop does not run itself, by name; each returns the tool message content. */
+  extraTools?: Record<string, (args: Record<string, unknown>) => Promise<string>>;
+}
+
+type LoopResult = Pick<AgentOutcome, 'summary' | 'error'> & { status: 'completed' | 'failed' };
+
+/**
+ * One agent's tool-calling loop: it ends on `finish`, on a final plain-text reply, on the token
+ * budget (after a last summary) or on the step limit. Provider errors and aborts are thrown.
+ */
+async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
+  const { chat, limits, signal, usage } = env;
+  const { messages, tools, allowed, ctx, progress } = loop;
+  const emit = (event: RuntimeEvent) => ctx.emit(event);
+  const done = (status: LoopResult['status'], summary: string, error: string | null) => ({
+    status,
+    summary,
+    error,
+  });
+  let textOnlyReplies = 0;
+  // The prompt is resent in full on every step, so the budget is close when the next step
+  // would pass it. Then the agent is asked for its final summary without tools.
+  let wrappingUp = false;
+  let lastPromptTokens = 0;
+  let steps = 0;
+  while (steps < loop.maxSteps) {
+    const used = usage.promptTokens + usage.completionTokens;
+    if (!wrappingUp && used + lastPromptTokens >= limits.maxTokens) {
+      wrappingUp = true;
+      emit({
+        type: 'info',
+        level: 'warn',
+        message: `Perto do limite de ${limits.maxTokens.toLocaleString('en-US')} tokens; pedindo o resumo final.`,
+      });
+      messages.push({ role: 'user', content: WRAP_UP_PROMPT });
+    }
+    steps++;
+    progress.steps++;
+    emit({
+      type: 'worker.state',
+      level: 'debug',
+      message: 'Thinking',
+      data: { state: 'thinking' },
+    });
+    emit({
+      type: 'model.request',
+      level: 'debug',
+      message: `Step ${steps}: calling ${loop.model}`,
+      data: { step: steps, messages: messages.length },
+    });
+    // Rate limits and provider hiccups are waited out, not failed: the agent keeps its
+    // progress and tries again until the task's own time limit.
+    let waited = false;
+    const onRetry = (notice: RetryNotice) => {
+      waited = true;
+      emit({
+        type: 'worker.state',
+        level: 'debug',
+        message: 'Waiting for the provider',
+        data: { state: 'waiting_provider' },
+      });
+      emit({
+        type: 'info',
+        level: 'warn',
+        message: `${providerTrouble(notice.error)} Nova tentativa em ${formatDelay(notice.delayMs)} (tentativa ${notice.attempt}).`,
+        data: { error: excerpt(errorMessage(notice.error), 300), delayMs: notice.delayMs },
+      });
+    };
+    const request = async () => {
+      const response = await withRetries(
+        () =>
+          chat.chat(
+            {
+              model: loop.model,
+              messages,
+              tools: wrappingUp ? undefined : tools,
+              temperature: limits.temperature,
+            },
+            signal,
+          ),
+        { signal, onRetry },
+      );
+      if (waited) {
+        waited = false;
+        emit({
+          type: 'worker.state',
+          level: 'info',
+          message: 'O provedor voltou a responder.',
+          data: { state: 'thinking' },
+        });
+      }
+      return response;
+    };
+    let response;
+    try {
+      response = await request();
+    } catch (error) {
+      // A model without vision rejects the request outright. The images are taken out and
+      // the step is retried once; from then on images are described instead of sent.
+      if (!ctx.vision || !hasImages(messages) || !isRejection(error)) throw error;
+      ctx.vision = false;
+      dropImages(messages, 0, 'The image could not be shown: your model does not accept images.');
+      emit({
+        type: 'info',
+        level: 'warn',
+        message: `O modelo ${loop.model} não aceita imagens; seguindo sem elas.`,
+        data: { error: excerpt(errorMessage(error), 300) },
+      });
+      response = await request();
+    }
+    if (response.usage) {
+      usage.promptTokens += response.usage.promptTokens;
+      usage.completionTokens += response.usage.completionTokens;
+      lastPromptTokens = response.usage.promptTokens;
+    }
+    const calls = response.message.tool_calls ?? [];
+    emit({
+      type: 'model.response',
+      level: 'info',
+      message: response.message.content?.trim()
+        ? excerpt(response.message.content.trim(), 300)
+        : calls.length
+          ? `Calling ${calls.map((c) => c.function.name).join(', ')}`
+          : '(empty response)',
+      data: {
+        step: steps,
+        content: excerpt(response.message.content, 4000),
+        reasoning: excerpt(response.reasoning, 2000),
+        toolCalls: calls.map((call) => call.function.name),
+        usage: response.usage,
+        latencyMs: response.latencyMs,
+        finishReason: response.finishReason,
+      },
+    });
+    messages.push(response.message);
+
+    if (wrappingUp) {
+      const text = response.message.content?.trim() || 'Nenhum resumo foi produzido.';
+      return done(
+        'completed',
+        `${text}\n\n_Encerrado ao atingir o limite de ${limits.maxTokens.toLocaleString('en-US')} tokens._`,
+        null,
+      );
+    }
+
+    if (!calls.length) {
+      // In a terminal conversation a plain-text reply is the answer; insisting on tools
+      // would only buy a second, paid step that repeats it.
+      const text = response.message.content?.trim();
+      if (loop.textEnds && text) return done('completed', text, null);
+      textOnlyReplies++;
+      if (textOnlyReplies >= MAX_TEXT_ONLY_REPLIES) {
+        emit({
+          type: 'info',
+          level: 'warn',
+          message: 'Model stopped calling tools; treating its last reply as the final summary.',
+        });
+        return done('completed', text || 'No summary provided.', null);
+      }
+      messages.push({
+        role: 'user',
+        content:
+          'Continue using the tools to complete the task. When you are done, call `finish` with your summary.',
+      });
+      continue;
+    }
+    textOnlyReplies = 0;
+
+    let finished: LoopResult | null = null;
+    const images: ToolImage[] = [];
+    for (const call of calls) {
+      let args: Record<string, unknown>;
+      try {
+        args = parseArguments(call.function.arguments);
+      } catch (error) {
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: `Error: invalid JSON arguments (${errorMessage(error)}).`,
+        });
+        continue;
+      }
+      if (call.function.name === 'finish') {
+        const summary =
+          typeof args.summary === 'string' && args.summary.trim()
+            ? args.summary.trim()
+            : 'No summary provided.';
+        const success = args.success !== false;
+        emit({
+          type: 'tool.call',
+          level: 'info',
+          message: 'finish',
+          data: { tool: 'finish', success },
+        });
+        messages.push({ role: 'tool', tool_call_id: call.id, content: 'Recorded.' });
+        finished = success
+          ? done('completed', summary, null)
+          : done('failed', summary, 'The agent reported that it could not complete the task.');
+        break;
+      }
+      const extra = loop.extraTools?.[call.function.name];
+      if (extra) {
+        const output = await extra(args);
+        // Its successes are already in the log as the soldiers' own events; a refusal is not.
+        if (output.startsWith('Error:'))
+          emit({
+            type: 'tool.result',
+            level: 'warn',
+            message: `${call.function.name}: ${excerpt(output, 160)}`,
+            data: { tool: call.function.name, isError: true, output: excerpt(output, 2000) },
+          });
+        messages.push({ role: 'tool', tool_call_id: call.id, content: output });
+        continue;
+      }
+      const parsedName = toolNameSchema.safeParse(call.function.name);
+      if (!parsedName.success || !allowed.has(parsedName.data)) {
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: `Error: tool "${call.function.name}" is not available to you.`,
+        });
+        emit({
+          type: 'tool.call',
+          level: 'warn',
+          message: `Rejected unavailable tool ${call.function.name}`,
+          data: { tool: call.function.name },
+        });
+        continue;
+      }
+      const name = parsedName.data;
+      const command =
+        name === 'run_command' && typeof args.command === 'string' ? args.command : undefined;
+      emit({
+        type: 'worker.state',
+        level: 'debug',
+        message: stateForTool(name, command),
+        data: { state: stateForTool(name, command) },
+      });
+      emit({
+        type: 'tool.call',
+        level: 'info',
+        message: describeCall(name, args),
+        data: { tool: name, args: summarizeArgs(args) },
+      });
+      const result = await executeTool(ctx, name, args);
+      emit({
+        type: 'tool.result',
+        level: result.isError ? 'warn' : 'debug',
+        message: `${name}: ${excerpt(result.output.split('\n')[0], 160)}`,
+        data: {
+          tool: name,
+          isError: result.isError,
+          output: excerpt(result.output, 2000),
+          ...(result.image ? { image: result.image.path } : {}),
+        },
+      });
+      messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
+      if (result.image) images.push(result.image);
+    }
+    if (finished) return finished;
+    compactToolOutputs(messages, KEEP_FULL_STEPS);
+    // Tool messages carry text only, so the images follow them in a user message.
+    if (images.length) {
+      messages.push({
+        role: 'user',
+        content: images.flatMap((image): ContentPart[] => [
+          { type: 'text', text: `Image ${image.path}:` },
+          { type: 'image_url', image_url: { url: image.dataUrl } },
+        ]),
+      });
+      dropImages(
+        messages,
+        MAX_ATTACHED_IMAGES,
+        'An image was shown here earlier and is no longer attached; read the file again to look at it.',
+      );
+    }
+  }
+  return done('failed', '', `Step limit of ${loop.maxSteps} reached before the task was finished.`);
+}
+
+/* ---------------------------------------------------------------- Squad */
+
+type CallableSoldier = ReturnType<typeof callableSoldiers>[number];
+
+function callSoldiersDefinition(roles: SoldierRole[]): ToolDefinition {
+  return {
+    type: 'function',
+    function: {
+      name: 'call_soldiers',
+      description:
+        'Send soldier bees from your squad to do part of the work, and wait for their reports. Soldiers in one call work in parallel; at most one of them may edit files or run commands.',
+      parameters: {
+        type: 'object',
+        properties: {
+          assignments: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              properties: {
+                role: { type: 'string', enum: roles },
+                instruction: {
+                  type: 'string',
+                  description:
+                    'Self-contained: the soldier sees nothing else. Say the goal, the files involved and what to report.',
+                },
+              },
+              required: ['role', 'instruction'],
+            },
+          },
+        },
+        required: ['assignments'],
+      },
+    },
+  };
+}
+
+/** The squad section of the captain's prompt; empty when she has no soldier to call. */
+export function buildSquadPrompt(squad: CallableSoldier[]): string {
+  if (!squad.length) return '';
+  return [
+    '## Your squad',
+    'You are the captain of these soldier bees. Call them with `call_soldiers` only when it beats doing the work yourself (a broad exploration, a long edit, a test run); do small things yourself. Call several at once only for independent work: they run in parallel. Each sees only your instruction and answers with a short report.',
+    ...squad.map(({ soldier }) => `- ${soldier.role}: ${soldierPresets[soldier.role].brief}`),
+  ].join('\n');
+}
+
+export function buildSoldierPrompt(
+  captain: Worker,
+  role: SoldierRole,
+  root: string,
+  place: AgentTaskInput['place'],
+): string {
+  const shell = process.platform === 'win32' ? 'cmd.exe (Windows)' : '/bin/sh';
+  const where =
+    place === 'project'
+      ? `the user's project folder (${root}); edits apply at once`
+      : `an isolated Git worktree of the project (${root})`;
+  return [
+    `You are the ${role} bee in ${captain.name}'s squad on a Hive software team: you ${soldierPresets[role].brief}`,
+    'Your captain gives you one instruction and reads only your final report, not your steps.',
+    [
+      '## Rules',
+      `- You work in ${where}. Paths are relative to it. Shell: ${shell}; commands may need approval.`,
+      '- No git commit, push, merge, rebase or reset. No global installs.',
+      '- Do only what the instruction asks. Read files before changing them.',
+      '- When done, reply with your report (or call `finish`): under 200 words, with file paths, exact command results and anything still open.',
+    ].join('\n'),
+  ].join('\n\n');
+}
+
+/**
+ * The assignments as smaller models send them: a list, the list as a JSON string, or a single
+ * `{ role, instruction }` without the list.
+ */
+function readAssignments(args: Record<string, unknown>): unknown[] {
+  let value = args.assignments;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(value)) return value as unknown[];
+  if (value && typeof value === 'object') return [value];
+  return 'role' in args ? [args] : [];
+}
+
+/**
+ * Runs the soldiers the captain called, in parallel, and returns their reports as one tool
+ * result. Bad calls come back as an error for the captain to fix; a soldier that fails is
+ * reported, not thrown, unless the whole session was stopped.
+ */
+async function callSoldiers(
+  env: LoopEnv,
+  ctx: ToolContext,
+  captain: { input: AgentTaskInput; root: string; squad: CallableSoldier[] },
+  args: Record<string, unknown>,
+): Promise<string> {
+  const { input, root, squad } = captain;
+  const raw = readAssignments(args);
+  const assignments: { member: CallableSoldier; instruction: string }[] = [];
+  for (const item of raw) {
+    const { role, instruction } = (item ?? {}) as Record<string, unknown>;
+    const member = squad.find(({ soldier }) => soldier.role === role);
+    if (!member)
+      return `Error: "${String(role)}" is not in your squad. Available: ${squad.map(({ soldier }) => soldier.role).join(', ')}.`;
+    if (typeof instruction !== 'string' || !instruction.trim())
+      return `Error: the assignment for ${member.soldier.role} needs an instruction.`;
+    if (assignments.some((other) => other.member === member))
+      return `Error: ${member.soldier.role} was called twice; give her one instruction.`;
+    assignments.push({ member, instruction: instruction.trim() });
+  }
+  if (!assignments.length) return 'Error: call at least one soldier.';
+  if (assignments.filter(({ member }) => soldierWrites(member.soldier.role)).length > 1)
+    return 'Error: at most one soldier that edits files or runs commands per call; call the others afterwards.';
+
+  const labels = assignments.map(({ member }) => soldierPresets[member.soldier.role].label);
+  ctx.emit({
+    type: 'tool.call',
+    level: 'info',
+    message: `Convocou ${labels.join(', ')}`,
+    data: { tool: 'call_soldiers', soldiers: assignments.map(({ member }) => member.soldier.role) },
+  });
+
+  const reports = await Promise.all(
+    assignments.map(async ({ member, instruction }) => {
+      const { soldier, tools } = member;
+      const label = soldierPresets[soldier.role].label;
+      const emit = (event: RuntimeEvent) =>
+        ctx.emit({
+          ...event,
+          message: `${label}: ${event.message}`,
+          data: { ...event.data, soldier: soldier.role },
+        });
+      const model = soldier.modelId ?? input.model;
+      emit({
+        type: 'info',
+        level: 'info',
+        message: `começou em ${model}`,
+        data: { phase: 'start', instruction: excerpt(instruction, 600), model },
+      });
+      let result: LoopResult;
+      try {
+        result = await runLoop(env, {
+          model,
+          messages: [
+            {
+              role: 'system',
+              content: buildSoldierPrompt(input.worker, soldier.role, root, input.place),
+            },
+            { role: 'user', content: instruction },
+          ],
+          tools: [...tools.map((name) => toolDefinitions[name]), toolDefinitions.finish],
+          allowed: new Set(tools),
+          ctx: { ...ctx, emit },
+          maxSteps: Math.min(env.limits.maxSteps, SOLDIER_MAX_STEPS),
+          textEnds: true,
+          progress: { steps: 0 },
+        });
+      } catch (error) {
+        if (env.signal.aborted) throw error;
+        result = { status: 'failed', summary: '', error: errorMessage(error) };
+      }
+      emit({
+        type: 'info',
+        level: result.status === 'completed' ? 'info' : 'warn',
+        message: result.status === 'completed' ? 'terminou' : `falhou: ${result.error ?? ''}`,
+        data: { phase: 'end', status: result.status },
+      });
+      const body = [result.summary && excerpt(result.summary, SOLDIER_REPORT_CHARS), result.error]
+        .filter(Boolean)
+        .join('\n');
+      return `## ${soldier.role} (${result.status})\n${body || 'No report.'}`;
+    }),
+  );
+  return reports.join('\n\n');
 }
 
 /**

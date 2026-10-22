@@ -1775,6 +1775,24 @@ dd {
   gap: 6px;
   margin-top: 4px;
 }
+/* The soldiers a captain sent out: they fly in beside her name and leave when they report. */
+.task-squad {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+.task-squad .soldier-bee {
+  animation: soldier-arrive 0.35s ease-out;
+}
+@keyframes soldier-arrive {
+  from {
+    opacity: 0;
+    transform: translate(-8px, -4px);
+  }
+}
 .task-card .actions {
   display: flex;
   flex-wrap: wrap;
@@ -1797,17 +1815,159 @@ dd {
 }
 .task-result {
   margin-top: 12px;
-  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.task-result .result-summary {
+  padding: 14px 16px 4px;
+}
+.result-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+.result-stats .stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+.result-stats .stat svg {
+  color: var(--subtle-foreground);
+}
+.stat.mono,
+.candidate-metrics dd {
+  font-family: var(--font-mono);
+  gap: 6px;
+}
+
+/* An agent's summary, drawn from its Markdown; long ones fold behind a fade. */
+.result-summary-body {
+  position: relative;
+  max-height: 168px;
+  overflow: hidden;
+}
+.result-summary.compact .result-summary-body {
+  max-height: 110px;
+}
+.result-summary.open .result-summary-body {
+  max-height: none;
+}
+.result-summary.folded .result-summary-body::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 48px;
+  background: linear-gradient(transparent, var(--surface-2));
+  pointer-events: none;
+}
+button.link.result-summary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-decoration: none;
+}
+button.link.result-summary-toggle:hover {
+  color: var(--foreground);
+}
+.result-summary-toggle svg {
+  transition: transform 0.15s;
+}
+.result-summary.open .result-summary-toggle svg {
+  transform: rotate(180deg);
+}
+.markdown {
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.markdown > * {
+  margin: 0 0 8px;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown .md-heading {
+  margin-top: 12px;
+  font-weight: 600;
+}
+.markdown .md-heading:first-child {
+  margin-top: 0;
+}
+.markdown .md-h1 {
+  font-size: 14.5px;
+}
+.markdown .md-h3 {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.markdown ul,
+.markdown ol {
+  display: grid;
+  gap: 4px;
+  padding-left: 20px;
+}
+.markdown li::marker {
+  color: var(--subtle-foreground);
+}
+.markdown strong {
+  font-weight: 600;
+}
+.markdown code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--secondary);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+.markdown pre {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--secondary);
+  overflow-x: auto;
+}
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+.markdown .md-table {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-2);
+  overflow-x: auto;
 }
-.task-result .summary {
-  margin: 0 0 8px;
-  color: var(--foreground);
-  white-space: pre-wrap;
-  max-height: 220px;
-  overflow-y: auto;
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.markdown th,
+.markdown td {
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown th {
+  background: var(--hover);
+  color: var(--muted-foreground);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.markdown tr + tr td,
+.markdown tbody tr:first-child td {
+  border-top: 1px solid var(--border);
 }
 /* Pending command approvals: flat rows with an amber edge, actions on the title line. */
 .approval-list {
@@ -3561,53 +3721,127 @@ pre.command {
 }
 .comparison-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
 }
 .candidate {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface-2);
+  transition:
+    border-color 0.15s,
+    opacity 0.15s;
+}
+/* The one applied stands out; the ones left behind step back. */
+.candidate.chosen {
+  border-color: rgb(76 214 160 / 45%);
+  box-shadow: inset 0 0 0 1px rgb(76 214 160 / 12%);
+}
+.candidate.dropped {
+  opacity: 0.55;
 }
 .candidate header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+.candidate-who {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.candidate-who strong {
+  font-size: 13.5px;
+  line-height: 1.3;
+}
+.candidate header .mascot,
+.candidate-status {
+  margin-top: 2px;
+}
+.candidate-who small {
+  overflow: hidden;
+  color: var(--subtle-foreground);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .candidate-status {
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-}
-.candidate dl {
-  display: grid;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
   gap: 4px;
-  margin: 0;
-  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
 }
-.candidate dl div {
+.candidate-status.tone-busy {
+  background: rgb(245 181 68 / 10%);
+  color: var(--warning);
+}
+.candidate-status.tone-ok {
+  background: rgb(76 214 160 / 10%);
+  color: var(--success);
+}
+.candidate-status.tone-error {
+  background: rgb(248 113 133 / 10%);
+  color: var(--danger);
+}
+.candidate-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.candidate-metrics div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+}
+.candidate-metrics div + div {
+  border-left: 1px solid var(--border);
+}
+.candidate-metrics dt {
+  color: var(--subtle-foreground);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.candidate-metrics dd {
   display: flex;
-  justify-content: space-between;
-}
-.candidate dt {
-  color: var(--muted-foreground);
-}
-.candidate dd {
   margin: 0;
-  font-family: var(--font-mono);
+  font-size: 13px;
 }
-.candidate-summary {
+.candidate-waiting {
   margin: 0;
-  color: var(--muted-foreground);
+  padding: 14px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--subtle-foreground);
   font-size: 12px;
-  line-height: 1.5;
+  text-align: center;
+}
+.candidate .result-summary .markdown {
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+}
+.candidate-error {
+  margin: 0;
+  font-size: 12px;
 }
 .candidate > button {
   align-self: flex-start;
+  margin-top: auto;
 }
 
 /* New mission modal: how to run it */

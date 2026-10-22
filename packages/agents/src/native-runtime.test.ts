@@ -2,10 +2,11 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { ExecutionLimits, Worker } from '@hive/core';
+import { soldierRoles, type ExecutionLimits, type Worker } from '@hive/core';
 import type { ChatClient, ChatRequest, ChatResponse } from '@hive/providers';
 import { ProviderError } from '@hive/providers';
 import { compactToolOutputs, NativeAgentRuntime } from './native-runtime';
+import type { RuntimeEvent } from './runtime';
 
 const limits: ExecutionLimits = {
   maxSteps: 20,
@@ -298,5 +299,178 @@ describe('NativeAgentRuntime token savings', () => {
     const once = outputs[0];
     compactToolOutputs(messages, 2);
     expect(messages[2]!.content).toBe(once);
+  });
+});
+
+/** The captain calls `assignments` first and finishes with what the soldiers reported. */
+function squadChat(
+  requests: ChatRequest[],
+  assignments: unknown,
+  tracker = { active: 0, most: 0 },
+) {
+  const reply = (message: ChatResponse['message']): ChatResponse => ({
+    message,
+    reasoning: null,
+    finishReason: 'stop',
+    usage: { promptTokens: 10, completionTokens: 5 },
+    latencyMs: 1,
+  });
+  const call = (name: string, args: unknown) => ({
+    role: 'assistant' as const,
+    content: '',
+    tool_calls: [
+      {
+        id: `c${requests.length}`,
+        type: 'function' as const,
+        function: { name, arguments: JSON.stringify(args) },
+      },
+    ],
+  });
+  return {
+    async chat(request: ChatRequest): Promise<ChatResponse> {
+      requests.push(structuredClone(request));
+      const system = String(request.messages[0]!.content);
+      if (system.includes("in Analista's squad")) {
+        tracker.active++;
+        tracker.most = Math.max(tracker.most, tracker.active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        tracker.active--;
+        const role = /You are the (\w+) bee/.exec(system)![1];
+        return reply({ role: 'assistant', content: `Relatório da ${role}.` });
+      }
+      const report = request.messages.find((message) => message.role === 'tool');
+      return report
+        ? reply(call('finish', { summary: String(report.content), success: true }))
+        : reply(call('call_soldiers', { assignments }));
+    },
+  } as ChatClient;
+}
+
+async function lead(chat: ChatClient, captain: Worker) {
+  const worktree = await mkdtemp(path.join(os.tmpdir(), 'hive-squad-'));
+  const runtime = new NativeAgentRuntime();
+  const sessionId = `squad-${Math.random()}`;
+  const session = await runtime.start({
+    sessionId,
+    task: {
+      title: 'Entender',
+      description: 'Explique o projeto.',
+      acceptanceCriteria: [],
+      upstream: [],
+    },
+    worker: captain,
+    model: 'captain-model',
+    chat,
+    worktreePath: worktree,
+    skills: [],
+    limits,
+    requestApproval: async () => false,
+  });
+  const events: RuntimeEvent[] = [];
+  runtime.subscribe(sessionId, (event) => events.push(event));
+  return { outcome: await session.done, events };
+}
+
+describe('NativeAgentRuntime squad', () => {
+  const captain = {
+    ...worker,
+    tools: ['list_dir', 'read_file', 'search', 'write_file', 'run_command'],
+    squad: [],
+  } as unknown as Worker;
+
+  it('calls only the soldiers asked for, in parallel, and hands their reports back', async () => {
+    const requests: ChatRequest[] = [];
+    const tracker = { active: 0, most: 0 };
+    const { outcome, events } = await lead(
+      squadChat(
+        requests,
+        [
+          { role: 'scout', instruction: 'Ache os pontos de entrada.' },
+          { role: 'researcher', instruction: 'Leia a documentação.' },
+        ],
+        tracker,
+      ),
+      captain,
+    );
+
+    expect(outcome.status).toBe('completed');
+    expect(outcome.summary).toContain('Relatório da scout.');
+    expect(outcome.summary).toContain('Relatório da researcher.');
+    expect(tracker.most).toBe(2);
+    const soldiers = requests.filter((r) =>
+      String(r.messages[0]!.content).includes("in Analista's squad"),
+    );
+    expect(soldiers).toHaveLength(2);
+    // A scout only looks, even though her captain can write and run commands.
+    const scout = soldiers.find((r) => String(r.messages[0]!.content).includes('scout bee'))!;
+    expect(scout.tools!.map((tool) => tool.function.name)).toEqual([
+      'list_dir',
+      'read_file',
+      'search',
+      'finish',
+    ]);
+    expect(scout.messages[1]).toEqual({ role: 'user', content: 'Ache os pontos de entrada.' });
+    expect(
+      events.some((e) => e.data?.soldier === 'scout' && e.message.startsWith('Batedora:')),
+    ).toBe(true);
+    // Soldiers' tokens count against the task's budget.
+    expect(outcome.usage.promptTokens).toBe(40);
+  });
+
+  it('refuses two soldiers that change the worktree in one call', async () => {
+    const requests: ChatRequest[] = [];
+    const { outcome } = await lead(
+      squadChat(requests, [
+        { role: 'builder', instruction: 'Edite a.ts.' },
+        { role: 'tester', instruction: 'Rode os testes.' },
+      ]),
+      captain,
+    );
+
+    expect(outcome.summary).toContain('at most one soldier that edits files or runs commands');
+    expect(
+      requests.some((r) => String(r.messages[0]!.content).includes("in Analista's squad")),
+    ).toBe(false);
+  });
+
+  it('offers only enabled soldiers, on their own model when they have one', async () => {
+    const requests: ChatRequest[] = [];
+    const { outcome } = await lead(
+      squadChat(requests, [{ role: 'reviewer', instruction: 'Revise.' }]),
+      {
+        ...captain,
+        squad: [
+          { role: 'scout', enabled: false, modelId: null },
+          { role: 'reviewer', enabled: true, modelId: 'small-model' },
+        ],
+      },
+    );
+
+    expect(outcome.status).toBe('completed');
+    const offered = requests[0]!.tools!.find((tool) => tool.function.name === 'call_soldiers')!;
+    expect(JSON.stringify(offered)).not.toContain('"scout"');
+    const reviewer = requests.find((r) => String(r.messages[0]!.content).includes('reviewer bee'))!;
+    expect(reviewer.model).toBe('small-model');
+  });
+
+  it('accepts the assignments sent as a JSON string', async () => {
+    const requests: ChatRequest[] = [];
+    const { outcome } = await lead(
+      squadChat(requests, JSON.stringify([{ role: 'scout', instruction: 'Explore.' }])),
+      captain,
+    );
+
+    expect(outcome.summary).toContain('Relatório da scout.');
+  });
+
+  it('gives no squad to an agent whose soldiers are all off', async () => {
+    const requests: ChatRequest[] = [];
+    await lead(squadChat(requests, []), {
+      ...captain,
+      squad: soldierRoles.map((role) => ({ role, enabled: false, modelId: null })),
+    });
+
+    expect(requests[0]!.tools!.some((tool) => tool.function.name === 'call_soldiers')).toBe(false);
+    expect(String(requests[0]!.messages[0]!.content)).not.toContain('## Your squad');
   });
 });
