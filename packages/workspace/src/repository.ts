@@ -58,10 +58,17 @@ export async function inspectRepository(folder: string): Promise<RepoInfo> {
 
 export async function statusPorcelain(root: string): Promise<{ path: string; status: string }[]> {
   const { stdout } = await git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
-  return stdout
-    .split('\0')
-    .filter(Boolean)
-    .map((entry) => ({ status: entry.slice(0, 2).trim(), path: entry.slice(3) }));
+  const records = stdout.split('\0');
+  const files: { path: string; status: string }[] = [];
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index]!;
+    if (!record) continue;
+    const status = record.slice(0, 2).trim();
+    files.push({ status, path: record.slice(3) });
+    // A rename or copy is followed by its old path as a record of its own.
+    if (/^[RC]/.test(status)) index++;
+  }
+  return files;
 }
 
 export async function listWorktrees(root: string): Promise<WorktreeEntry[]> {

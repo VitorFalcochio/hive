@@ -41,6 +41,8 @@ export function stateForTaskStatus(status: TaskStatus): WorkerState | null {
 
 /** Match a command against an allow-list entry: exact string, or `prefix *`. */
 export function commandMatchesAllowList(command: string, allowList: readonly string[]): boolean {
+  // A line break starts another command in a shell; it must never ride on an allowed one.
+  if (/[\r\n]/.test(command)) return false;
   const normalized = command.trim().replace(/\s+/g, ' ');
   // Never auto-approve command chaining, redirection or substitution.
   if (/[;&|`<>]|\$\(/.test(normalized)) return false;

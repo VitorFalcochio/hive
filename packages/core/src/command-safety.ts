@@ -85,6 +85,8 @@ function splitChain(command: string): string[] | null {
   let quote: '"' | "'" | null = null;
   for (let index = 0; index < command.length; index++) {
     const char = command[index]!;
+    // A line break is another command, even inside quotes for some shells: never safe.
+    if (char === '\n' || char === '\r') return null;
     if (quote) {
       if (char === quote) quote = null;
       else if (quote === '"' && (char === '`' || (char === '$' && command[index + 1] === '(')))

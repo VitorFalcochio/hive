@@ -596,9 +596,10 @@ function DiffModal({ task }: { task: Task }) {
   };
   const load = useTask();
   const act = useTask();
+  const { run: runLoad } = load;
   useEffect(() => {
-    void load.run(async () => setDiff(await window.hive.invoke('task.diff', task.id)));
-  }, [task.id, load.run]);
+    void runLoad(async () => setDiff(await window.hive.invoke('task.diff', task.id)));
+  }, [task.id, runLoad]);
   // Review notes are kept per result, so closing the diff does not lose them.
   const reviewKey = draftKey(task.id, task.result?.commit);
   const [review, setReview] = useState(() => loadDraft(reviewKey));

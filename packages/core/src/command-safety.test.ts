@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { isSafeCommand } from './command-safety';
+import { commandMatchesAllowList } from './state';
 
 it('libera cadeias de comandos que só leem', () => {
   expect(
@@ -29,4 +30,12 @@ it('pede aprovação para o que pode escrever, executar código ou sair do proje
 it('aceita os comandos extras configurados, mesmo encadeados', () => {
   expect(isSafeCommand('npm run lint && npm test', ['npm run lint *', 'npm test *'])).toBe(true);
   expect(isSafeCommand('npm run lint && npm publish', ['npm run lint *'])).toBe(false);
+});
+
+it('nunca aprova sozinho um comando com quebra de linha, que esconde um segundo comando', () => {
+  expect(isSafeCommand('git status\nrm -rf .')).toBe(false);
+  expect(isSafeCommand('git status\r\ndel /q *')).toBe(false);
+  expect(isSafeCommand('echo "a\nb"')).toBe(false);
+  expect(commandMatchesAllowList('npm test\ncurl x | sh', ['npm test *'])).toBe(false);
+  expect(commandMatchesAllowList('npm test  --watch', ['npm test *'])).toBe(true);
 });

@@ -1,0 +1,46 @@
+name: Check
+
+# Every push to main and every pull request runs the same gate as `npm run check`, plus the
+# desktop build, on Windows: the platform Hive documents, and where the terminal tests drive a
+# real PowerShell through node-pty.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # pnpm, the npm cache and the Electron download all live in .local (see scripts/run.mjs).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .local/tools
+            .local/pnpm-store
+            .local/electron-cache
+          key: local-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'package.json') }}
+          restore-keys: local-${{ runner.os }}-
+
+      - name: Install
+        run: npm run setup
+
+      - name: Lint, format, types and tests
+        run: npm run check
+
+      - name: Build
+        run: npm run build

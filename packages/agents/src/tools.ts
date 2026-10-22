@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   commandMatchesAllowList,
@@ -77,6 +77,17 @@ function guardGit(relative: string): void {
   if (relative.split(/[\\/]/).some((part) => part.toLowerCase() === '.git')) {
     throw new HiveError('FORBIDDEN_PATH', 'Writing inside .git is not allowed.');
   }
+}
+
+/**
+ * The path a write lands on, checked twice for .git: as asked, and as resolved, since a link
+ * inside the project (`shortcut -> .git`) would otherwise pass under another name.
+ */
+async function writableTarget(ctx: ToolContext, requested: string): Promise<string> {
+  guardGit(requested);
+  const file = await resolveInside(ctx.root, requested);
+  guardGit(path.relative(await realpath(ctx.root), file));
+  return file;
 }
 
 async function isBinary(file: string): Promise<boolean> {
@@ -317,8 +328,7 @@ async function searchTool(ctx: ToolContext, args: Record<string, unknown>): Prom
 
 async function writeTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
   const requested = str(args, 'path');
-  guardGit(requested);
-  const file = await resolveInside(ctx.root, requested);
+  const file = await writableTarget(ctx, requested);
   const content = str(args, 'content');
   const existed = await lstat(file).then(
     () => true,
@@ -342,8 +352,7 @@ async function writeTool(ctx: ToolContext, args: Record<string, unknown>): Promi
 
 async function replaceTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
   const requested = str(args, 'path');
-  guardGit(requested);
-  const file = await resolveInside(ctx.root, requested);
+  const file = await writableTarget(ctx, requested);
   const oldString = str(args, 'old_string');
   const newString = str(args, 'new_string');
   if (!oldString)
