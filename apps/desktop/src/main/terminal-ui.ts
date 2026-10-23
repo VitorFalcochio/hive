@@ -11,6 +11,7 @@ import {
 import { errorMessage } from '@hive/shared';
 import type { ApprovalAnswer, Exchange, TurnHandlers } from './terminal-agents';
 import { BEE_COLUMNS, SMALL_BEE_COLUMNS, beeLines, besideBee } from './terminal-bee';
+import { renderMarkdown } from './terminal-markdown';
 
 /** Where the app draws: the shell's terminal, through the command that launched it. */
 export interface TerminalHost {
@@ -560,14 +561,32 @@ export class HiveTerminalApp {
       );
       return;
     }
-    // A plain-text answer was already shown as the agent spoke.
-    const repeated = outcome.summary.trim() === this.said;
-    const body = outcome.summary.trim().replace(/\r?\n/g, `${newline}  `);
+    // A plain-text answer was already shown as the agent spoke; only what came after it (the
+    // note that a limit ended the task) is left to print.
+    const summary = outcome.summary.trim();
+    const repeated = Boolean(this.said) && summary.startsWith(this.said);
+    const rest = repeated ? summary.slice(this.said.length).trim() : summary;
+    const body = !rest
+      ? ''
+      : repeated
+        ? `${this.markdown(rest, false)}${newline}`
+        : `${newline}${this.markdown(rest)}${newline}`;
     this.write(
-      (repeated ? '' : `${newline}${this.color()}●${reset} ${body}${newline}`) +
+      body +
         (outcome.status === 'failed' ? `${red}  ${outcome.error ?? ''}${reset}${newline}` : '') +
         `${meta}${newline}`,
     );
+  }
+
+  /** What the agent said, its Markdown drawn for the terminal, after its coloured dot. */
+  private markdown(text: string, dot = true): string {
+    // Two columns for the dot and one spare, so no line reaches the edge and wraps by itself.
+    const width = Math.max(20, this.host.size().cols - 3);
+    return renderMarkdown(text, width, this.color())
+      .map((line, index) =>
+        index || !dot ? (line ? `  ${line}` : '') : `${this.color()}●${reset} ${line}`,
+      )
+      .join(newline);
   }
 
   /** A line of the transcript, kept above the working bee while one is flying. */
@@ -591,7 +610,7 @@ export class HiveTerminalApp {
           break;
         }
         this.said = content;
-        this.print(`${this.color()}●${reset} ${content.replace(/\r?\n/g, `${newline}  `)}`);
+        this.print(this.markdown(content));
         break;
       }
       case 'tool.call': {

@@ -125,6 +125,32 @@ describe('terminal do Hive', () => {
     ]);
   });
 
+  it('não repete a resposta quando o limite acrescenta um aviso no fim', async () => {
+    const said = '**Resumo do trabalho**\n\nTestes passaram.';
+    const turn = vi.fn(
+      async (
+        _worker: string,
+        _request: string,
+        _history: Exchange[],
+        handlers: TurnHandlers,
+      ): Promise<AgentOutcome> => {
+        handlers.onEvent({
+          type: 'model.response',
+          level: 'info',
+          message: said,
+          data: { content: said },
+        });
+        return outcome(`${said}\n\n_Encerrado ao atingir o limite de 3,000,000 tokens._`);
+      },
+    );
+    const { app, screen } = setup(turn);
+    app.start('agents');
+    app.input('\x1b[B\r');
+    app.input('analise o projeto\r');
+    await vi.waitFor(() => expect(screen()).toContain('Encerrado ao atingir o limite'));
+    expect(screen().split('Resumo do trabalho').length).toBe(2);
+  });
+
   it('não deixa escolher quem não tem modelo e sai com Esc', () => {
     const { app, end, screen } = setup();
     app.start('agents');
