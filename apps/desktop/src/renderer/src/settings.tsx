@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { FolderOpen, RotateCcw, Save, X } from 'lucide-react';
 import { defaultSettings, type Settings } from '@hive/core';
+import { useHive } from './context';
 import { PageHeader, useTask } from './ui';
 
 const approvalChoices: { value: Settings['commandApproval']; label: string; detail: string }[] = [
@@ -50,6 +51,7 @@ export function SettingsPage({
 
 function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Promise<void> }) {
   const [draft, setDraft] = useState<Settings>(settings);
+  const { workers, refresh, notify } = useHive();
   const task = useTask();
   // The shift has its own page and can be switched from the tray, so this form leaves it alone.
   const dirty =
@@ -161,7 +163,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
 
       <Section
         title="Limites padrão para agentes novos"
-        description="Valores iniciais de cada agente criado a partir daqui. Agentes já existentes mantêm os valores deles."
+        description="Valores iniciais de cada agente criado a partir daqui. Cada agente também tem os seus, na gaveta dele."
       >
         <div className="settings-grid">
           <NumberField
@@ -212,6 +214,29 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
               }}
             />
           </Field>
+        </div>
+        <div className="settings-apply">
+          <button
+            className="secondary"
+            disabled={task.running}
+            onClick={() =>
+              void task.run(async () => {
+                // Each agent keeps its own temperature: it is tuned to its model.
+                for (const worker of workers)
+                  await window.hive.invoke('worker.save', {
+                    ...worker,
+                    limits: { ...draft.defaultLimits, temperature: worker.limits.temperature },
+                  });
+                await refresh();
+                notify(`Limites aplicados a ${workers.length} agentes.`);
+              })
+            }
+          >
+            Aplicar a todos os agentes
+          </button>
+          <small>
+            Passos, tokens e tempos acima passam a valer para os agentes que já existem.
+          </small>
         </div>
       </Section>
 

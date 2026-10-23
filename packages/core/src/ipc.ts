@@ -94,6 +94,8 @@ export interface DashboardSummary {
   usage: { promptTokens: number; completionTokens: number; runsCounted: number };
   /** Tokens used since local midnight across all projects, against the daily budget. */
   today: { promptTokens: number; completionTokens: number; budget: number };
+  /** Honey boosts given: since local midnight and in all. There is no cap. */
+  honey: { today: number; total: number };
   providers: ProviderConfig[];
   workers: number;
 }
@@ -339,6 +341,7 @@ export const ipcContract = {
     z.object({ raw: z.string().min(1).max(200_000), originalName: z.string().max(64).optional() }),
   ),
   'skill.deleteLocal': channel<void>()(z.string().min(1).max(64)),
+  'skill.restore': channel<SkillSummary>()(z.string().min(1).max(64)),
 
   'mission.list': channel<(Mission & { lastRunStatus: Run['status'] | null; pinned: boolean })[]>()(
     z.object({ workspaceId: id }),
@@ -358,6 +361,7 @@ export const ipcContract = {
 
   'task.cancel': channel<void>()(id),
   'task.retry': channel<void>()(id),
+  'task.boost': channel<Task>()(z.object({ id, boosted: z.boolean() })),
   /** Sends line comments on a finished task back to its agent for one revision pass. */
   'task.revise': channel<void>()(
     z.object({

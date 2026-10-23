@@ -182,6 +182,8 @@ export interface RolePreset {
   label: string;
   description: string;
   tools: ToolName[];
+  /** Hive's built-in skills this role starts with. */
+  skills: string[];
   systemPrompt: string;
 }
 
@@ -191,6 +193,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Queen · Coordinator',
     description: 'Decomposes missions into tasks with dependencies and acceptance criteria.',
     tools: readOnlyTools,
+    skills: ['planejar-tarefas'],
     systemPrompt:
       'You coordinate a team of software agents. Break objectives into small, independently verifiable tasks. Prefer tasks that touch different files so they can run in parallel. Every task needs concrete acceptance criteria.',
   },
@@ -199,6 +202,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Software Architect',
     description: 'Designs structure and module boundaries; writes design notes and scaffolding.',
     tools: allTools,
+    skills: ['decisoes-de-arquitetura', 'verificar-antes-de-concluir'],
     systemPrompt:
       'You are a pragmatic software architect. Keep changes minimal and consistent with the existing structure. Explain trade-offs briefly in your final summary.',
   },
@@ -207,6 +211,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Frontend Developer',
     description: 'Builds user interfaces and client-side logic.',
     tools: allTools,
+    skills: ['interface-de-qualidade', 'depurar-sistematicamente', 'verificar-antes-de-concluir'],
     systemPrompt:
       'You are a senior frontend engineer. Match the existing component patterns, keep markup accessible, and verify your changes with the project test or build commands when available.',
   },
@@ -215,6 +220,12 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Backend Developer',
     description: 'Implements services, data access and APIs.',
     tools: allTools,
+    skills: [
+      'apis-e-dados',
+      'seguranca-no-codigo',
+      'depurar-sistematicamente',
+      'verificar-antes-de-concluir',
+    ],
     systemPrompt:
       'You are a senior backend engineer. Validate inputs, handle errors explicitly and keep functions small. Run the relevant tests before finishing.',
   },
@@ -223,6 +234,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'QA Engineer',
     description: 'Writes and runs tests; reports failures with evidence.',
     tools: allTools,
+    skills: ['escrever-testes', 'depurar-sistematicamente', 'verificar-antes-de-concluir'],
     systemPrompt:
       'You are a QA engineer. Add focused tests for the behaviour described in the task, run them, and report exact commands and results.',
   },
@@ -231,6 +243,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Code Reviewer',
     description: 'Reviews changes for correctness and risk without editing.',
     tools: readOnlyTools,
+    skills: ['revisar-codigo', 'seguranca-no-codigo'],
     systemPrompt:
       'You are a careful code reviewer. Read the relevant code, identify concrete defects with file and line references, and do not modify files.',
   },
@@ -239,6 +252,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Custom',
     description: 'A worker with a custom role.',
     tools: allTools,
+    skills: [],
     systemPrompt: '',
   },
 };
@@ -356,6 +370,24 @@ export function callableSoldiers(
       tools: soldierPresets[soldier.role].tools.filter((tool) => worker.tools.includes(tool)),
     }))
     .filter(({ tools }) => tools.length > 0);
+}
+
+/**
+ * The agent as it works a task given honey: twice the steps, tokens and time (up to what Hive
+ * allows) and every soldier of its squad called in, whatever was switched off.
+ */
+export function honeyBoost<T extends Pick<Worker, 'role' | 'squad' | 'limits'>>(worker: T): T {
+  const { limits } = worker;
+  return {
+    ...worker,
+    squad: squadOf(worker).map((soldier) => ({ ...soldier, enabled: true })),
+    limits: {
+      ...limits,
+      maxSteps: Math.min(200, limits.maxSteps * 2),
+      maxTokens: Math.min(10_000_000, limits.maxTokens * 2),
+      taskTimeoutMin: Math.min(600, limits.taskTimeoutMin * 2),
+    },
+  };
 }
 
 /** An agent's whole squad, defaults filled in, in `soldierRoles` order. The Queen has none. */

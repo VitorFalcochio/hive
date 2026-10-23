@@ -3,7 +3,7 @@ import { Check, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { providerPresets, type ProviderConfig } from '@hive/core';
 import { hasAccess, useHive } from './context';
 import { Mascot } from './mascot';
-import { Dot, Empty, PageHeader, runTone, statusLabels, useTask } from './ui';
+import { Dot, Empty, PageHeader, runTone, statusLabels } from './ui';
 
 export function OverviewPage() {
   const { summary, providers, workers, openModal, pickWorkspace, openMission } = useHive();
@@ -226,66 +226,6 @@ export function ProvidersPage() {
           >
             Nenhum provedor ainda. NVIDIA, OpenAI, Groq, DeepSeek, OpenRouter ou um servidor local.
           </Empty>
-        </section>
-      )}
-    </>
-  );
-}
-
-export function SkillsPage() {
-  const { skills, refresh, notify, fail } = useHive();
-  const task = useTask();
-  return (
-    <>
-      <PageHeader
-        eyebrow="Conhecimento"
-        title="Skills"
-        description="Conecte um catálogo SkillForge para consultar e instalar instruções."
-      >
-        <button
-          disabled={task.running}
-          onClick={() =>
-            void task.run(async () => {
-              await window.hive.invoke('skill.pickCatalog');
-              await refresh();
-            })
-          }
-        >
-          <Plus size={15} /> Conectar catálogo
-        </button>
-      </PageHeader>
-      {skills.length ? (
-        <div className="card rows flush">
-          {skills.map((skill) => (
-            <div key={`${skill.source}:${skill.name}`} className="row static">
-              <div className="row-main">
-                <span className="row-title">{skill.name}</span>
-                <small>{skill.description}</small>
-              </div>
-              {skill.installed ? (
-                <span className="badge">Instalada</span>
-              ) : (
-                <button
-                  className="ghost"
-                  onClick={() =>
-                    void window.hive
-                      .invoke('skill.install', skill.name)
-                      .then(() => {
-                        notify(`${skill.name} instalada.`);
-                        return refresh();
-                      })
-                      .catch(fail)
-                  }
-                >
-                  Instalar
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <section className="card">
-          <Empty>Nenhuma skill disponível. Conecte uma pasta de catálogo para começar.</Empty>
         </section>
       )}
     </>

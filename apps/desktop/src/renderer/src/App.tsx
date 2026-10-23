@@ -50,7 +50,9 @@ import { SplashScreen } from './splash';
 import { AgentsPage } from './agents';
 import { AgentBee } from './mascot';
 import { TokenMeter } from './token-meter';
-import { AboutPage, OverviewPage, ProvidersPage, SkillsPage } from './pages';
+import { HoneyMeter } from './honey';
+import { AboutPage, OverviewPage, ProvidersPage } from './pages';
+import { SkillsPage } from './skills';
 import { Dot } from './ui';
 
 const navigation: { view: View; label: string; icon: typeof Bot }[] = [
@@ -125,6 +127,8 @@ export function App() {
   const [ready, setReady] = useState(false);
   const noticeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const openRunId = useRef<string | null>(null);
+  // Where each project tab was left, so switching back returns there instead of the overview.
+  const lastPlace = useRef(new Map<string, { view: View; runId: string | null }>());
   const eventListeners = useRef(new Set<(event: AgentEvent) => void>());
   const fileListeners = useRef(new Set<(paths: string[]) => void>());
   const terminalListeners = useRef(new Set<(event: TerminalEvent) => void>());
@@ -356,10 +360,19 @@ export function App() {
   async function activate(workspace: Workspace) {
     if (workspace.id === activeWorkspace?.id) return;
     try {
+      // Each tab comes back where it was left: the same screen, the same mission open.
+      if (activeWorkspace)
+        lastPlace.current.set(activeWorkspace.id, { view, runId: detail?.run.id ?? null });
+      const place = lastPlace.current.get(workspace.id);
       setDetail(null);
       await window.hive.invoke('workspace.activate', workspace.id);
       await refresh();
-      setView('overview');
+      if (place?.view === 'mission' && place.runId) {
+        // A run deleted in the meantime falls back to the overview.
+        const run = await window.hive.invoke('run.get', place.runId).catch(() => null);
+        setDetail(run);
+        setView(run ? 'mission' : 'overview');
+      } else setView(place?.view ?? 'overview');
     } catch (failure) {
       context.fail(failure);
     }
@@ -389,6 +402,7 @@ export function App() {
     }
     try {
       if (workspace.id === activeWorkspace?.id) setDetail(null);
+      lastPlace.current.delete(workspace.id);
       await window.hive.invoke('workspace.close', workspace.id);
       await refresh();
       const { disposeProjectDocs } = await import('./code/monaco');
@@ -611,6 +625,7 @@ export function App() {
           {approvals.length > 0 && (
             <span className="warn-text">{approvals.length} aprovação(ões) pendente(s)</span>
           )}
+          {summary?.honey && <HoneyMeter honey={summary.honey} />}
           {summary?.today && <TokenMeter usage={summary.today} />}
           <span>
             {workers.filter((worker) => worker.modelId).length}/{workers.length} agentes

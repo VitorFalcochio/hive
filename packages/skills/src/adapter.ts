@@ -3,6 +3,7 @@ import { cp, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { SkillDetail, SkillDiagnostic, SkillSummary, SkillValidation } from '@hive/core';
 import { HiveError, errorMessage, newId } from '@hive/shared';
+import { builtinSkill } from './builtin';
 import { discoverSkillDirectories, exists, listSkillFiles, readTextFile } from './filesystem';
 import { parseSkillMarkdown, skillNameSchema } from './format';
 import { validateSkillDirectory, validateSkillText } from './validator';
@@ -37,6 +38,21 @@ type Source = 'skillforge' | 'local';
  */
 export class SkillForgeAdapter {
   constructor(private readonly options: SkillForgeAdapterOptions) {}
+
+  /** Whether a folder, as a catalog, holds at least one skill with a SKILL.md. */
+  static async hasSkills(folder: string): Promise<boolean> {
+    const root = new SkillForgeAdapter({
+      catalogPath: folder,
+      libraryDir: '',
+      cliValidation: false,
+    });
+    const base = await root.catalogSkillsRoot();
+    if (!base) return false;
+    const directories = await discoverSkillDirectories(base).catch(() => []);
+    for (const directory of directories)
+      if (await exists(path.join(directory, 'SKILL.md'))) return true;
+    return false;
+  }
 
   async catalogSkillsRoot(): Promise<string | null> {
     const base = this.options.catalogPath;
@@ -76,9 +92,13 @@ export class SkillForgeAdapter {
       directory,
     };
     try {
-      const parsed = parseSkillMarkdown(await readTextFile(path.join(directory, 'SKILL.md')));
+      const raw = await readTextFile(path.join(directory, 'SKILL.md'));
+      const parsed = parseSkillMarkdown(raw);
+      const original = source === 'local' ? builtinSkill(parsed.metadata.name) : undefined;
       return {
         ...base,
+        builtin: Boolean(original),
+        modified: original ? raw.replace(/\r\n/g, '\n') !== original.raw : false,
         name: parsed.metadata.name,
         description: parsed.metadata.description,
         license: parsed.metadata.license ?? null,
@@ -88,6 +108,8 @@ export class SkillForgeAdapter {
     } catch (error) {
       return {
         ...base,
+        builtin: false,
+        modified: false,
         name: path.basename(directory),
         description: `Cannot read SKILL.md: ${errorMessage(error)}`,
         license: null,
@@ -272,6 +294,34 @@ export class SkillForgeAdapter {
     } else if (!originalName && (await exists(destination))) {
       throw new HiveError('CONFLICT', `A local skill named "${name}" already exists.`);
     }
+    return this.writeLocal(name, raw);
+  }
+
+  /**
+   * Copies Hive's own skills into the library; one already there (maybe edited) is left alone.
+   * Returns the names written.
+   */
+  async installBuiltins(names: string[]): Promise<string[]> {
+    const written: string[] = [];
+    for (const name of names) {
+      const original = builtinSkill(name);
+      if (!original) continue;
+      if (await exists(path.join(this.options.libraryDir, name, 'SKILL.md'))) continue;
+      await this.writeLocal(name, original.raw);
+      written.push(name);
+    }
+    return written;
+  }
+
+  /** Puts a built-in skill's original text back, undoing the user's edits. */
+  async restoreBuiltin(name: string): Promise<SkillSummary> {
+    const original = builtinSkill(name);
+    if (!original) throw new HiveError('NOT_FOUND', `Not a built-in skill: ${name}`);
+    return this.writeLocal(name, original.raw);
+  }
+
+  private async writeLocal(name: string, raw: string): Promise<SkillSummary> {
+    const destination = path.join(this.options.libraryDir, name);
     await mkdir(destination, { recursive: true });
     const file = path.join(destination, 'SKILL.md');
     const temporary = `${file}.${newId('tmp')}`;

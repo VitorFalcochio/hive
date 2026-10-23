@@ -5,11 +5,13 @@ import {
   ipcContract,
   rolePresets,
   defaultLimits,
+  defaultSettings,
   recommendedModelCandidates,
   formatCost,
   usageCost,
   type AutopilotStatus,
   type DashboardSummary,
+  type ExecutionLimits,
   type RecommendedSetup,
   type HivePush,
   type IpcChannel,
@@ -36,13 +38,14 @@ import {
   type AutopilotHistoryItem,
 } from '@hive/orchestrator';
 import { NativeAgentRuntime, type AgentRuntime } from '@hive/agents';
-import { SkillForgeAdapter } from '@hive/skills';
+import { SkillForgeAdapter, builtinSkillNames } from '@hive/skills';
 import { FileService } from './files';
 import { TerminalManager } from './terminal';
 import { TerminalAgents } from './terminal-agents';
 import { HiveTerminalApp } from './terminal-ui';
 import { startControlServer, writeCommandShims, type ControlServer } from './control-server';
 import { assistCode } from './code-assistant';
+import { describeProject } from './project-context';
 import { startStaticServer, type StaticServer } from './static-server';
 import { locateElement } from './locate';
 
@@ -143,6 +146,7 @@ export class DesktopService {
       }
       this.repos.setValue('seeded', '1');
     }
+    this.raiseLimits();
     this.detachWorkers();
     // A process interruption must not leave a plan marked as running indefinitely.
     for (const run of this.repos.runs.list()) {
@@ -157,6 +161,84 @@ export class DesktopService {
     this.terminals = new TerminalManager((event) => this.push({ kind: 'terminal', event }));
     // A shift that was on when Hive closed picks its queue back up.
     this.advanceShift();
+  }
+
+  /** Honey given today and in all; "today" starts at local midnight, like the token meter. */
+  private honey(): { today: number; total: number } {
+    let stored = { day: '', today: 0, total: 0 };
+    try {
+      stored = { ...stored, ...(JSON.parse(this.repos.getValue('honey') ?? '{}') as object) };
+    } catch {
+      // A damaged counter starts over; it is only a tally.
+    }
+    return {
+      today: stored.day === startOfToday() ? stored.today : 0,
+      total: stored.total,
+    };
+  }
+
+  private countHoney() {
+    const { today, total } = this.honey();
+    this.repos.setValue(
+      'honey',
+      JSON.stringify({ day: startOfToday(), today: today + 1, total: total + 1 }),
+    );
+    // The boost itself announces the task change, which refreshes the status bar.
+  }
+
+  /**
+   * Once: agents and settings made with the old, tight limits (400 mil tokens, 40 steps) get
+   * the roomy ones. A limit the user already set higher stays.
+   */
+  private raiseLimits() {
+    if (this.repos.getValue('limitsRaised') === '1') return;
+    const raise = (limits: ExecutionLimits): ExecutionLimits => ({
+      ...limits,
+      maxSteps: Math.max(limits.maxSteps, defaultLimits.maxSteps),
+      maxTokens: Math.max(limits.maxTokens, defaultLimits.maxTokens),
+      commandTimeoutSec: Math.max(limits.commandTimeoutSec, defaultLimits.commandTimeoutSec),
+      taskTimeoutMin: Math.max(limits.taskTimeoutMin, defaultLimits.taskTimeoutMin),
+    });
+    for (const worker of this.repos.workers.list())
+      this.repos.workers.put({ ...worker, limits: raise(worker.limits), updatedAt: nowIso() });
+    const settings = this.repos.getSettings();
+    this.repos.saveSettings({
+      ...settings,
+      defaultLimits: raise(settings.defaultLimits),
+      runTokenBudget: 0,
+      dailyTokenBudget: Math.max(settings.dailyTokenBudget, defaultSettings.dailyTokenBudget),
+    });
+    this.repos.setValue('limitsRaised', '1');
+  }
+
+  /**
+   * Puts the skills that ship with Hive in the library and on the agents whose role uses them.
+   * Each skill only once: one the user deleted, or took off an agent, stays that way.
+   */
+  async installBuiltinSkills(): Promise<void> {
+    let done: string[] = [];
+    try {
+      done = JSON.parse(this.repos.getValue('builtinSkills') ?? '[]') as string[];
+    } catch {
+      // A damaged list just installs again; skills already in the library are kept.
+    }
+    const fresh = builtinSkillNames.filter((name) => !done.includes(name));
+    if (!fresh.length) return;
+    await this.skills().installBuiltins(fresh);
+    for (const worker of this.repos.workers.list()) {
+      const added = rolePresets[worker.role].skills.filter(
+        (name) => fresh.includes(name) && !worker.skills.includes(name),
+      );
+      if (!added.length) continue;
+      this.repos.workers.put({
+        ...worker,
+        skills: [...worker.skills, ...added],
+        updatedAt: nowIso(),
+      });
+      this.changed('worker', worker.id);
+    }
+    this.repos.setValue('builtinSkills', JSON.stringify([...done, ...fresh]));
+    this.changed('skill');
   }
 
   /**
@@ -380,8 +462,12 @@ export class DesktopService {
         title: mission.title,
         objective: mission.objective,
         workers: this.repos.workers.list(),
-        projectContext: `Repository: ${workspace.name}\nBranch: ${run.baseBranch}`,
+        projectContext: await describeProject(workspace.path, {
+          name: workspace.name,
+          branch: run.baseBranch,
+        }),
         queen,
+        skills: (await this.skills().resolve(queen.skills)).skills,
         model: queen.modelId,
         chat: this.client(queen.providerId),
         signal: AbortSignal.timeout(180_000),
@@ -760,6 +846,44 @@ export class DesktopService {
       }
       case 'skill.validateDraft':
         return this.skills().validateDraft(parse(channel));
+      case 'skill.saveLocal': {
+        const { raw, originalName } = parse(channel);
+        const result = await this.skills().saveLocal(raw, originalName);
+        // A renamed skill keeps its place on the agents that use it.
+        if (originalName && originalName !== result.name) {
+          for (const worker of this.repos.workers.list()) {
+            if (!worker.skills.includes(originalName)) continue;
+            this.repos.workers.put({
+              ...worker,
+              skills: worker.skills.map((name) => (name === originalName ? result.name : name)),
+              updatedAt: nowIso(),
+            });
+            this.changed('worker', worker.id);
+          }
+        }
+        this.changed('skill');
+        return result;
+      }
+      case 'skill.deleteLocal': {
+        const name = parse(channel);
+        await this.skills().deleteLocal(name);
+        for (const worker of this.repos.workers.list()) {
+          if (!worker.skills.includes(name)) continue;
+          this.repos.workers.put({
+            ...worker,
+            skills: worker.skills.filter((skill) => skill !== name),
+            updatedAt: nowIso(),
+          });
+          this.changed('worker', worker.id);
+        }
+        this.changed('skill');
+        return;
+      }
+      case 'skill.restore': {
+        const result = await this.skills().restoreBuiltin(parse(channel));
+        this.changed('skill');
+        return result;
+      }
       case 'skill.install': {
         const result = await this.skills().install(parse(channel));
         this.changed('skill');
@@ -770,10 +894,17 @@ export class DesktopService {
           title: 'Catálogo SkillForge',
           properties: ['openDirectory'],
         });
-        if (selected.canceled) return this.repos.getSettings();
+        if (selected.canceled || !selected.filePaths[0]) return this.repos.getSettings();
+        const folder = selected.filePaths[0];
+        // A folder of projects instead of skills would list every project as a broken skill.
+        if (!(await SkillForgeAdapter.hasSkills(folder)))
+          throw new HiveError(
+            'VALIDATION',
+            'Nenhuma skill nessa pasta. Escolha uma pasta com subpastas que tenham um SKILL.md.',
+          );
         const result = this.repos.saveSettings({
           ...this.repos.getSettings(),
-          skillforgeCatalogPath: selected.filePaths[0] ?? null,
+          skillforgeCatalogPath: folder,
         });
         this.changed('skill');
         return result;
@@ -853,6 +984,13 @@ export class DesktopService {
         return this.scheduler.cancelTask(parse(channel));
       case 'task.retry':
         return this.scheduler.retry(parse(channel));
+      case 'task.boost': {
+        const { id: taskId, boosted } = parse(channel);
+        const before = this.repos.tasks.get(taskId)?.boosted ?? false;
+        const task = this.scheduler.boost(taskId, boosted);
+        if (boosted && !before) this.countHoney();
+        return task;
+      }
       case 'task.revise': {
         const { taskId, comments, note } = parse(channel);
         return this.scheduler.revise(taskId, comments, note);
@@ -1028,6 +1166,7 @@ export class DesktopService {
             ...this.repos.usageSince(startOfToday()),
             budget: this.repos.getSettings().dailyTokenBudget,
           },
+          honey: this.honey(),
         };
         return summary;
       }

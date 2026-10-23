@@ -226,6 +226,9 @@ app
       return (width > 480 ? image.resize({ width: 480, quality: 'good' }) : image).toDataURL();
     };
     desktopService = service;
+    await service
+      .installBuiltinSkills()
+      .catch((error: unknown) => console.error('Skills de fábrica indisponíveis:', error));
     // Without them the terminals still work, only `agents` and `hive` are missing.
     await service
       .enableTerminalCommands()

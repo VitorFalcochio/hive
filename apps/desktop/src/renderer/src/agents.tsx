@@ -1,14 +1,5 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
-import {
-  Check,
-  ChevronRight,
-  Eye,
-  Plus,
-  SlidersHorizontal,
-  Sparkles,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, ChevronRight, Eye, Plus, SlidersHorizontal, Sparkles, Trash2 } from 'lucide-react';
 import {
   allTools,
   beeColorOf,
@@ -30,8 +21,9 @@ import {
   type WorkerRole,
 } from '@hive/core';
 import { hasAccess, useHive } from './context';
-import { Dot, PageHeader, Select, useTask } from './ui';
+import { Dot, Drawer, PageHeader, Select, useTask } from './ui';
 import { AgentBee, Mascot, SoldierBee } from './mascot';
+import { NumberField } from './settings';
 
 const roleOrder: WorkerRole[] = [
   'queen',
@@ -190,63 +182,6 @@ function SquadLine({ worker }: { worker: Worker }) {
   );
 }
 
-/** Edits slide in from the right, so the table stays in view behind them. */
-function Drawer({
-  eyebrow,
-  title,
-  onClose,
-  footer,
-  children,
-  onSubmit,
-}: {
-  eyebrow: string;
-  title: string;
-  onClose: () => void;
-  footer: ReactNode;
-  children: ReactNode;
-  onSubmit: () => void;
-}) {
-  const titleId = useId();
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  return (
-    <div
-      className="drawer-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <form
-        className="drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
-      >
-        <div className="drawer-header">
-          <div>
-            <p className="eyebrow">{eyebrow}</p>
-            <h2 id={titleId}>{title}</h2>
-          </div>
-          <button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </div>
-        <div className="drawer-body">{children}</div>
-        <div className="drawer-footer">{footer}</div>
-      </form>
-    </div>
-  );
-}
-
 function NewAgent({
   onCreated,
   onClose,
@@ -254,7 +189,7 @@ function NewAgent({
   onCreated: (id: string) => void;
   onClose: () => void;
 }) {
-  const { workers, refresh, notify } = useHive();
+  const { workers, skills, refresh, notify } = useHive();
   const [draft, setDraft] = useState<WorkerInput | null>(null);
   // A custom agent without a pick wears the colour fewest agents wear, chosen when it is created.
   const suggested = nextBeeColor(workers);
@@ -286,7 +221,14 @@ function NewAgent({
   // Picking a base role fills in what that role usually needs; the user can still change it.
   function pickRole(role: string) {
     const preset = rolePresets[role as WorkerRole];
-    patch({ role: preset.role, tools: [...preset.tools] });
+    const available = new Set(
+      skills.filter((skill) => skill.source === 'local').map((s) => s.name),
+    );
+    patch({
+      role: preset.role,
+      tools: [...preset.tools],
+      skills: preset.skills.filter((name) => available.has(name)),
+    });
   }
 
   return (
@@ -338,6 +280,7 @@ function NewAgent({
         />
         <ProfileFields value={draft} onChange={patch} />
       </section>
+      <SkillsSection value={draft.skills} onChange={(next) => patch({ skills: next })} />
       <ToolsSection tools={draft.tools} commands={draft.autoApproveCommands} onChange={patch} />
       {task.error && (
         <p role="alert" className="form-error">
@@ -369,6 +312,8 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
     draft.description !== worker.description ||
     draft.systemPrompt !== worker.systemPrompt ||
     draft.tools.join() !== worker.tools.join() ||
+    draft.skills.join() !== worker.skills.join() ||
+    JSON.stringify(draft.limits) !== JSON.stringify(worker.limits) ||
     JSON.stringify(draft.squad) !== JSON.stringify(worker.squad) ||
     draft.autoApproveCommands.join('\n') !== worker.autoApproveCommands.join('\n');
   const patch = (next: Partial<Worker>) => setDraft((value) => ({ ...value, ...next }));
@@ -432,7 +377,9 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
       {worker.role !== 'queen' && (
         <SquadSection captain={draft} onChange={(squad) => patch({ squad })} />
       )}
+      <SkillsSection value={draft.skills} onChange={(next) => patch({ skills: next })} />
       <ToolsSection tools={draft.tools} commands={draft.autoApproveCommands} onChange={patch} />
+      <LimitsSection value={draft.limits} onChange={(limits) => patch({ limits })} />
       {task.error && (
         <p role="alert" className="form-error">
           {task.error}
@@ -805,6 +752,115 @@ function ToolsSection({
           />
         </label>
       )}
+    </section>
+  );
+}
+
+/** The skills in Hive's library, switched on and off for this agent. */
+function SkillsSection({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (skills: string[]) => void;
+}) {
+  const { skills } = useHive();
+  const library = skills.filter((skill) => skill.source === 'local');
+  // A skill the agent has but the library lost still shows, so it can be taken off.
+  const missing = value.filter((name) => !library.some((skill) => skill.name === name));
+  return (
+    <section className="agent-section">
+      <h3>Skills</h3>
+      {library.length || missing.length ? (
+        <div className="tool-list skill-options">
+          {library.map((skill) => (
+            <label key={skill.name} className="tool-option">
+              <input
+                type="checkbox"
+                checked={value.includes(skill.name)}
+                onChange={(event) =>
+                  onChange(
+                    event.target.checked
+                      ? [...value, skill.name]
+                      : value.filter((name) => name !== skill.name),
+                  )
+                }
+              />
+              <span>
+                {skill.name}
+                <small title={skill.description}>{skill.description}</small>
+              </span>
+            </label>
+          ))}
+          {missing.map((name) => (
+            <label key={name} className="tool-option">
+              <input
+                type="checkbox"
+                checked
+                onChange={() => onChange(value.filter((skill) => skill !== name))}
+              />
+              <span>
+                {name}
+                <small>Não está mais na biblioteca.</small>
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="field-hint">Nenhuma skill na biblioteca. Crie ou instale na aba Skills.</p>
+      )}
+    </section>
+  );
+}
+
+/** How far one task of this agent may go before Hive stops it. */
+function LimitsSection({
+  value,
+  onChange,
+}: {
+  value: Worker['limits'];
+  onChange: (limits: Worker['limits']) => void;
+}) {
+  const set = <K extends keyof Worker['limits']>(key: K, next: Worker['limits'][K]) =>
+    onChange({ ...value, [key]: next });
+  return (
+    <section className="agent-section">
+      <h3>Limites por tarefa</h3>
+      <div className="settings-grid">
+        <NumberField
+          label="Tokens"
+          hint="Prompt e resposta juntos, até 10 milhões."
+          min={1_000}
+          max={10_000_000}
+          step={100_000}
+          value={value.maxTokens}
+          onChange={(next) => set('maxTokens', next)}
+        />
+        <NumberField
+          label="Passos"
+          hint="De 1 a 200."
+          min={1}
+          max={200}
+          value={value.maxSteps}
+          onChange={(next) => set('maxSteps', next)}
+        />
+        <NumberField
+          label="Tempo da tarefa (min)"
+          hint="De 1 a 600 minutos."
+          min={1}
+          max={600}
+          value={value.taskTimeoutMin}
+          onChange={(next) => set('taskTimeoutMin', next)}
+        />
+        <NumberField
+          label="Tempo de comando (s)"
+          hint="De 5 a 3.600 segundos."
+          min={5}
+          max={3_600}
+          value={value.commandTimeoutSec}
+          onChange={(next) => set('commandTimeoutSec', next)}
+        />
+      </div>
     </section>
   );
 }

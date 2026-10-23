@@ -10,6 +10,8 @@ export interface PlanRequest {
   chat: ChatClient;
   model: string;
   queen: Worker;
+  /** The Queen's skills, followed while planning. */
+  skills?: { name: string; body: string }[];
   signal?: AbortSignal;
   maxAttempts?: number;
   onAttempt?: (attempt: number, error: string | null) => void;
@@ -55,6 +57,15 @@ export function buildPlanPrompt(request: PlanRequest): ChatMessage[] {
         "- Use dependsOn only when a task needs another task's output.",
         '- Every task needs 1-5 concrete, verifiable acceptance criteria.',
         '- Assign workerId only from the provided list; match the worker role to the work.',
+        "- Ground the plan in the project context: name the real folders and files involved, follow its README and agent notes, and use the project's own test, lint and build commands in acceptance criteria.",
+        ...(request.skills?.length
+          ? [
+              '',
+              '## Skills',
+              'Follow these while planning; the JSON shape and rules above still come first.',
+              ...request.skills.map((skill) => `### Skill: ${skill.name}\n${skill.body}`),
+            ]
+          : []),
       ].join('\n'),
     },
     {

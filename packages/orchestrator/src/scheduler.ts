@@ -1,5 +1,6 @@
 import {
   activeStatuses,
+  honeyBoost,
   isBlockedByFailure,
   isSafeCommand,
   readyTasks,
@@ -352,6 +353,23 @@ export class Scheduler {
     };
   }
 
+  /**
+   * Gives a task honey, or takes it back. Only while it waits (or can be retried): honey
+   * changes how a task is started, not one already under way.
+   */
+  boost(taskId: string, boosted: boolean): Task {
+    const task = this.repos.tasks.require(taskId, 'Tarefa');
+    const waiting = ['pending', 'blocked', 'failed', 'cancelled', 'rejected'].includes(task.status);
+    if (!waiting || this.sessions.has(taskId) || this.launching.has(taskId))
+      throw new HiveError(
+        'CONFLICT',
+        'O mel só vale para tarefas que ainda não começaram ou que vão ser tentadas de novo.',
+      );
+    const updated = this.update(taskId, { boosted });
+    this.pump(task.runId);
+    return updated;
+  }
+
   isActive(runId: string): boolean {
     return this.repos.tasks
       .list('run_id = ?', runId)
@@ -382,8 +400,14 @@ export class Scheduler {
     }
     tasks = this.repos.tasks.list('run_id = ?', runId);
     const limit = this.repos.getSettings().maxConcurrentTasks;
-    for (const task of readyTasks(tasks)) {
-      if (this.sessions.size + this.launching.size >= limit) break;
+    // Tasks given honey go first, and may take one slot over the limit so they never wait.
+    const ready = readyTasks(tasks).sort((a, b) => Number(!!b.boosted) - Number(!!a.boosted));
+    for (const task of ready) {
+      const busy = this.sessions.size + this.launching.size;
+      if (busy >= limit + (task.boosted ? 1 : 0)) {
+        if (task.boosted) continue;
+        break;
+      }
       if (this.launching.has(task.id) || this.sessions.has(task.id)) continue;
       this.launching.add(task.id);
       void this.launch(run, task);
@@ -445,7 +469,8 @@ export class Scheduler {
         throw new HiveError('CANCELLED', 'Cancelada antes de começar.');
     };
     try {
-      const worker = this.repos.workers.require(initial.workerId ?? '', 'Agente');
+      const assigned = this.repos.workers.require(initial.workerId ?? '', 'Agente');
+      const worker = initial.boosted ? honeyBoost(assigned) : assigned;
       if (!worker.providerId || !worker.modelId)
         throw new HiveError('VALIDATION', `${worker.name} não tem provedor e modelo configurados.`);
       this.update(initial.id, {
@@ -458,7 +483,16 @@ export class Scheduler {
         startedAt: nowIso(),
         finishedAt: null,
       });
-      this.log(run, initial.id, worker.id, 'task.status', 'info', `${worker.name} começou.`);
+      this.log(
+        run,
+        initial.id,
+        worker.id,
+        'task.status',
+        'info',
+        initial.boosted
+          ? `${worker.name} começou com mel: limites dobrados e esquadrão completo.`
+          : `${worker.name} começou.`,
+      );
       const name = `${run.id.slice(-6)}-${initial.key}-a${attempt}`.replace(/[^\w-]+/g, '-');
       worktree = await manager.create(name, branch, revision?.fromCommit ?? run.baseCommit);
       const tasks = this.repos.tasks.list('run_id = ?', run.id);

@@ -299,6 +299,8 @@ export const taskSchema = z.object({
   finishedAt: z.string().nullable(),
   /** Present once the user sent review notes; absent on tasks saved before reviews existed. */
   revision: taskRevisionSchema.optional(),
+  /** Given honey: jumps the queue and runs with doubled limits and the whole squad. */
+  boosted: z.boolean().optional(),
 });
 export type Task = z.infer<typeof taskSchema>;
 
@@ -412,6 +414,10 @@ export const skillSummarySchema = z.object({
   resources: z.array(z.string()),
   hasScripts: z.boolean(),
   installed: z.boolean(),
+  /** Ships with Hive (a local copy the user may have edited). */
+  builtin: z.boolean(),
+  /** A built-in skill whose text differs from the one Hive ships. */
+  modified: z.boolean(),
   directory: z.string(),
 });
 export type SkillSummary = z.infer<typeof skillSummarySchema>;
@@ -465,11 +471,15 @@ export const settingsSchema = z.object({
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
+/**
+ * Roomy enough for a long task on free models, which is how Hive is meant to be used all day.
+ * They still stop an agent stuck in a loop: tokens and steps run out long before a day does.
+ */
 export const defaultLimits: ExecutionLimits = {
-  maxSteps: 40,
-  maxTokens: 400_000,
-  commandTimeoutSec: 180,
-  taskTimeoutMin: 30,
+  maxSteps: 120,
+  maxTokens: 3_000_000,
+  commandTimeoutSec: 300,
+  taskTimeoutMin: 90,
   temperature: null,
 };
 
@@ -478,8 +488,8 @@ export const defaultSettings: Settings = {
   skillforgeCatalogPath: null,
   skillforgeCliValidation: false,
   defaultLimits,
-  runTokenBudget: 2_000_000,
-  dailyTokenBudget: 2_000_000,
+  runTokenBudget: 0,
+  dailyTokenBudget: 20_000_000,
   commandApproval: 'safe',
   reduceMotion: 'system',
   density: 'comfortable',

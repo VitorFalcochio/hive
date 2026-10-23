@@ -29,6 +29,7 @@ import { useHive } from './context';
 import { Dot, Empty, PageHeader, runTone, statusLabels, useTask } from './ui';
 import { applyCandidate, discardCandidates, isCandidate, summarizeCandidate } from './comparison';
 import { useShift } from './shift';
+import { HoneyJar } from './honey';
 import { AgentBee, SoldierBee } from './mascot';
 import { Markdown } from './markdown';
 
@@ -400,13 +401,25 @@ function TaskCard({
       !['completed', 'approved'].includes(tasks.find((item) => item.key === key)?.status ?? ''),
   );
   const result = task.result;
+  // Honey is given before a task starts (or before it is tried again), never mid-run.
+  const waiting = task.status === 'pending' || task.status === 'blocked';
+  const retryable = ['failed', 'cancelled', 'rejected'].includes(task.status);
+  const honey = (boosted: boolean) => window.hive.invoke('task.boost', { id: task.id, boosted });
 
   return (
-    <article className={live ? 'card task-card live' : 'card task-card'}>
+    <article className={`card task-card${live ? ' live' : ''}${task.boosted ? ' boosted' : ''}`}>
       <div className="card-heading">
         <div className="task-title">
           <Dot tone={taskTone(task.status)} />
           <h3>{task.title}</h3>
+          {task.boosted && (
+            <span className="honey-mark">
+              <HoneyJar
+                size={14}
+                label="Com mel: fura a fila, limites dobrados e esquadrão completo"
+              />
+            </span>
+          )}
         </div>
         <span className="badge">{taskLabels[task.status]}</span>
       </div>
@@ -420,12 +433,14 @@ function TaskCard({
       ) : null}
       <small className="task-meta">
         {worker && (
-          <AgentBee
-            worker={worker}
-            size={14}
-            // While her soldiers fly, the captain waits for their reports.
-            mood={live && !isWaiting(task) && !out.length ? 'working' : 'still'}
-          />
+          <span className={task.boosted ? 'honey-glow' : undefined}>
+            <AgentBee
+              worker={worker}
+              size={14}
+              // While her soldiers fly, the captain waits for their reports.
+              mood={live && !isWaiting(task) && !out.length ? 'working' : 'still'}
+            />
+          </span>
         )}
         {worker?.name ?? 'Agente automático'}
         {worker && out.length > 0 && (
@@ -496,6 +511,36 @@ function TaskCard({
           </button>
         )}
         <span className="spacer" />
+        {waiting && (
+          <button
+            className={task.boosted ? 'secondary honey-button on' : 'ghost honey-button'}
+            disabled={action.running}
+            aria-pressed={!!task.boosted}
+            title={
+              task.boosted
+                ? 'Tirar o mel desta tarefa'
+                : 'Dar mel: fura a fila, dobra os limites e chama o esquadrão completo'
+            }
+            onClick={() => call(() => honey(!task.boosted))}
+          >
+            <HoneyJar size={13} /> {task.boosted ? 'Com mel' : 'Mel'}
+          </button>
+        )}
+        {retryable && !task.boosted && (
+          <button
+            className="ghost honey-button"
+            disabled={action.running}
+            title="Tenta de novo furando a fila, com limites dobrados e o esquadrão completo"
+            onClick={() =>
+              call(async () => {
+                await honey(true);
+                await window.hive.invoke('task.retry', task.id);
+              })
+            }
+          >
+            <HoneyJar size={13} /> Tentar com mel
+          </button>
+        )}
         {live && (
           <button
             className="secondary"

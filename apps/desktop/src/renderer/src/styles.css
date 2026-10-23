@@ -1153,6 +1153,46 @@ textarea.mono {
   font-size: 12px;
   color: var(--subtle-foreground);
 }
+/* Skills: their list, the editor's source and which agents use one. */
+.skill-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The hive's hexagon marks a skill that ships with Hive; amber once the user has edited it. */
+.skill-builtin {
+  flex-shrink: 0;
+  color: var(--subtle-foreground);
+}
+.skill-builtin.modified {
+  color: var(--warning);
+}
+.skill-users {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+}
+.skill-chevron {
+  flex-shrink: 0;
+  color: var(--subtle-foreground);
+}
+textarea.skill-source {
+  min-height: 340px;
+  resize: vertical;
+  line-height: 1.55;
+}
+.skill-agent {
+  align-items: center;
+}
+.skill-options {
+  grid-template-columns: minmax(0, 1fr);
+}
+.skill-options small {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 /* Squad: each captain's soldiers, under its row and in its drawer. */
 .agent-tr:has(.agent-squad) {
   row-gap: 2px;
@@ -1759,6 +1799,42 @@ dd {
 }
 .task-card.live {
   border-color: rgb(245 181 68 / 30%);
+}
+/* Honey: a task given a boost wears an amber line, a drop by its title and a glowing bee. */
+.task-card.boosted {
+  border-top-color: rgb(245 181 68 / 55%);
+}
+.honey-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.honey-glow {
+  display: inline-flex;
+  filter: drop-shadow(0 0 3px rgb(245 181 68 / 75%));
+  animation: honey-glow 1.8s ease-in-out infinite;
+}
+@keyframes honey-glow {
+  50% {
+    filter: drop-shadow(0 0 6px rgb(245 181 68 / 95%));
+  }
+}
+.motion-reduce .honey-glow {
+  animation: none;
+}
+.honey-button.on {
+  border-color: rgb(245 181 68 / 45%);
+  color: var(--warning);
+}
+/* The honey given today, beside the token meter; a count, never a limit. */
+.honey-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.honey-jar {
+  flex-shrink: 0;
+  image-rendering: pixelated;
 }
 .task-title {
   display: flex;
@@ -5117,5 +5193,17 @@ pre.command {
   font-weight: 400;
   font-size: 12.5px;
   line-height: 1.5;
+  color: var(--subtle-foreground);
+}
+
+/* Settings: pushing the default limits onto the agents that already exist. */
+.settings-apply {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.settings-apply small {
+  font-size: 12px;
   color: var(--subtle-foreground);
 }

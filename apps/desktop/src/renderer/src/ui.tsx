@@ -288,3 +288,60 @@ export function Select({
     </>
   );
 }
+
+/** Edits slide in from the right, so the table stays in view behind them. */
+export function Drawer({
+  eyebrow,
+  title,
+  onClose,
+  footer,
+  children,
+  onSubmit,
+}: {
+  eyebrow: string;
+  title: string;
+  onClose: () => void;
+  footer: ReactNode;
+  children: ReactNode;
+  onSubmit: () => void;
+}) {
+  const titleId = useId();
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div
+      className="drawer-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        className="drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div className="drawer-header">
+          <div>
+            <p className="eyebrow">{eyebrow}</p>
+            <h2 id={titleId}>{title}</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="drawer-body">{children}</div>
+        <div className="drawer-footer">{footer}</div>
+      </form>
+    </div>
+  );
+}

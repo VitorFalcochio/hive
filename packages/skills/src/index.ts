@@ -8,3 +8,4 @@ export {
 } from './format';
 export { validateSkillDirectory, validateSkillText } from './validator';
 export { discoverSkillDirectories, listSkillFiles, LIMITS } from './filesystem';
+export { builtinSkill, builtinSkillNames, builtinSkills, type BuiltinSkill } from './builtin';

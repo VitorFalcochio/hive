@@ -355,4 +355,41 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     await until(() => ctx.status() === 'review', 'review');
     expect(() => ctx.scheduler.revise('task_a', [], '  ')).toThrow(/ao menos um comentário/);
   });
+
+  it('tarefa com mel fura a fila e roda com limites dobrados e esquadrão completo', async () => {
+    const started: AgentTaskInput[] = [];
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const ctx = await setup(
+      async (input) => {
+        started.push(input);
+        await gate;
+        await writeTaskFile(input);
+        return {};
+      },
+      [{ key: 'a' }, { key: 'b' }, { key: 'c' }],
+    );
+    ctx.repos.workers.put({
+      ...ctx.repos.workers.require('w1', 'Agente'),
+      squad: [{ role: 'scout', enabled: false, modelId: null }],
+    });
+    ctx.scheduler.boost('task_c', true);
+    ctx.scheduler.start(ctx.run.id);
+    // Two at a time: the honeyed task takes one of the first two slots.
+    await until(() => started.length === 2, 'two tasks');
+    expect(started.map((input) => input.task.title).sort()).toEqual(['Tarefa a', 'Tarefa c']);
+
+    const boosted = started.find((input) => input.task.title === 'Tarefa c')!;
+    const plain = started.find((input) => input.task.title === 'Tarefa a')!;
+    expect(boosted.limits.maxTokens).toBe(Math.min(10_000_000, defaultLimits.maxTokens * 2));
+    expect(boosted.limits.maxSteps).toBe(Math.min(200, defaultLimits.maxSteps * 2));
+    expect(plain.limits.maxTokens).toBe(defaultLimits.maxTokens);
+    expect(boosted.worker.squad.every((soldier) => soldier.enabled)).toBe(true);
+    expect(plain.worker.squad.find((soldier) => soldier.role === 'scout')?.enabled).toBe(false);
+
+    // Honey changes how a task starts, so a running one cannot take it.
+    expect(() => ctx.scheduler.boost('task_a', true)).toThrow(/ainda não começaram/);
+    release();
+    await until(() => ctx.status() === 'review', 'review');
+  });
 });
