@@ -21,7 +21,13 @@ import {
   type Workspace,
 } from '@hive/core';
 import { HiveDatabase, Repositories } from '@hive/persistence';
-import { OpenAICompatibleClient, workerCompatibilityIssues } from '@hive/providers';
+import {
+  GatedClient,
+  OpenAICompatibleClient,
+  ProviderGate,
+  workerCompatibilityIssues,
+  type ChatClient,
+} from '@hive/providers';
 import { newId, nowIso, maskSecret, secretRedactor, HiveError, errorMessage } from '@hive/shared';
 import {
   git,
@@ -71,6 +77,8 @@ export class DesktopService {
     height: number;
   }) => Promise<string | null>;
   private readonly planning = new Set<string>();
+  /** One per provider, shared by everything that calls it. */
+  private readonly gates = new Map<string, ProviderGate>();
   private shiftTimer: ReturnType<typeof setTimeout> | undefined;
   // Each open project keeps its own watcher and preview server, so switching tabs loses nothing.
   private readonly fileServices = new Map<string, FileService>();
@@ -88,7 +96,7 @@ export class DesktopService {
     this.scheduler = new Scheduler({
       repos: this.repos,
       runtime,
-      chatFor: (providerId) => this.client(providerId),
+      chatFor: (providerId) => this.chatClient(providerId),
       resolveSkills: (names) => this.skills().resolve(names),
       // Outside the user's repository, on the same drive as Hive's data.
       worktreeRoot: (workspace) => path.join(this.dataDir, 'worktrees', workspace.id),
@@ -248,7 +256,7 @@ export class DesktopService {
   async enableTerminalCommands(): Promise<void> {
     const agents = new TerminalAgents({
       repos: this.repos,
-      chatFor: (providerId) => this.client(providerId),
+      chatFor: (providerId) => this.chatClient(providerId),
       resolveSkills: async (names) => (await this.skills().resolve(names)).skills,
       onWorkerChanged: (id) => this.changed('worker', id),
       onChange: () => this.changed('chat'),
@@ -469,7 +477,7 @@ export class DesktopService {
         queen,
         skills: (await this.skills().resolve(queen.skills)).skills,
         model: queen.modelId,
-        chat: this.client(queen.providerId),
+        chat: this.chatClient(queen.providerId),
         signal: AbortSignal.timeout(180_000),
       });
       return this.setPlan(runId, result.plan);
@@ -499,6 +507,16 @@ export class DesktopService {
         env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       },
     });
+  }
+
+  /**
+   * The client agents talk through: every call to one provider, from any task, soldier or
+   * terminal, goes through the same gate, so together they stay under its rate limit.
+   */
+  private chatClient(providerId: string): ChatClient {
+    let gate = this.gates.get(providerId);
+    if (!gate) this.gates.set(providerId, (gate = new ProviderGate()));
+    return new GatedClient(this.client(providerId), gate);
   }
 
   private client(providerId: string) {
@@ -1134,7 +1152,7 @@ export class DesktopService {
         if (!worker.providerId || !worker.modelId)
           throw new HiveError('VALIDATION', 'Configure o provedor e o modelo deste agente.');
         return assistCode(
-          this.client(worker.providerId),
+          this.chatClient(worker.providerId),
           { ...worker, providerId: worker.providerId, modelId: worker.modelId },
           value,
         );

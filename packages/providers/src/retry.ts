@@ -59,15 +59,21 @@ export async function withRetries<T>(
     signal?: AbortSignal;
     maxAttempts?: number;
     onRetry?: (notice: RetryNotice) => void;
+    /** For tests: the source of the spread between waits. */
+    random?: () => number;
   } = {},
 ): Promise<T> {
-  const { signal, maxAttempts = Infinity, onRetry } = options;
+  const { signal, maxAttempts = Infinity, onRetry, random = Math.random } = options;
   for (let attempt = 1; ; attempt++) {
     try {
       return await call();
     } catch (error) {
-      const delayMs = retryDelay(error, attempt - 1);
-      if (delayMs === null || attempt >= maxAttempts || signal?.aborted) throw error;
+      const base = retryDelay(error, attempt - 1);
+      if (base === null || attempt >= maxAttempts || signal?.aborted) throw error;
+      // Agents that failed together must not all try again in the same second, or they hit
+      // the limit together once more. A wait the provider asked for is only ever lengthened.
+      const asked = error instanceof ProviderError && error.retryAfterMs !== null;
+      const delayMs = Math.round(base * (asked ? 1 + random() * 0.3 : 0.75 + random() * 0.5));
       onRetry?.({ attempt: attempt + 1, delayMs, error });
       await sleep(delayMs, undefined, { signal });
     }
