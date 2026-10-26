@@ -24,6 +24,7 @@ import { hasAccess, useHive } from './context';
 import { Dot, Drawer, PageHeader, Select, useTask } from './ui';
 import { AgentBee, Mascot, SoldierBee } from './mascot';
 import { NumberField } from './settings';
+import { AgentMcpSection } from './mcp';
 
 const roleOrder: WorkerRole[] = [
   'queen',
@@ -58,6 +59,14 @@ const toolLabels: Record<ToolName, { label: string; detail: string }> = {
   read_skill_resource: {
     label: 'Ler skills',
     detail: 'Consulta os arquivos de referência das skills do agente.',
+  },
+  web_fetch: {
+    label: 'Ler a web',
+    detail: 'Abre páginas e APIs da internet, como documentação. Só leitura (GET).',
+  },
+  view_page: {
+    label: 'Ver páginas locais',
+    detail: 'Tira print do app rodando em localhost e lê os erros do console.',
   },
 };
 
@@ -209,6 +218,7 @@ function NewAgent({
         skills: [],
         tools: [...rolePresets.custom.tools],
         autoApproveCommands: [],
+        mcpServers: [],
         systemPrompt: '',
         limits: settings.defaultLimits,
       }),
@@ -282,6 +292,10 @@ function NewAgent({
       </section>
       <SkillsSection value={draft.skills} onChange={(next) => patch({ skills: next })} />
       <ToolsSection tools={draft.tools} commands={draft.autoApproveCommands} onChange={patch} />
+      <AgentMcpSection
+        value={draft.mcpServers ?? []}
+        onChange={(next) => patch({ mcpServers: next })}
+      />
       {task.error && (
         <p role="alert" className="form-error">
           {task.error}
@@ -379,6 +393,10 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
       )}
       <SkillsSection value={draft.skills} onChange={(next) => patch({ skills: next })} />
       <ToolsSection tools={draft.tools} commands={draft.autoApproveCommands} onChange={patch} />
+      <AgentMcpSection
+        value={draft.mcpServers ?? []}
+        onChange={(next) => patch({ mcpServers: next })}
+      />
       <LimitsSection value={draft.limits} onChange={(limits) => patch({ limits })} />
       {task.error && (
         <p role="alert" className="form-error">

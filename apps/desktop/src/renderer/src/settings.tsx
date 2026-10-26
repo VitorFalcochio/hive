@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { FolderOpen, RotateCcw, Save, X } from 'lucide-react';
 import { defaultSettings, type Settings } from '@hive/core';
 import { useHive } from './context';
+import { McpServersSection } from './mcp';
 import { PageHeader, useTask } from './ui';
 
 const approvalChoices: { value: Settings['commandApproval']; label: string; detail: string }[] = [
@@ -79,10 +80,12 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
   }
 
   function restoreDefaults() {
-    // The catalog folder is a choice the user made, so restoring defaults keeps it.
+    // The catalog folder and the MCP servers are choices the user made, so restoring defaults
+    // keeps them.
     setDraft({
       ...defaultSettings,
       skillforgeCatalogPath: draft.skillforgeCatalogPath,
+      mcpServers: draft.mcpServers,
       autopilot: draft.autopilot,
     });
   }
@@ -239,6 +242,11 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
           </small>
         </div>
       </Section>
+
+      <McpServersSection
+        servers={draft.mcpServers}
+        onChange={(servers) => set('mcpServers', servers)}
+      />
 
       <Section title="Skills" description="De onde o Hive carrega o catálogo de skills.">
         <div className="settings-field">

@@ -66,6 +66,7 @@ describe('cores das abelhas', () => {
       skills: [],
       tools: [],
       autoApproveCommands: [],
+      mcpServers: [],
       systemPrompt: '',
       limits: {
         maxSteps: 10,

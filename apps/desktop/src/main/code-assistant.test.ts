@@ -15,6 +15,7 @@ const worker: Worker & { providerId: string; modelId: string } = {
   skills: [],
   tools: [],
   autoApproveCommands: [],
+  mcpServers: [],
   systemPrompt: 'Priorize correção e clareza.',
   limits: { ...defaultLimits },
   createdAt: '2026-01-01T00:00:00.000Z',

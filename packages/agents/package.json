@@ -12,9 +12,10 @@
   },
   "dependencies": {
     "@hive/core": "workspace:*",
-    "@hive/shared": "workspace:*",
     "@hive/providers": "workspace:*",
+    "@hive/shared": "workspace:*",
+    "@hive/skills": "workspace:*",
     "@hive/workspace": "workspace:*",
-    "@hive/skills": "workspace:*"
+    "@modelcontextprotocol/sdk": "^1.32.2"
   }
 }

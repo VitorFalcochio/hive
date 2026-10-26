@@ -163,9 +163,26 @@ export const allTools: ToolName[] = [
   'replace_in_file',
   'run_command',
   'read_skill_resource',
+  'web_fetch',
+  'view_page',
 ];
 
-export const readOnlyTools: ToolName[] = ['list_dir', 'read_file', 'search', 'read_skill_resource'];
+export const readOnlyTools: ToolName[] = [
+  'list_dir',
+  'read_file',
+  'search',
+  'read_skill_resource',
+  'web_fetch',
+  'view_page',
+];
+
+/**
+ * Off in the role presets until the user turns them on: a page read off the web can carry
+ * instructions, and the address an agent fetches carries whatever it puts in it.
+ */
+const optInTools: ToolName[] = ['web_fetch'];
+const presetTools = allTools.filter((tool) => !optInTools.includes(tool));
+const presetReadOnlyTools = readOnlyTools.filter((tool) => !optInTools.includes(tool));
 
 export const toolDescriptions: Record<ToolName, string> = {
   list_dir: 'List files and folders',
@@ -175,6 +192,8 @@ export const toolDescriptions: Record<ToolName, string> = {
   replace_in_file: 'Edit files by exact replacement',
   run_command: 'Run shell commands (approval required unless allow-listed)',
   read_skill_resource: 'Read reference files of assigned skills',
+  web_fetch: 'Read a web page or API response (GET only)',
+  view_page: 'Screenshot a page served on localhost and read its console errors',
 };
 
 export interface RolePreset {
@@ -192,7 +211,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     role: 'queen',
     label: 'Queen · Coordinator',
     description: 'Decomposes missions into tasks with dependencies and acceptance criteria.',
-    tools: readOnlyTools,
+    tools: presetReadOnlyTools,
     skills: ['planejar-tarefas'],
     systemPrompt:
       'You coordinate a team of software agents. Break objectives into small, independently verifiable tasks. Prefer tasks that touch different files so they can run in parallel. Every task needs concrete acceptance criteria.',
@@ -201,7 +220,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     role: 'architect',
     label: 'Software Architect',
     description: 'Designs structure and module boundaries; writes design notes and scaffolding.',
-    tools: allTools,
+    tools: presetTools,
     skills: ['decisoes-de-arquitetura', 'verificar-antes-de-concluir'],
     systemPrompt:
       'You are a pragmatic software architect. Keep changes minimal and consistent with the existing structure. Explain trade-offs briefly in your final summary.',
@@ -210,7 +229,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     role: 'frontend',
     label: 'Frontend Developer',
     description: 'Builds user interfaces and client-side logic.',
-    tools: allTools,
+    tools: presetTools,
     skills: ['interface-de-qualidade', 'depurar-sistematicamente', 'verificar-antes-de-concluir'],
     systemPrompt:
       'You are a senior frontend engineer. Match the existing component patterns, keep markup accessible, and verify your changes with the project test or build commands when available.',
@@ -219,7 +238,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     role: 'backend',
     label: 'Backend Developer',
     description: 'Implements services, data access and APIs.',
-    tools: allTools,
+    tools: presetTools,
     skills: [
       'apis-e-dados',
       'seguranca-no-codigo',
@@ -233,7 +252,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     role: 'qa',
     label: 'QA Engineer',
     description: 'Writes and runs tests; reports failures with evidence.',
-    tools: allTools,
+    tools: presetTools,
     skills: ['escrever-testes', 'depurar-sistematicamente', 'verificar-antes-de-concluir'],
     systemPrompt:
       'You are a QA engineer. Add focused tests for the behaviour described in the task, run them, and report exact commands and results.',
@@ -242,7 +261,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     role: 'reviewer',
     label: 'Code Reviewer',
     description: 'Reviews changes for correctness and risk without editing.',
-    tools: readOnlyTools,
+    tools: presetReadOnlyTools,
     skills: ['revisar-codigo', 'seguranca-no-codigo'],
     systemPrompt:
       'You are a careful code reviewer. Read the relevant code, identify concrete defects with file and line references, and do not modify files.',
@@ -251,7 +270,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     role: 'custom',
     label: 'Custom',
     description: 'A worker with a custom role.',
-    tools: allTools,
+    tools: presetTools,
     skills: [],
     systemPrompt: '',
   },
@@ -333,8 +352,9 @@ export const soldierPresets: Record<SoldierRole, SoldierPreset> = {
   tester: {
     label: 'Testadora',
     detail: 'Roda testes e comandos para conferir o trabalho.',
-    brief: 'runs tests, builds and other commands, and reports exact results.',
-    tools: [...lookTools, 'run_command'],
+    brief:
+      'runs tests, builds and other commands, looks at local pages when allowed, and reports exact results.',
+    tools: [...lookTools, 'run_command', 'view_page'],
   },
   reviewer: {
     label: 'Revisora',
@@ -346,8 +366,8 @@ export const soldierPresets: Record<SoldierRole, SoldierPreset> = {
     label: 'Pesquisadora',
     detail: 'Entra quando falta informação: documentação, APIs, exemplos.',
     brief:
-      'digs up missing information in the project: docs, APIs, config, usage examples. Read-only.',
-    tools: lookTools,
+      'digs up missing information: docs, APIs, config and usage examples, in the project or on the web when allowed. Read-only.',
+    tools: [...lookTools, 'web_fetch'],
   },
 };
 

@@ -23,6 +23,7 @@ import { HiveDatabase } from '@hive/persistence';
 import { HiveError, errorMessage, secretRedactor } from '@hive/shared';
 import { DesktopService } from './service';
 import { attachDesignInspector } from './design-inspector';
+import { viewLocalPage } from './page-viewer';
 import appIcon from '../../resources/icon.png?asset';
 import trayIcon from '../../resources/tray.png?asset';
 import trayIcon2x from '../../resources/tray@2x.png?asset';
@@ -212,6 +213,7 @@ app
         item.error ? `${item.missionTitle}: ${item.error}` : item.missionTitle,
       );
     // Design Mode notes keep a small picture of the element; wide ones are scaled down.
+    service.viewPage = viewLocalPage;
     service.capturePage = async (rect) => {
       const window = mainWindow();
       if (!window) return null;

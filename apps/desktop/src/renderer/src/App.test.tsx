@@ -43,6 +43,7 @@ const queen = {
   skills: [],
   tools: [],
   autoApproveCommands: [],
+  mcpServers: [],
   systemPrompt: '',
   limits: {},
   createdAt: '2026-01-01',
@@ -138,7 +139,7 @@ it('cria um agente novo a partir de uma função base', async () => {
       expect.objectContaining({
         name: 'Acessibilidade',
         role: 'reviewer',
-        tools: ['list_dir', 'read_file', 'search', 'read_skill_resource'],
+        tools: ['list_dir', 'read_file', 'search', 'read_skill_resource', 'view_page'],
       }),
     ),
   );

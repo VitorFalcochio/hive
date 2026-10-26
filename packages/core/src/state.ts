@@ -11,6 +11,8 @@ export function stateForTool(tool: ToolName, command?: string): WorkerState {
       return 'coding';
     case 'run_command':
       return command && looksLikeTestCommand(command) ? 'testing' : 'coding';
+    case 'view_page':
+      return 'testing';
     default:
       return 'thinking';
   }

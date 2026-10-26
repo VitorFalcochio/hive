@@ -73,6 +73,7 @@ describe('conversas no terminal', () => {
       skills: [],
       tools: ['read_file'],
       autoApproveCommands: [],
+      mcpServers: [],
       systemPrompt: '',
       limits: defaultSettings.defaultLimits,
       createdAt: '',

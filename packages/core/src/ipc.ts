@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  mcpServerSchema,
   planSchema,
   providerKindSchema,
   reviewCommentSchema,
@@ -34,6 +35,10 @@ function channel<O>() {
 const id = z.string().min(1).max(100);
 const relPath = z.string().max(1_000);
 const none = z.undefined();
+
+export interface McpProbe {
+  tools: { name: string; description: string }[];
+}
 
 export interface AppInfo {
   version: string;
@@ -309,6 +314,8 @@ export const ipcContract = {
   ),
   'provider.clearKey': channel<ProviderConfig>()(id),
   'provider.test': channel<ConnectionTest>()(id),
+  /** Starts an MCP server once and lists its tools, without saving it. */
+  'mcp.test': channel<McpProbe>()(mcpServerSchema),
   'provider.models': channel<ModelInfo[]>()(z.object({ providerId: id, refresh: z.boolean() })),
   'provider.probeTools': channel<ModelInfo>()(
     z.object({ providerId: id, modelId: z.string().min(1).max(200) }),

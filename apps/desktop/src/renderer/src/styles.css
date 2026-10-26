@@ -5207,3 +5207,38 @@ pre.command {
   font-size: 12px;
   color: var(--subtle-foreground);
 }
+
+/* Servidores MCP: rows in Settings, each opening its editor in place. */
+.mcp-server + .mcp-server {
+  box-shadow: 0 -1px 0 var(--border);
+}
+.mcp-server .row {
+  padding-left: 0;
+  padding-right: 0;
+}
+.mcp-toggle {
+  width: auto;
+  min-height: 0;
+}
+.mcp-probe {
+  margin: -4px 0 8px 28px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.mcp-editor {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px 28px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+.mcp-editor .settings-field {
+  margin-bottom: 0;
+}
+.mcp-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

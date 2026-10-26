@@ -188,8 +188,14 @@ export function describeTool(tool: string, args: Record<string, unknown>): strin
       return `$ ${target('command')}`;
     case 'read_skill_resource':
       return `Lendo ${target('path')} da skill ${target('skill')}`;
-    default:
-      return tool;
+    case 'web_fetch':
+      return `Lendo ${target('url')}`;
+    case 'view_page':
+      return `Olhando ${target('url')}`;
+    default: {
+      const mcp = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(tool);
+      return mcp ? `MCP ${mcp[1]} · ${mcp[2]}` : tool;
+    }
   }
 }
 

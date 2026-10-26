@@ -43,7 +43,12 @@ import {
   validatePlan,
   type AutopilotHistoryItem,
 } from '@hive/orchestrator';
-import { NativeAgentRuntime, type AgentRuntime } from '@hive/agents';
+import {
+  NativeAgentRuntime,
+  probeMcpServer,
+  type AgentRuntime,
+  type PageViewer,
+} from '@hive/agents';
 import { SkillForgeAdapter, builtinSkillNames } from '@hive/skills';
 import { FileService } from './files';
 import { TerminalManager } from './terminal';
@@ -76,6 +81,9 @@ export class DesktopService {
     width: number;
     height: number;
   }) => Promise<string | null>;
+  /** Set by the app shell: opens a local page in a hidden window for the agents' view_page. */
+  viewPage?: PageViewer;
+  private readonly runtime: AgentRuntime;
   private readonly planning = new Set<string>();
   /** One per provider, shared by everything that calls it. */
   private readonly gates = new Map<string, ProviderGate>();
@@ -90,12 +98,22 @@ export class DesktopService {
     database: HiveDatabase,
     private readonly dataDir: string,
     private readonly push: (push: HivePush) => void,
-    runtime: AgentRuntime = new NativeAgentRuntime(),
+    runtime?: AgentRuntime,
   ) {
     this.repos = new Repositories(database);
+    this.runtime =
+      runtime ??
+      new NativeAgentRuntime({
+        mcpServers: () => this.repos.getSettings().mcpServers,
+        viewPage: (request) => {
+          if (!this.viewPage)
+            throw new HiveError('VALIDATION', 'view_page is not available right now.');
+          return this.viewPage(request);
+        },
+      });
     this.scheduler = new Scheduler({
       repos: this.repos,
-      runtime,
+      runtime: this.runtime,
       chatFor: (providerId) => this.chatClient(providerId),
       resolveSkills: (names) => this.skills().resolve(names),
       // Outside the user's repository, on the same drive as Hive's data.
@@ -146,6 +164,7 @@ export class DesktopService {
           skills: [],
           tools: preset.tools,
           autoApproveCommands: [],
+          mcpServers: [],
           systemPrompt: preset.systemPrompt,
           limits: { ...defaultLimits },
           createdAt: nowIso(),
@@ -256,6 +275,7 @@ export class DesktopService {
   async enableTerminalCommands(): Promise<void> {
     const agents = new TerminalAgents({
       repos: this.repos,
+      runtime: this.runtime,
       chatFor: (providerId) => this.chatClient(providerId),
       resolveSkills: async (names) => (await this.skills().resolve(names)).skills,
       onWorkerChanged: (id) => this.changed('worker', id),
@@ -768,6 +788,12 @@ export class DesktopService {
         this.changed('provider', providerId);
         return models;
       }
+      case 'mcp.test': {
+        const server = parse(channel);
+        // Started where agents start it, so relative paths in its arguments resolve the same.
+        const workspace = this.active();
+        return probeMcpServer(server, workspace?.path ?? app.getPath('home'));
+      }
       case 'provider.test': {
         const id = parse(channel);
         let result;
@@ -829,6 +855,7 @@ export class DesktopService {
           ...value,
           beeColor: value.beeColor ?? null,
           squad: value.squad ?? [],
+          mcpServers: value.mcpServers ?? previous?.mcpServers ?? [],
           id: previous?.id ?? newId('worker'),
           createdAt: previous?.createdAt ?? nowIso(),
           updatedAt: nowIso(),

@@ -1,6 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import {
   callableSoldiers,
+  commandMatchesAllowList,
   rolePresets,
   soldierPresets,
   soldierWrites,
@@ -8,6 +9,7 @@ import {
   toolNameSchema,
   type CommandEvidence,
   type ExecutionLimits,
+  type McpServer,
   type SoldierRole,
   type ToolName,
   type Worker,
@@ -29,7 +31,16 @@ import type {
   AgentTaskInput,
   RuntimeEvent,
 } from './runtime';
-import { executeTool, toolDefinitions, type ToolContext, type ToolImage } from './tools';
+import { McpSession, type McpTool } from './mcp';
+import {
+  executeTool,
+  toolDefinitions,
+  truncate,
+  type ToolContext,
+  type ToolImage,
+  type ToolOutcome,
+} from './tools';
+import type { PageViewer } from './web';
 
 const MAX_SKILL_CHARS = 48_000;
 const MAX_TEXT_ONLY_REPLIES = 2;
@@ -164,9 +175,18 @@ function excerpt(text: string | null | undefined, length = 600): string {
  * Hive's built-in agent engine: a tool-calling loop over an OpenAI-compatible model.
  * Each session works in one worktree, stops on `finish`, on limits, or on cancellation.
  */
+export interface NativeRuntimeOptions {
+  /** The MCP servers configured in Settings, read again whenever a session starts. */
+  mcpServers?: () => McpServer[];
+  /** Opens local pages for view_page; the tool is left out without it. */
+  viewPage?: PageViewer;
+}
+
 export class NativeAgentRuntime implements AgentRuntime {
   readonly id = 'native';
   private readonly sessions = new Map<string, ActiveSession>();
+
+  constructor(private readonly options: NativeRuntimeOptions = {}) {}
 
   async start(input: AgentTaskInput): Promise<AgentSession> {
     if (this.sessions.has(input.sessionId))
@@ -224,6 +244,7 @@ export class NativeAgentRuntime implements AgentRuntime {
       commands,
     });
 
+    let mcp: McpSession | null = null;
     try {
       const root = await realpath(input.worktreePath);
       const env: LoopEnv = { chat: input.chat, limits, signal, usage };
@@ -236,6 +257,7 @@ export class NativeAgentRuntime implements AgentRuntime {
         commands,
         emit,
         vision: true,
+        ...(this.options.viewPage ? { viewPage: this.options.viewPage } : {}),
         requestApproval: async (request) => {
           emit({
             type: 'worker.state',
@@ -254,9 +276,12 @@ export class NativeAgentRuntime implements AgentRuntime {
         },
       };
       const squad = callableSoldiers(worker);
+      mcp = await openMcp(this.options.mcpServers?.() ?? [], worker, root, signal, emit);
+      const own = offeredTools(worker.tools, ctx);
       const tools: ToolDefinition[] = [
-        ...worker.tools.map((name) => toolDefinitions[name]),
+        ...own.map((name) => toolDefinitions[name]),
         ...(squad.length ? [callSoldiersDefinition(squad.map(({ soldier }) => soldier.role))] : []),
+        ...(mcp?.tools.map((tool) => tool.definition) ?? []),
         toolDefinitions.finish,
       ];
       emit({
@@ -265,7 +290,8 @@ export class NativeAgentRuntime implements AgentRuntime {
         message: `${worker.name} started on ${input.model}`,
         data: {
           model: input.model,
-          tools: worker.tools,
+          tools: own,
+          mcpTools: mcp?.tools.map((tool) => tool.qualified) ?? [],
           skills: input.skills.map((s) => s.name),
           squad: squad.map(({ soldier }) => soldier.role),
           runtime: this.id,
@@ -278,16 +304,17 @@ export class NativeAgentRuntime implements AgentRuntime {
           { role: 'user', content: buildTaskPrompt(input) },
         ],
         tools,
-        allowed: new Set<ToolName>(worker.tools),
+        allowed: new Set<ToolName>(own),
         ctx,
         maxSteps: limits.maxSteps,
         textEnds: input.place === 'project',
         progress,
-        extraTools: squad.length
-          ? {
-              call_soldiers: (args) => callSoldiers(env, ctx, { input, root, squad }, args),
-            }
-          : {},
+        extraTools: {
+          ...(squad.length
+            ? { call_soldiers: (args) => callSoldiers(env, ctx, { input, root, squad }, args) }
+            : {}),
+          ...(mcp ? mcpHandlers(mcp, ctx) : {}),
+        },
       });
       return outcome(result.status, result.summary, result.error);
     } catch (error) {
@@ -296,6 +323,8 @@ export class NativeAgentRuntime implements AgentRuntime {
         return outcome('failed', '', `Task timed out after ${limits.taskTimeoutMin} minutes.`);
       if (isAbortError(error)) return outcome('cancelled', '', 'Cancelled.');
       return outcome('failed', '', secretRedactor.redact(errorMessage(error)));
+    } finally {
+      await mcp?.close();
     }
   }
 }
@@ -320,8 +349,11 @@ interface LoopOptions {
   /** A plain-text reply is the final answer instead of a nudge to keep using tools. */
   textEnds: boolean;
   progress: { steps: number };
-  /** Tools the loop does not run itself, by name; each returns the tool message content. */
-  extraTools?: Record<string, (args: Record<string, unknown>) => Promise<string>>;
+  /**
+   * Tools the loop does not run itself, by name. A plain string is the tool message content;
+   * an outcome can carry an image too and reports its own events.
+   */
+  extraTools?: Record<string, (args: Record<string, unknown>) => Promise<string | ToolOutcome>>;
 }
 
 type LoopResult = Pick<AgentOutcome, 'summary' | 'error'> & { status: 'completed' | 'failed' };
@@ -522,7 +554,13 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
       }
       const extra = loop.extraTools?.[call.function.name];
       if (extra) {
-        const output = await extra(args);
+        const result = await extra(args);
+        if (typeof result !== 'string') {
+          messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
+          if (result.image) images.push(result.image);
+          continue;
+        }
+        const output = result;
         // Its successes are already in the log as the soldiers' own events; a refusal is not.
         if (output.startsWith('Error:'))
           emit({
@@ -754,8 +792,11 @@ async function callSoldiers(
             },
             { role: 'user', content: instruction },
           ],
-          tools: [...tools.map((name) => toolDefinitions[name]), toolDefinitions.finish],
-          allowed: new Set(tools),
+          tools: [
+            ...offeredTools(tools, ctx).map((name) => toolDefinitions[name]),
+            toolDefinitions.finish,
+          ],
+          allowed: new Set(offeredTools(tools, ctx)),
           ctx: { ...ctx, emit },
           maxSteps: Math.min(env.limits.maxSteps, SOLDIER_MAX_STEPS),
           textEnds: true,
@@ -778,6 +819,108 @@ async function callSoldiers(
     }),
   );
   return reports.join('\n\n');
+}
+
+/** The tools this environment can actually run: view_page needs a page viewer. */
+function offeredTools(tools: ToolName[], ctx: ToolContext): ToolName[] {
+  return tools.filter((name) => name !== 'view_page' || ctx.viewPage);
+}
+
+/** The agent's MCP servers, started for this session; ones that fail are logged and skipped. */
+async function openMcp(
+  servers: McpServer[],
+  worker: Worker,
+  root: string,
+  signal: AbortSignal,
+  emit: (event: RuntimeEvent) => void,
+): Promise<McpSession | null> {
+  const chosen = servers.filter(
+    (server) => server.enabled && worker.mcpServers.includes(server.id),
+  );
+  if (!chosen.length) return null;
+  const session = await McpSession.open(chosen, root, signal);
+  for (const failure of session.failures)
+    emit({
+      type: 'info',
+      level: 'warn',
+      message: `Servidor MCP ${failure.server} indisponível: ${excerpt(failure.error.split('\n')[0], 200)}`,
+      data: { mcp: failure.server, error: excerpt(failure.error, 2000) },
+    });
+  return session;
+}
+
+/**
+ * How an MCP call reads where commands are approved, so the same rules cover it: an agent's
+ * allow-list entry `mcp github *` or the shift's safe list lets it through without asking.
+ */
+export function mcpCommand(
+  tool: Pick<McpTool, 'server' | 'name'>,
+  args: Record<string, unknown>,
+): string {
+  return `mcp ${tool.server.name} ${tool.name} ${JSON.stringify(args)}`.slice(0, 2000);
+}
+
+function mcpHandlers(
+  mcp: McpSession,
+  ctx: ToolContext,
+): Record<string, (args: Record<string, unknown>) => Promise<ToolOutcome>> {
+  return Object.fromEntries(
+    mcp.tools.map((tool) => [
+      tool.qualified,
+      async (args: Record<string, unknown>): Promise<ToolOutcome> => {
+        const label = `${tool.server.name} · ${tool.name}`;
+        ctx.emit({
+          type: 'tool.call',
+          level: 'info',
+          message: `MCP ${label}`,
+          data: { tool: tool.qualified, mcp: tool.server.name, args: summarizeArgs(args) },
+        });
+        const command = mcpCommand(tool, args);
+        const allowed =
+          tool.server.approval === 'auto' ||
+          commandMatchesAllowList(command, ctx.worker.autoApproveCommands) ||
+          (await ctx.requestApproval({ command }));
+        if (!allowed)
+          return {
+            output:
+              'The user denied this MCP call. Do not retry it; continue without it or explain in finish.',
+            isError: true,
+          };
+        let outcome: ToolOutcome;
+        try {
+          const result = await mcp.call(tool, args, ctx.signal);
+          const image = ctx.vision ? result.images[0] : undefined;
+          outcome = {
+            output: truncate(result.text),
+            isError: result.isError,
+            ...(image
+              ? {
+                  image: {
+                    path: label,
+                    mime: image.mime,
+                    dataUrl: `data:${image.mime};base64,${image.data}`,
+                  },
+                }
+              : {}),
+          };
+        } catch (error) {
+          if (ctx.signal.aborted) throw new HiveError('CANCELLED', 'Cancelled.');
+          outcome = { output: `Error: ${errorMessage(error)}`, isError: true };
+        }
+        ctx.emit({
+          type: 'tool.result',
+          level: outcome.isError ? 'warn' : 'debug',
+          message: `${label}: ${excerpt(outcome.output.split('\n')[0], 160)}`,
+          data: {
+            tool: tool.qualified,
+            isError: outcome.isError,
+            output: excerpt(outcome.output, 2000),
+          },
+        });
+        return outcome;
+      },
+    ]),
+  );
 }
 
 /**

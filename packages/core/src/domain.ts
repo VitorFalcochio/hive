@@ -114,6 +114,8 @@ export const toolNameSchema = z.enum([
   'replace_in_file',
   'run_command',
   'read_skill_resource',
+  'web_fetch',
+  'view_page',
 ]);
 export type ToolName = z.infer<typeof toolNameSchema>;
 
@@ -126,6 +128,31 @@ export const executionLimitsSchema = z.object({
   temperature: z.number().min(0).max(2).nullable(),
 });
 export type ExecutionLimits = z.infer<typeof executionLimitsSchema>;
+
+/**
+ * An MCP server agents can call: a local program spoken to over stdio, or a remote one over
+ * streamable HTTP. Its tools reach only the agents that switch it on.
+ */
+export const mcpServerSchema = z.object({
+  id: z.string().min(1).max(100),
+  /** Shown to the agents in tool names (`mcp__<name>__<tool>`), so letters, digits, - and _. */
+  name: z
+    .string()
+    .min(1)
+    .max(40)
+    .regex(/^[a-zA-Z0-9_-]+$/),
+  enabled: z.boolean(),
+  transport: z.enum(['stdio', 'http']),
+  command: z.string().max(500),
+  args: z.array(z.string().max(1_000)).max(50),
+  /** Extra environment for a stdio server, such as an access token it reads. */
+  env: z.record(z.string().max(100), z.string().max(4_000)),
+  url: z.string().max(1_000),
+  headers: z.record(z.string().max(100), z.string().max(4_000)),
+  /** 'ask' needs an approval for each call, like a command; 'auto' trusts the server. */
+  approval: z.enum(['ask', 'auto']),
+});
+export type McpServer = z.infer<typeof mcpServerSchema>;
 
 /** Body colour of an agent's bee. Status colours (green, red, blue) are left out on purpose. */
 export const beeColorSchema = z.enum([
@@ -165,6 +192,8 @@ export const workerSchema = z.object({
   modelId: z.string().nullable(),
   skills: z.array(z.string()),
   tools: z.array(toolNameSchema),
+  /** Ids of the MCP servers (see Settings.mcpServers) whose tools this agent may call. */
+  mcpServers: z.array(z.string()).default([]),
   /** Commands that run without asking, matched as an exact string or `prefix *`. */
   autoApproveCommands: z.array(z.string().min(1).max(200)),
   systemPrompt: z.string().max(20_000),
@@ -468,6 +497,7 @@ export const settingsSchema = z.object({
   reduceMotion: z.enum(['system', 'on', 'off']),
   density: z.enum(['comfortable', 'compact']),
   autopilot: autopilotSettingsSchema,
+  mcpServers: z.array(mcpServerSchema).max(30).default([]),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -493,6 +523,7 @@ export const defaultSettings: Settings = {
   commandApproval: 'safe',
   reduceMotion: 'system',
   density: 'comfortable',
+  mcpServers: [],
   autopilot: {
     enabled: false,
     // Checks only. Installs, deploys, publishing and git writes are denied while unattended.

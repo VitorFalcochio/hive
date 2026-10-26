@@ -78,6 +78,7 @@ async function setup(
     skills: [],
     tools: [],
     autoApproveCommands: [],
+    mcpServers: [],
     systemPrompt: '',
     limits: defaultLimits,
     createdAt: at,
