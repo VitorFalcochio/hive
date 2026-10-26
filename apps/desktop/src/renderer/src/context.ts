@@ -15,6 +15,7 @@ import { providerPresets } from '@hive/core';
 
 export type View =
   | 'overview'
+  | 'colmeia'
   | 'search'
   | 'mission'
   | 'code'

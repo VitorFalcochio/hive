@@ -63,6 +63,8 @@ export class TerminalAgents {
       onWorkerChanged: (workerId: string) => void;
       /** Agents started or stopped work, or switched between working and waiting. */
       onChange: () => void;
+      /** Every step of a terminal agent, for the Colmeia screen to show live. */
+      onActivity?: (chat: ActiveChat, event: RuntimeEvent) => void;
       runtime?: AgentRuntime;
     },
   ) {
@@ -104,6 +106,7 @@ export class TerminalAgents {
     const waiting = (state: string) => state === 'waiting_approval' || state === 'waiting_provider';
     const onEvent = (event: RuntimeEvent) => {
       handlers.onEvent(event);
+      this.deps.onActivity?.(chat, event);
       if (event.type !== 'worker.state') return;
       const state = workerStateSchema.safeParse(event.data?.state);
       if (!state.success) return;

@@ -280,6 +280,23 @@ export class DesktopService {
       resolveSkills: async (names) => (await this.skills().resolve(names)).skills,
       onWorkerChanged: (id) => this.changed('worker', id),
       onChange: () => this.changed('chat'),
+      // Shown live, not stored: the terminal already keeps the conversation.
+      onActivity: (chat, event) =>
+        this.push({
+          kind: 'event',
+          event: {
+            id: newId('event'),
+            ts: nowIso(),
+            workspaceId: chat.workspaceId,
+            runId: null,
+            taskId: null,
+            workerId: chat.workerId,
+            type: event.type,
+            level: event.level,
+            message: event.message,
+            data: { ...event.data, chat: chat.id, title: chat.title },
+          },
+        }),
     });
     this.terminalAgents = agents;
     this.control = await startControlServer(({ terminalId, command, argument, write, end }) => {

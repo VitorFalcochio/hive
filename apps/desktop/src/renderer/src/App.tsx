@@ -53,10 +53,12 @@ import { TokenMeter } from './token-meter';
 import { HoneyMeter } from './honey';
 import { AboutPage, OverviewPage, ProvidersPage } from './pages';
 import { SkillsPage } from './skills';
+import { ColmeiaPage } from './colmeia';
 import { Dot } from './ui';
 
 const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   { view: 'overview', label: 'Visão geral', icon: LayoutGrid },
+  { view: 'colmeia', label: 'Colmeia', icon: Hexagon },
   { view: 'search', label: 'Buscar', icon: Search },
   { view: 'code', label: 'Código', icon: Code2 },
   { view: 'run', label: 'Rodar', icon: SquareTerminal },
@@ -90,6 +92,7 @@ function useRemembered(key: string): [boolean, (value: boolean) => void] {
 
 const viewTitles: Record<View, string> = {
   overview: 'Visão geral',
+  colmeia: 'Colmeia',
   search: 'Buscar',
   mission: 'Missão',
   code: 'Código',
@@ -591,6 +594,7 @@ export function App() {
           )}
           <div className={page === 'run' ? 'page page-full' : 'page'} hidden={page === 'code'}>
             {page === 'overview' && <OverviewPage />}
+            {page === 'colmeia' && <ColmeiaPage key={activeWorkspace?.id ?? 'none'} />}
             {page === 'search' && <SearchPage key={activeWorkspace?.id ?? 'none'} />}
             {page === 'mission' && <MissionPage />}
             {page === 'run' && <RunPage key={activeWorkspace?.id ?? 'none'} />}
