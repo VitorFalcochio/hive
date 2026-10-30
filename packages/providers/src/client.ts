@@ -188,6 +188,32 @@ export class OpenAICompatibleClient implements ChatClient {
   }
 
   /**
+   * OpenAI-compatible `/embeddings` (OpenAI, Ollama, LM Studio, OpenRouter…). Vectors come back in
+   * input order; a response with the wrong shape is an error, never a partial result.
+   */
+  async embed(model: string, inputs: string[], signal?: AbortSignal): Promise<number[][]> {
+    if (!inputs.length) return [];
+    const body = (await this.request(
+      '/embeddings',
+      { method: 'POST', body: JSON.stringify({ model, input: inputs }) },
+      signal,
+      60_000,
+    )) as { data?: { embedding?: unknown; index?: number }[] };
+    const rows = [...(body.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    if (rows.length !== inputs.length)
+      throw new HiveError('PROVIDER', 'Provider returned a different number of embeddings.');
+    return rows.map((row) => {
+      if (
+        !Array.isArray(row.embedding) ||
+        !row.embedding.length ||
+        row.embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))
+      )
+        throw new HiveError('PROVIDER', 'Provider returned an invalid embedding.');
+      return row.embedding as number[];
+    });
+  }
+
+  /**
    * Smallest possible chat call to confirm a model really answers. Listing models is not
    * enough: providers keep retired models in the catalog while calls to them return 404.
    */

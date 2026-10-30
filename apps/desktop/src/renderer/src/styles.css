@@ -5576,3 +5576,110 @@ pre.command {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* model failover */
+.failover-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.failover-subtitle small {
+  font-weight: 400;
+  color: var(--warning);
+}
+.failover-backups,
+.failover-chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.failover-backups li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.failover-index {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 6%);
+  font: 500 10.5px var(--font-mono);
+  color: var(--muted-foreground);
+}
+.failover-name {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.failover-name small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.failover-add {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  gap: 8px;
+  margin-top: 8px;
+}
+.failover-chain li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.failover-chain li small {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.failover-chain li em {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--warning);
+}
+.failover-chain li.resting {
+  opacity: 0.6;
+}
+.failover-arrow {
+  position: absolute;
+  top: -8px;
+  left: 34px;
+  color: var(--subtle-foreground);
+}
+.failover-source {
+  grid-row: 1 / span 2;
+  justify-self: start;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font: 500 10px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border-strong);
+}
+.failover-source.primary {
+  color: var(--success);
+  border-color: rgb(76 214 160 / 35%);
+}
+.failover-source.backup {
+  color: #93c5fd;
+  border-color: rgb(147 197 253 / 35%);
+}

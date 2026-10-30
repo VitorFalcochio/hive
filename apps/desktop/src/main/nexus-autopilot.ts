@@ -14,6 +14,7 @@ import { extractJson, MAX_RUN_TASKS } from '@hive/orchestrator';
 import type { Repositories } from '@hive/persistence';
 import type { ChatClient } from '@hive/providers';
 import { HiveError, errorMessage, newId, nowIso } from '@hive/shared';
+import type { CortexService } from './cortex';
 
 interface Options {
   repos: Repositories;
@@ -21,6 +22,8 @@ interface Options {
   chatFor: (providerId: string) => ChatClient;
   invoke: (channel: IpcChannel, input: unknown) => Promise<unknown>;
   resultContext: (runId: string) => string;
+  /** Cortex blocks of the project; the flow may only connect its agents to these. */
+  cortex?: CortexService;
   onEvent: (event: AgentEvent) => void;
 }
 
@@ -143,6 +146,10 @@ export class NexusAutopilot {
       );
     if (!parsed.agents.length && parsed.tasks.some((task) => task.workerKey))
       throw new HiveError('VALIDATION', 'O fluxo referencia agentes que não foram declarados.');
+    for (const access of parsed.cortexAccess ?? []) {
+      if (!this.options.cortex) throw new HiveError('VALIDATION', 'O Cortex não está disponível.');
+      this.options.cortex.validateAutopilotGrant(run, access);
+    }
   }
 
   async propose(request: NexusAutopilotRequest): Promise<NexusAutopilotPlan> {
@@ -219,6 +226,8 @@ export class NexusAutopilot {
           worktree: task.worktreePath ? 'allocated' : 'none',
         })),
         executionEvidence: this.options.resultContext(request.runId),
+        // Which agents may use which shared memory today; the contents are not sent.
+        cortex: this.options.cortex?.autopilotContext(state.run) ?? [],
         basePlan: base?.draft ?? null,
       };
       const response = await this.options.chatFor(queen.providerId).chat(
@@ -237,7 +246,8 @@ export class NexusAutopilot {
                 'Agentes existentes usam {source:"existing",key,workerId}. Agentes novos usam {source:"new",key,name,role,providerId,modelId} e somente pares presentes no contexto.',
                 'Tarefas usam workerKey de um agente declarado ou null e dependências por chave. Resultado Vivo é singleton; connectResult deve ser true.',
                 'Não invente provedores, modelos, ferramentas, permissões, testes concluídos nem evidências.',
-                'Schema exato: {objective:string,agents:Agent[],tasks:[{key,title,description,workerKey,dependsOn,acceptanceCriteria}],connectResult:boolean,approvalSteps:string[],warnings:string[]}.',
+                'Cortex é memória compartilhada do projeto. Só blocos listados em context.cortex existem. Conexões existentes são mantidas como estão. Para que um agente do fluxo use um Cortex, inclua em cortexAccess {cortexId,agentKey,permissions:["read"] ou ["read","propose"]} somente quando a tarefa precisar; nunca dê acesso a todos por padrão. Approve e Manage são exclusivos do usuário.',
+                'Schema exato: {objective:string,agents:Agent[],tasks:[{key,title,description,workerKey,dependsOn,acceptanceCriteria}],connectResult:boolean,approvalSteps:string[],warnings:string[],cortexAccess:[{cortexId,agentKey,permissions}]}.',
               ].join('\n'),
             },
             {
@@ -465,6 +475,15 @@ export class NexusAutopilot {
           }),
         });
       }
+      let cortexGranted = 0;
+      for (const access of original.draft.cortexAccess ?? []) {
+        const workerId = agentIds[access.agentKey];
+        if (
+          workerId &&
+          this.options.cortex?.applyAutopilotGrant(state.run, { ...access, workerId })
+        )
+          cortexGranted++;
+      }
       let started = false;
       if (start) {
         await this.options.invoke('run.start', runId);
@@ -487,7 +506,7 @@ export class NexusAutopilot {
         workerId: state.run.queenWorkerId,
         type: 'plan',
         level: 'info',
-        message: `Nexus Autopilot v${working.version}: ${Object.keys(taskIds).length} tarefa(s) aplicada(s)${started ? ' e execução iniciada' : ''}.`,
+        message: `Nexus Autopilot v${working.version}: ${Object.keys(taskIds).length} tarefa(s) aplicada(s)${cortexGranted ? `, ${cortexGranted} conexão(ões) ao Cortex` : ''}${started ? ' e execução iniciada' : ''}.`,
         data: { planId, version: working.version, source: 'nexus-autopilot' },
       };
       this.options.repos.appendEvent(event);

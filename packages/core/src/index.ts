@@ -9,3 +9,4 @@ export * from './bee-sprite';
 export * from './live-result';
 export * from './canvas-commands';
 export * from './nexus-autopilot';
+export * from './cortex';

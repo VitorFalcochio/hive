@@ -1,6 +1,8 @@
 import { createContext, memo, useContext, useEffect, useState } from 'react';
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
 import {
+  ArrowUpRight,
+  BrainCircuit,
   ChevronDown,
   ChevronRight,
   GitBranch,
@@ -11,6 +13,7 @@ import {
 } from 'lucide-react';
 import type {
   AgentEvent,
+  CortexOverview,
   CanvasSnapshot,
   CanvasTerminal,
   CanvasWorker,
@@ -71,6 +74,9 @@ export interface CanvasView {
   frames: Map<string, Frame>;
   updateNote: (id: string, patch: Partial<Note>) => void;
   updateFrame: (id: string, patch: Partial<Frame>) => void;
+  /** Cortex blocks of the project, by id. */
+  cortex: Map<string, CortexOverview>;
+  openCortex: (cortexId: string) => void;
 }
 
 export const CanvasViewContext = createContext<CanvasView | null>(null);
@@ -82,7 +88,10 @@ function useView(): CanvasView {
 }
 
 export type NodeData = { ref: string };
-export type CanvasNode = Node<NodeData, 'agent' | 'task' | 'lane' | 'note' | 'frame' | 'result'>;
+export type CanvasNode = Node<
+  NodeData,
+  'agent' | 'task' | 'lane' | 'note' | 'frame' | 'result' | 'cortex'
+>;
 
 /** Handles are where connections are drawn; the engine decides what a drawn line may do. */
 function Handles({ source, target }: { source: boolean; target: boolean }) {
@@ -106,8 +115,9 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
   const status = view.agents.get(data.ref);
   if (!worker || !status) return null;
   const queen = worker.role === 'queen';
-  // A line from an agent to a task delegates it (the engine checks it has not started).
-  const handles = <Handles source={!queen} target={false} />;
+  // A line from an agent to a task delegates it (the engine checks it has not started); to a
+  // Cortex it gives access. The Queen only connects to a Cortex, for planning context.
+  const handles = <Handles source target={false} />;
   const windowed = view.grouping === 'workspace' && !queen && !view.minimized.has(worker.id);
   if (windowed)
     return (
@@ -405,7 +415,112 @@ export const LiveResultNode = memo(function LiveResultNode({
   );
 });
 
+/**
+ * Shared memory of the project. A line from an agent to it is that agent's access; what the agent
+ * may do comes from the permissions set on the line. Double-click opens the Inspector.
+ */
+export const CortexNode = memo(function CortexNode({ id, data, selected }: NodeProps<CanvasNode>) {
+  const view = useView();
+  const block = view.cortex.get(data.ref);
+  if (!block) return null;
+  const { node } = block;
+  const connected = node.connections
+    .map((connection) => view.workers.get(connection.workerId))
+    .filter((worker): worker is CanvasWorker => !!worker);
+  const pending = block.pendingApprovals;
+  const degraded = !!block.embedding.degraded;
+  const tone = pending ? 'waiting' : connected.length ? 'running' : 'pending';
+  const status = pending
+    ? `${pending} ${pending === 1 ? 'pendente' : 'pendentes'}`
+    : connected.length
+      ? 'Ativo'
+      : 'Sem acesso';
+  const shown = connected.slice(0, 4);
+  return (
+    <div className={`nc-node nc-cortex tone-${tone}${selected ? ' selected' : ''}`}>
+      <Handle type="target" position={Position.Left} isConnectable />
+      <Handle type="target" position={Position.Top} id="top" isConnectable />
+      <header className="nc-cortex-head">
+        <span className="nc-cortex-icon" aria-hidden>
+          <BrainCircuit size={18} />
+        </span>
+        <div className="nc-cortex-title">
+          <strong className="truncate">{node.name}</strong>
+          <span className="truncate">
+            Memória compartilhada · {view.snapshot.workspace?.name ?? 'projeto'}
+          </span>
+        </div>
+        <PinMark id={id} />
+        {connected.length > 0 && (
+          <span
+            className="nc-cortex-bees"
+            aria-label={`Conectados: ${connected.map((worker) => worker.name).join(', ')}`}
+          >
+            {shown.map((worker) => (
+              <span key={worker.id} className="nc-cortex-bee" title={worker.name}>
+                <AgentBee worker={worker} size={15} mood="still" />
+              </span>
+            ))}
+            {connected.length > shown.length && (
+              <span
+                className="nc-cortex-bee more"
+                title={connected
+                  .slice(shown.length)
+                  .map((worker) => worker.name)
+                  .join(', ')}
+              >
+                +{connected.length - shown.length}
+              </span>
+            )}
+          </span>
+        )}
+        <span
+          className={`nc-cortex-pill tone-${tone}`}
+          title={connected.length ? undefined : 'Arraste de um agente até o bloco para dar acesso'}
+        >
+          {status}
+        </span>
+      </header>
+      <dl className="nc-cortex-metrics">
+        <div title="Memórias aprovadas e vigentes">
+          <dd>{block.memories.active}</dd>
+          <dt>memórias</dt>
+        </div>
+        <div title="Decisões arquiteturais registradas (vigentes e históricas)">
+          <dd>{block.decisions}</dd>
+          <dt>decisões</dt>
+        </div>
+        <div
+          className={pending ? 'tone-waiting' : undefined}
+          title="Propostas aguardando sua aprovação"
+        >
+          <dd>{pending}</dd>
+          <dt>pendentes</dt>
+        </div>
+      </dl>
+      <footer className="nc-cortex-foot">
+        <span className={`nc-cortex-state${degraded ? ' degraded' : ''}`}>
+          <span className="nc-dot" aria-hidden />
+          {degraded
+            ? 'Busca local (provedor indisponível)'
+            : node.config.semanticSearch
+              ? 'Busca semântica'
+              : 'Busca por palavras'}
+        </span>
+        <button
+          className="nc-cortex-open nodrag"
+          onClick={() => view.openCortex(node.id)}
+          title="Abrir o Cortex Inspector (duplo clique)"
+        >
+          Abrir <ArrowUpRight size={12} />
+        </button>
+      </footer>
+    </div>
+  );
+});
+
 export const nodeTypes = {
+  cortex: CortexNode,
   result: LiveResultNode,
   agent: AgentNode,
   task: TaskNode,

@@ -35,6 +35,22 @@ export const nexusAutopilotTaskSchema = planTaskSchema
   .strict();
 export type NexusAutopilotTask = z.infer<typeof nexusAutopilotTaskSchema>;
 
+/**
+ * Access to an existing Cortex block for an agent of the flow. Only Read and Propose: Approve and
+ * Manage are given by the user on the canvas. Existing connections are never changed.
+ */
+export const nexusAutopilotCortexAccessSchema = z
+  .object({
+    cortexId: id,
+    agentKey: key,
+    permissions: z
+      .array(z.enum(['read', 'propose']))
+      .min(1)
+      .max(2),
+  })
+  .strict();
+export type NexusAutopilotCortexAccess = z.infer<typeof nexusAutopilotCortexAccessSchema>;
+
 /** The model may only fill this declarative shape. It never receives executable tools. */
 export const nexusAutopilotDraftSchema = z
   .object({
@@ -45,6 +61,7 @@ export const nexusAutopilotDraftSchema = z
     connectResult: z.literal(true),
     approvalSteps: z.array(z.string().trim().min(1).max(300)).max(10),
     warnings: z.array(z.string().trim().min(1).max(500)).max(20),
+    cortexAccess: z.array(nexusAutopilotCortexAccessSchema).max(24).optional(),
   })
   .strict()
   .superRefine((draft, context) => {
@@ -80,6 +97,13 @@ export const nexusAutopilotDraftSchema = z
           message: 'Uma tarefa não pode depender de si mesma.',
         });
     }
+    for (const [index, access] of (draft.cortexAccess ?? []).entries())
+      if (!agentKeys.has(access.agentKey))
+        context.addIssue({
+          code: 'custom',
+          path: ['cortexAccess', index, 'agentKey'],
+          message: `Agente desconhecido no acesso ao Cortex: ${access.agentKey}.`,
+        });
     const byKey = new Map(draft.tasks.map((task) => [task.key, task]));
     const visiting = new Set<string>();
     const visited = new Set<string>();

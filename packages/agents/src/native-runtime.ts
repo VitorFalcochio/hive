@@ -25,6 +25,7 @@ import {
 } from '@hive/providers';
 import { Emitter, HiveError, errorMessage, isAbortError, secretRedactor } from '@hive/shared';
 import type {
+  AgentExtraTool,
   AgentOutcome,
   AgentRuntime,
   AgentSession,
@@ -107,6 +108,7 @@ export function buildSystemPrompt(input: AgentTaskInput, root: string): string {
         ].join('\n'),
       ];
   parts.push(buildSquadPrompt(callableSoldiers(worker)));
+  if (input.memory?.guidance) parts.push(input.memory.guidance);
   if (skills.length) {
     let budget = MAX_SKILL_CHARS;
     const blocks: string[] = [];
@@ -155,6 +157,7 @@ export function buildTaskPrompt(input: AgentTaskInput): string {
     }
     if (review.note.trim()) lines.push('', 'General note from the user:', review.note.trim());
   }
+  if (input.memory?.context) lines.push('', input.memory.context);
   return lines.join('\n');
 }
 
@@ -278,10 +281,12 @@ export class NativeAgentRuntime implements AgentRuntime {
       const squad = callableSoldiers(worker);
       mcp = await openMcp(this.options.mcpServers?.() ?? [], worker, root, signal, emit);
       const own = offeredTools(worker.tools, ctx);
+      const memoryTools = input.memory?.tools ?? [];
       const tools: ToolDefinition[] = [
         ...own.map((name) => toolDefinitions[name]),
         ...(squad.length ? [callSoldiersDefinition(squad.map(({ soldier }) => soldier.role))] : []),
         ...(mcp?.tools.map((tool) => tool.definition) ?? []),
+        ...memoryTools.map((tool) => tool.definition),
         toolDefinitions.finish,
       ];
       emit({
@@ -294,6 +299,7 @@ export class NativeAgentRuntime implements AgentRuntime {
           mcpTools: mcp?.tools.map((tool) => tool.qualified) ?? [],
           skills: input.skills.map((s) => s.name),
           squad: squad.map(({ soldier }) => soldier.role),
+          memoryTools: memoryTools.map((tool) => tool.definition.function.name),
           runtime: this.id,
         },
       });
@@ -314,6 +320,7 @@ export class NativeAgentRuntime implements AgentRuntime {
             ? { call_soldiers: (args) => callSoldiers(env, ctx, { input, root, squad }, args) }
             : {}),
           ...(mcp ? mcpHandlers(mcp, ctx) : {}),
+          ...memoryHandlers(memoryTools, ctx),
         },
       });
       return outcome(result.status, result.summary, result.error);
@@ -918,6 +925,42 @@ function mcpHandlers(
           },
         });
         return outcome;
+      },
+    ]),
+  );
+}
+
+/** The caller's own tools (the Cortex): logged like any call, run by the caller, never thrown. */
+function memoryHandlers(
+  tools: AgentExtraTool[],
+  ctx: ToolContext,
+): Record<string, (args: Record<string, unknown>) => Promise<string>> {
+  return Object.fromEntries(
+    tools.map((tool) => [
+      tool.definition.function.name,
+      async (args: Record<string, unknown>) => {
+        const name = tool.definition.function.name;
+        ctx.emit({
+          type: 'tool.call',
+          level: 'info',
+          message: typeof args.query === 'string' ? `${name} "${excerpt(args.query, 160)}"` : name,
+          data: { tool: name, args: summarizeArgs(args) },
+        });
+        let output: string;
+        try {
+          output = await tool.run(args);
+        } catch (error) {
+          if (ctx.signal.aborted) throw new HiveError('CANCELLED', 'Cancelled.');
+          output = `Error: ${errorMessage(error)}`;
+        }
+        if (!output.startsWith('Error:'))
+          ctx.emit({
+            type: 'tool.result',
+            level: 'debug',
+            message: `${name}: ${excerpt(output.split('\n')[0], 160)}`,
+            data: { tool: name, isError: false, output: excerpt(output, 2000) },
+          });
+        return output;
       },
     ]),
   );

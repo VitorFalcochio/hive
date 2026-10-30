@@ -1,4 +1,6 @@
 export type {
+  AgentExtraTool,
+  AgentMemory,
   AgentOutcome,
   AgentRuntime,
   AgentSession,

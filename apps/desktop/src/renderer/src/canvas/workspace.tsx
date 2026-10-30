@@ -61,6 +61,9 @@ import {
 import { CommandPalette } from './command-palette';
 import { QueenCommand } from './queen-command';
 import { NexusAutopilot } from './nexus-autopilot';
+import { useCortex } from './cortex/use-cortex';
+import { CortexInspector, type CortexTab } from './cortex/CortexInspector';
+import { BLOCK_MIME, BlockLibrary, type BlockKind } from './cortex/BlockLibrary';
 
 export const toneColors: Record<Tone, string> = {
   done: '#4cd6a0',
@@ -151,6 +154,13 @@ export function Workspace({
     instruction?: string;
   } | null>(null);
   const [autopilotOpen, setAutopilotOpen] = useState(false);
+  const cortexState = useCortex(runId);
+  const [cortexOpen, setCortexOpen] = useState<{ id: string; tab?: CortexTab } | null>(null);
+  const [blocksOpen, setBlocksOpen] = useState(false);
+  const cortexBlocks = useMemo(
+    () => new Map((cortexState.blocks ?? []).map((block) => [block.node.id, block])),
+    [cortexState.blocks],
+  );
   const [pendingReveal, setPendingReveal] = useState<string | null>(null);
   const grouping: Grouping = prefs.grouping;
   const scope = `${runId}:${grouping}`;
@@ -176,8 +186,13 @@ export function Workspace({
   }, [notice]);
   useEffect(() => {
     const open = () => setAutopilotOpen(true);
+    const blocks = () => setBlocksOpen((current) => !current);
     window.addEventListener('nc:autopilot', open);
-    return () => window.removeEventListener('nc:autopilot', open);
+    window.addEventListener('nc:blocks', blocks);
+    return () => {
+      window.removeEventListener('nc:autopilot', open);
+      window.removeEventListener('nc:blocks', blocks);
+    };
   }, []);
   /** Runs an engine call; its refusal (a cycle, a started task…) is shown, never swallowed. */
   const act = useCallback(
@@ -309,8 +324,11 @@ export function Workspace({
       frames: new Map(layout.frames.map((frame) => [frame.id, frame])),
       updateNote: layoutApi.updateNote,
       updateFrame: layoutApi.updateFrame,
+      cortex: cortexBlocks,
+      openCortex: (cortexId) => setCortexOpen({ id: cortexId }),
     };
   }, [
+    cortexBlocks,
     liveResult,
     resultError,
     snapshot,
@@ -333,16 +351,28 @@ export function Workspace({
 
   /* ---------------------------------------------------------------- layout */
 
+  const cortexGraph = useMemo(
+    () =>
+      (cortexState.blocks ?? []).map((block) => ({
+        id: block.node.id,
+        workers: block.node.connections.map((connection) => connection.workerId),
+      })),
+    [cortexState.blocks],
+  );
   const graph = useMemo(
     () =>
       buildGraph(snapshot, {
         grouping,
         collapsed,
-        extraAgents: layout.agents,
+        // An agent with access to a Cortex stays on the canvas, so its line is visible.
+        extraAgents: [
+          ...new Set([...layout.agents, ...cortexGraph.flatMap((block) => block.workers)]),
+        ],
         windowSize: (workerId) =>
           minimized.has(workerId) ? null : (layout.sizes[`agent:${workerId}`] ?? SIZE.window),
+        cortex: cortexGraph,
       }),
-    [snapshot, grouping, collapsed, layout.agents, layout.sizes, minimized],
+    [snapshot, grouping, collapsed, layout.agents, layout.sizes, minimized, cortexGraph],
   );
 
   /** Everything on the canvas: the execution graph, then the user's frames and notes. */
@@ -573,11 +603,15 @@ export function Workspace({
 
   /* ---------------------------------------------------------------- connections */
 
-  /** Only lines with a meaning the engine knows: task → task (dependency), agent → task (delegation). */
+  /**
+   * Only lines with a meaning the engine knows: task → task (dependency), agent → task
+   * (delegation), agent → Cortex (access to shared memory).
+   */
   const validConnection = useCallback(
     (connection: FlowConnection | Edge) => {
       const [from, fromRef] = splitId(connection.source);
       const [to] = splitId(connection.target);
+      if (to === 'cortex') return from === 'agent' && view.workers.has(fromRef);
       if (to !== 'task' || connection.source === connection.target) return false;
       if (from === 'task') return true;
       return from === 'agent' && view.workers.get(fromRef)?.role !== 'queen';
@@ -587,7 +621,18 @@ export function Workspace({
   const onConnect = useCallback(
     (connection: FlowConnection) => {
       const [from, fromRef] = splitId(connection.source);
-      const [, toRef] = splitId(connection.target);
+      const [toType, toRef] = splitId(connection.target);
+      if (toType === 'cortex') {
+        const worker = view.workers.get(fromRef);
+        const block = cortexBlocks.get(toRef);
+        if (!worker || !block) return;
+        void act(
+          () =>
+            window.hive.invoke('cortex.connect', { cortexId: block.node.id, workerId: worker.id }),
+          `${worker.name} conectado ao ${block.node.name} com Read e Propose. Ajuste em Conexões no Inspector.`,
+        );
+        return;
+      }
       const target = view.tasks.get(toRef);
       if (!target) return;
       if (from === 'task') {
@@ -619,7 +664,7 @@ export function Workspace({
         );
       }
     },
-    [view.tasks, view.workers, act],
+    [view.tasks, view.workers, act, cortexBlocks],
   );
 
   /* ---------------------------------------------------------------- canvas items */
@@ -647,6 +692,27 @@ export function Workspace({
     },
     [layoutApi],
   );
+  /** A Cortex block of the project, placed where it was dropped (or in view). */
+  const addCortex = useCallback(
+    (at: { x: number; y: number }) =>
+      void act(async () => {
+        const created = await window.hive.invoke('cortex.create', { runId });
+        layoutApi.place(grouping, {
+          [`cortex:${created.node.id}`]: { x: Math.round(at.x), y: Math.round(at.y) },
+        });
+        await cortexState.reload();
+      }, 'Cortex criado. Arraste de um agente até ele para dar acesso à memória.'),
+    [act, runId, layoutApi, grouping, cortexState],
+  );
+  const placeBlock = useCallback(
+    (kind: BlockKind, at: { x: number; y: number }) => {
+      if (kind === 'note') addNote(at);
+      else if (kind === 'frame') addFrame(at);
+      else addCortex(at);
+    },
+    [addNote, addFrame, addCortex],
+  );
+
   /** A frame around the selected nodes (Ctrl+G). */
   const groupSelection = useCallback(() => {
     const picked = nodes.filter((node) => node.selected && !node.parentId && node.type !== 'frame');
@@ -701,7 +767,7 @@ export function Workspace({
         ownsKeyboard(event.target)
       )
         return;
-      if (modal || paletteOpen || queenCommand || autopilotOpen || resultOpen) return;
+      if (modal || paletteOpen || queenCommand || autopilotOpen || resultOpen || cortexOpen) return;
       const key = event.key.toLowerCase();
       const ctrl = event.ctrlKey || event.metaKey;
       if (event.key === 'Escape') {
@@ -727,6 +793,7 @@ export function Workspace({
     queenCommand,
     autopilotOpen,
     resultOpen,
+    cortexOpen,
     modal,
     expanded,
     select,
@@ -750,6 +817,7 @@ export function Workspace({
   const paneItems = (at: { x: number; y: number }): (MenuItem | 'separator')[] => [
     { label: 'Nova nota', hint: 'N', run: () => addNote(at) },
     { label: 'Novo grupo', run: () => addFrame(at) },
+    { label: 'Novo Cortex — Shared Memory', run: () => addCortex(at) },
     { label: 'Agrupar seleção', hint: 'Ctrl+G', run: groupSelection },
     'separator',
     {
@@ -818,6 +886,45 @@ export function Workspace({
         ],
       };
     const [type, ref] = splitId(node.id);
+    if (type === 'cortex') {
+      const block = cortexBlocks.get(ref);
+      if (!block) return { items: [] };
+      return {
+        title: block.node.name,
+        items: [
+          {
+            label: 'Abrir Cortex Inspector',
+            hint: '2× clique',
+            run: () => setCortexOpen({ id: ref }),
+          },
+          {
+            label: `Aprovações pendentes (${block.pendingApprovals})`,
+            run: () => setCortexOpen({ id: ref, tab: 'approvals' }),
+          },
+          {
+            label: 'Conexões e permissões',
+            run: () => setCortexOpen({ id: ref, tab: 'connections' }),
+          },
+          'separator',
+          pin,
+          {
+            label: 'Remover bloco (mantém as memórias)',
+            danger: true,
+            run: () => {
+              if (
+                window.confirm(
+                  `Remover “${block.node.name}” do projeto? Os agentes perdem o acesso; as memórias ficam guardadas no banco do Hive.`,
+                )
+              )
+                void act(
+                  () => window.hive.invoke('cortex.delete', { cortexId: ref, purge: false }),
+                  'Cortex removido.',
+                );
+            },
+          },
+        ],
+      };
+    }
     if (type === 'agent') {
       const worker = view.workers.get(ref);
       if (!worker) return { items: [] };
@@ -921,6 +1028,23 @@ export function Workspace({
 
   const edgeItems = (edge: Edge): (MenuItem | 'separator')[] => {
     const graphEdge = graph.edges.find((item) => item.id === edge.id);
+    if (graphEdge?.kind === 'memory') {
+      const [, workerId] = splitId(graphEdge.source);
+      const [, cortexId] = splitId(graphEdge.target);
+      const worker = view.workers.get(workerId);
+      return [
+        { label: 'Permissões…', run: () => setCortexOpen({ id: cortexId, tab: 'connections' }) },
+        {
+          label: `Desconectar ${worker?.name ?? 'agente'}`,
+          danger: true,
+          run: () =>
+            void act(
+              () => window.hive.invoke('cortex.disconnect', { cortexId, workerId }),
+              `${worker?.name ?? 'Agente'} perdeu o acesso ao Cortex.`,
+            ),
+        },
+      ];
+    }
     if (!graphEdge || graphEdge.kind !== 'dependency' || graphEdge.folded) return [];
     const [, sourceRef] = splitId(graphEdge.source);
     const [, targetRef] = splitId(graphEdge.target);
@@ -1043,6 +1167,11 @@ export function Workspace({
     },
     pin: lockSelected,
     'group-selection': groupSelection,
+    'new-cortex': () => {
+      const at = center();
+      addCortex({ x: at.x - SIZE.cortex.width / 2, y: at.y - SIZE.cortex.height / 2 });
+    },
+    blocks: () => setBlocksOpen(true),
   };
   const commandContext: CommandContext = {
     snapshot,
@@ -1117,6 +1246,18 @@ export function Workspace({
       add(frame.id, frame.title, 'Grupo neste Canvas', 'block', ['grupo', 'frame'], (context) =>
         context.reveal(frame.id),
       );
+    for (const block of cortexState.blocks ?? [])
+      registry.register({
+        id: `entity:cortex:${block.node.id}`,
+        title: block.node.name,
+        description: `Cortex · ${block.memories.active} memórias · ${block.pendingApprovals} pendentes`,
+        category: 'Cortex',
+        icon: 'cortex',
+        entity: 'block',
+        keywords: ['cortex', 'memória', 'memory', 'aprovações', block.node.id],
+        availability: () => true,
+        execute: () => setCortexOpen({ id: block.node.id }),
+      });
     add(
       `result:${run.missionId}`,
       'Resultado Vivo',
@@ -1146,6 +1287,7 @@ export function Workspace({
     run.queenWorkerId,
     run.missionId,
     runId,
+    cortexState.blocks,
   ]);
   const queenApplied = async (applied: CanvasQueenApplied) => {
     await layoutApi.reload();
@@ -1169,7 +1311,9 @@ export function Workspace({
         context={commandContext}
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
-        blocked={!!modal || resultOpen || !!expanded || !!queenCommand || autopilotOpen}
+        blocked={
+          !!modal || resultOpen || !!expanded || !!queenCommand || autopilotOpen || !!cortexOpen
+        }
         onError={(message) => say(message, 'error')}
       />
       {queenCommand && (
@@ -1206,6 +1350,20 @@ export function Workspace({
               nodeTypes={nodeTypes}
               onNodesChange={onNodesChange}
               onNodeClick={(_, node) => select({ kind: 'node', id: node.id })}
+              onNodeDoubleClick={(_, node) => {
+                if (node.type === 'cortex') setCortexOpen({ id: node.data.ref });
+              }}
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes(BLOCK_MIME)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'copy';
+              }}
+              onDrop={(event) => {
+                const kind = event.dataTransfer.getData(BLOCK_MIME) as BlockKind | '';
+                if (!kind) return;
+                event.preventDefault();
+                placeBlock(kind, flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+              }}
               onEdgeClick={(_, edge) => setSelection({ kind: 'edge', id: edge.id })}
               onPaneClick={() => {
                 select(null);
@@ -1275,6 +1433,7 @@ export function Workspace({
                   const { ref } = (node.data ?? {}) as { ref?: string };
                   if (node.type === 'lane' || node.type === 'frame') return 'rgb(255 255 255 / 4%)';
                   if (node.type === 'note') return 'rgb(245 181 68 / 40%)';
+                  if (node.type === 'cortex') return 'rgb(167 139 250 / 70%)';
                   if (node.type === 'agent')
                     return toneColors[view.agents.get(ref ?? '')?.tone ?? 'pending'];
                   const task = view.tasks.get(ref ?? '');
@@ -1283,6 +1442,25 @@ export function Workspace({
               />
             </ReactFlow>
             {empty}
+            {blocksOpen && (
+              <BlockLibrary
+                onClose={() => setBlocksOpen(false)}
+                onPlace={(kind) => {
+                  const at = center();
+                  const size =
+                    kind === 'cortex' ? SIZE.cortex : kind === 'note' ? NOTE_SIZE : FRAME_SIZE;
+                  placeBlock(kind, { x: at.x - size.width / 2, y: at.y - size.height / 2 });
+                }}
+              />
+            )}
+            {cortexState.error && (
+              <div className="nc-banner subtle" role="status">
+                Cortex: {cortexState.error}
+                <button className="ghost" onClick={() => void cortexState.reload()}>
+                  Tentar novamente
+                </button>
+              </div>
+            )}
             {connection === 'disconnected' && (
               <div className="nc-banner" role="alert">
                 <Unplug size={13} /> Sem conexão com o motor: mostrando o último estado conhecido.
@@ -1368,6 +1546,16 @@ export function Workspace({
             <AgentPanel view={view} workerId={expandedWorker.id} />
           </div>
         </div>
+      )}
+
+      {cortexOpen && cortexBlocks.get(cortexOpen.id) && (
+        <CortexInspector
+          key={cortexOpen.id}
+          block={cortexBlocks.get(cortexOpen.id)!}
+          workers={view.workers}
+          initialTab={cortexOpen.tab}
+          onClose={() => setCortexOpen(null)}
+        />
       )}
 
       {resultOpen && (
@@ -1465,6 +1653,10 @@ function Legend() {
           <div>
             <dt className="line coordination" />
             <dd>Coordenação da Queen</dd>
+          </div>
+          <div>
+            <dt className="line memory" />
+            <dd>Acesso ao Cortex: arraste de um agente para o bloco</dd>
           </div>
           <div className="keys">
             <dt>

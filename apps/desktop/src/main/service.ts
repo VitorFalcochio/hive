@@ -67,6 +67,9 @@ import { canvasRuns, canvasSnapshot, canvasWorker } from './canvas-data';
 import { LiveResults } from './live-result';
 import { CanvasQueen } from './canvas-queen';
 import { NexusAutopilot } from './nexus-autopilot';
+import { CortexService } from './cortex';
+import { ModelRouter } from './model-router';
+import type { RouteSwitch } from '@hive/providers';
 
 /** Local midnight as an ISO time: "today" for the token meter is the user's calendar day. */
 function startOfToday(): string {
@@ -80,6 +83,8 @@ export class DesktopService {
   readonly liveResults: LiveResults;
   readonly canvasQueen: CanvasQueen;
   readonly nexusAutopilot: NexusAutopilot;
+  readonly cortex: CortexService;
+  readonly router: ModelRouter;
   readonly scheduler: Scheduler;
   readonly autopilot: Autopilot;
   readonly terminals: TerminalManager;
@@ -121,6 +126,30 @@ export class DesktopService {
     runtime?: AgentRuntime,
   ) {
     this.repos = new Repositories(database);
+    this.router = new ModelRouter({
+      repos: this.repos,
+      chatFor: (providerId) => this.chatClient(providerId),
+      refreshCatalog: async (providerId) => {
+        const models = await this.client(providerId).listModels();
+        this.repos.replaceModels(providerId, models);
+        this.repos.providers.put({
+          ...this.repos.providers.require(providerId, 'Provedor'),
+          modelsFetchedAt: nowIso(),
+        });
+        this.changed('provider', providerId);
+        return models;
+      },
+    });
+    this.cortex = new CortexService({
+      repos: this.repos,
+      embeddingsFor: (providerId) => this.client(providerId),
+      chatFor: (providerId) => this.chatClient(providerId),
+      onChange: (cortexId) => this.changed('cortex', cortexId),
+      onEvent: (event) => {
+        this.push({ kind: 'event', event });
+        if (event.runId) this.liveResults.schedule(event.runId);
+      },
+    });
     this.liveResults = new LiveResults(this.repos, (runId) =>
       this.push({ kind: 'changed', entity: 'result', id: runId }),
     );
@@ -142,6 +171,7 @@ export class DesktopService {
       chatFor: (providerId) => this.chatClient(providerId),
       invoke: (channel, input) => this.invoke(channel, input),
       resultContext: (runId) => this.liveResults.context(runId),
+      cortex: this.cortex,
       onEvent: (event) => {
         this.push({ kind: 'event', event });
         this.liveResults.schedule(event.runId!);
@@ -170,6 +200,11 @@ export class DesktopService {
       },
       onChange: (entity, id) => this.changed(entity, id),
       unattended: (runId) => this.autopilot.isUnattended(runId),
+      prepareMemory: (context) => this.cortex.prepareTask(context),
+      chatForWorker: (worker, notify) =>
+        this.router.clientFor(worker, (change) =>
+          notify(describeSwitch(change), switchData(change)),
+        ),
     });
     this.autopilot = new Autopilot({
       repos: this.repos,
@@ -576,11 +611,14 @@ export class DesktopService {
             branch: run.baseBranch,
           })) +
           '\n\n' +
-          this.liveResults.context(runId),
+          this.liveResults.context(runId) +
+          (await this.queenMemory(run, queen.id, [mission.title, mission.objective].join(' - '))),
         queen,
         skills: (await this.skills().resolve(queen.skills)).skills,
         model: queen.modelId,
-        chat: this.chatClient(queen.providerId),
+        chat: this.router.clientFor(queen, (change) =>
+          this.logRun(run, queen.id, describeSwitch(change), switchData(change)),
+        ),
         signal: AbortSignal.timeout(180_000),
       });
       return this.setPlan(runId, result.plan);
@@ -591,6 +629,39 @@ export class DesktopService {
       throw error instanceof HiveError ? new HiveError(error.code, failure) : error;
     } finally {
       this.planning.delete(runId);
+    }
+  }
+
+  /** A line in a run's live log that is not about one task (the Queen while she plans). */
+  private logRun(
+    run: RunDetail['run'],
+    workerId: string,
+    message: string,
+    data: Record<string, unknown>,
+  ) {
+    const event = {
+      id: newId('event'),
+      ts: nowIso(),
+      workspaceId: run.workspaceId,
+      runId: run.id,
+      taskId: null,
+      workerId,
+      type: 'info' as const,
+      level: 'warn' as const,
+      message,
+      data,
+    };
+    this.repos.appendEvent(event);
+    this.push({ kind: 'event', event });
+  }
+
+  /** Cortex knowledge for the Queen's plan, when she is connected with Read; never blocks planning. */
+  private async queenMemory(run: RunDetail['run'], queenId: string, objective: string) {
+    try {
+      const context = await this.cortex.planningContext(run, queenId, objective);
+      return context ? ['', '', context].join(String.fromCharCode(10)) : '';
+    } catch {
+      return '';
     }
   }
 
@@ -952,6 +1023,8 @@ export class DesktopService {
         this.changed('worker', id);
         return;
       }
+      case 'worker.routes':
+        return this.router.plan(this.repos.workers.require(parse(channel), 'Agente'));
       case 'worker.compatibility': {
         const worker = this.repos.workers.require(parse(channel), 'Agente');
         return workerCompatibilityIssues(
@@ -1406,6 +1479,50 @@ export class DesktopService {
       }
       case 'canvas.terminal.open':
         return this.openCanvasTerminal(parse(channel));
+      case 'cortex.list':
+        return this.cortex.list(parse(channel));
+      case 'cortex.create':
+        return this.cortex.create(parse(channel));
+      case 'cortex.update':
+        return this.cortex.update(parse(channel));
+      case 'cortex.delete': {
+        const { cortexId, purge } = parse(channel);
+        return this.cortex.delete(cortexId, purge);
+      }
+      case 'cortex.connect':
+        return this.cortex.connect(parse(channel));
+      case 'cortex.disconnect': {
+        const { cortexId, workerId } = parse(channel);
+        return this.cortex.disconnect(cortexId, workerId);
+      }
+      case 'cortex.permissions': {
+        const { cortexId, workerId, permissions } = parse(channel);
+        return this.cortex.setPermissions(cortexId, workerId, permissions);
+      }
+      case 'cortex.memories':
+        return this.cortex.memories(parse(channel));
+      case 'cortex.memory':
+        return this.cortex.memory(parse(channel));
+      case 'cortex.memory.create':
+        return this.cortex.createMemory(parse(channel));
+      case 'cortex.memory.edit':
+        return this.cortex.editMemory(parse(channel));
+      case 'cortex.memory.revoke':
+        return this.cortex.revokeMemory(parse(channel));
+      case 'cortex.proposals': {
+        const { cortexId, status } = parse(channel);
+        return this.cortex.proposals(cortexId, status);
+      }
+      case 'cortex.proposal.resolve':
+        return this.cortex.resolve(parse(channel));
+      case 'cortex.proposal.assess':
+        return this.cortex.assess(parse(channel).proposalId);
+      case 'cortex.activity':
+        return this.cortex.activity(parse(channel));
+      case 'cortex.search': {
+        const { cortexId, query } = parse(channel);
+        return this.cortex.search(cortexId, query);
+      }
       case 'autopilot.status':
         return this.autopilotStatus();
       case 'autopilot.setEnabled': {
@@ -1653,4 +1770,21 @@ export class DesktopService {
     this.repos.setValue('pinnedMissions', JSON.stringify(pinned ? [...ids, id] : ids));
     this.changed('mission', id);
   }
+}
+
+/** A model change as the task log tells it. */
+function describeSwitch(change: RouteSwitch): string {
+  if (change.restored)
+    return `De volta ao modelo principal: ${change.to.providerName} · ${change.to.model}.`;
+  return `${change.from.providerName} · ${change.from.model}: ${change.reason}. Seguindo com ${change.to.providerName} · ${change.to.model}, sem esperar.`;
+}
+
+function switchData(change: RouteSwitch): Record<string, unknown> {
+  return {
+    failover: true,
+    from: { providerId: change.from.providerId, model: change.from.model },
+    to: { providerId: change.to.providerId, model: change.to.model },
+    reason: change.reason,
+    restored: change.restored,
+  };
 }

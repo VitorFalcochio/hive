@@ -4,3 +4,10 @@ export { OpenAICompatibleClient } from './client';
 export { GatedClient, ProviderGate } from './gate';
 export { normalizeModels, modelFamily } from './models';
 export { workerCompatibilityIssues, isBlocking } from './compatibility';
+export {
+  FailoverClient,
+  RouteHealth,
+  failoverCause,
+  type ChatRoute,
+  type RouteSwitch,
+} from './failover';

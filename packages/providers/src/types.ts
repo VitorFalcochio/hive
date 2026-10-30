@@ -60,3 +60,8 @@ export interface ProviderEndpoint {
 export interface ChatClient {
   chat(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse>;
 }
+
+/** What the Cortex needs to index memories with a provider's embedding model. */
+export interface EmbeddingClient {
+  embed(model: string, inputs: string[], signal?: AbortSignal): Promise<number[][]>;
+}

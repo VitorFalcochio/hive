@@ -74,6 +74,40 @@ const migrations: string[] = [
   );
   CREATE INDEX nexus_autopilot_plans_run ON nexus_autopilot_plans(run_id, version DESC);
   `,
+  `
+  CREATE TABLE cortex_nodes (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL);
+  CREATE INDEX cortex_nodes_workspace ON cortex_nodes(workspace_id);
+  CREATE TABLE cortex_memories (
+    id TEXT PRIMARY KEY, cortex_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+    status TEXT NOT NULL, kind TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL
+  );
+  CREATE INDEX cortex_memories_cortex ON cortex_memories(cortex_id, status);
+  CREATE TABLE cortex_proposals (
+    id TEXT PRIMARY KEY, cortex_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+    status TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL
+  );
+  CREATE INDEX cortex_proposals_cortex ON cortex_proposals(cortex_id, status);
+  CREATE TABLE cortex_notifications (
+    id TEXT PRIMARY KEY, cortex_id TEXT NOT NULL, workspace_id TEXT NOT NULL, worker_id TEXT NOT NULL,
+    delivered INTEGER NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL
+  );
+  CREATE INDEX cortex_notifications_worker ON cortex_notifications(worker_id, delivered);
+  CREATE TABLE cortex_activity (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    cortex_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    type TEXT NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX cortex_activity_cortex ON cortex_activity(cortex_id, seq);
+  CREATE TABLE cortex_embeddings (
+    memory_id TEXT NOT NULL, model TEXT NOT NULL, hash TEXT NOT NULL,
+    dim INTEGER NOT NULL, vector BLOB NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY (memory_id, model)
+  );
+  `,
 ];
 
 export class HiveDatabase {

@@ -154,11 +154,11 @@ export function sortTasks(tasks: Task[]): Task[] {
  * underneath; `agent` puts each agent's tasks in a lane; `none` shows only the task flow.
  */
 export type Grouping = 'workspace' | 'agent' | 'none';
-export type EdgeKind = 'dependency' | 'assignment' | 'coordination' | 'aggregation';
+export type EdgeKind = 'dependency' | 'assignment' | 'coordination' | 'aggregation' | 'memory';
 
 export interface GraphNode {
   id: string;
-  type: 'agent' | 'task' | 'lane' | 'note' | 'frame' | 'result';
+  type: 'agent' | 'task' | 'lane' | 'note' | 'frame' | 'result' | 'cortex';
   position: { x: number; y: number };
   parentId?: string;
   width: number;
@@ -182,6 +182,7 @@ export interface GraphEdge {
 export const SIZE = {
   task: { width: 248, height: 86 },
   agent: { width: 220, height: 74 },
+  cortex: { width: 300, height: 158 },
   /** An agent's window on the workspace, before the user resizes it. */
   window: { width: 520, height: 400 },
   columnGap: 76,
@@ -195,6 +196,7 @@ export const nodeId = {
   task: (id: string) => `task:${id}`,
   agent: (id: string) => `agent:${id}`,
   group: (id: string) => `group:${id}`,
+  cortex: (id: string) => `cortex:${id}`,
 };
 export const UNASSIGNED = 'unassigned';
 
@@ -216,6 +218,8 @@ export interface GraphOptions {
   extraAgents?: readonly string[];
   /** Size of an agent's window in the workspace view; null when it is shown as a card. */
   windowSize?: (workerId: string) => { width: number; height: number } | null;
+  /** Cortex blocks of the project, with the agents connected to each. */
+  cortex?: readonly { id: string; workers: readonly string[] }[];
 }
 
 /**
@@ -517,6 +521,33 @@ export function buildGraph(
               )),
         ];
   for (const source of sources) edges.push(edge(source.id, resultId, 'aggregation', 'muted'));
+
+  // Shared memory sits under the team; a line from an agent is its access, drawn by the user.
+  const bottom = Math.max(
+    0,
+    ...nodes.filter((node) => !node.parentId).map((node) => node.position.y + node.height),
+  );
+  const agentNodes = new Map(
+    nodes.filter((node) => node.type === 'agent').map((node) => [node.ref, node.id]),
+  );
+  (options.cortex ?? []).forEach((block, index) => {
+    const id = nodeId.cortex(block.id);
+    nodes.push({
+      id,
+      type: 'cortex',
+      position: {
+        x: left + index * (SIZE.cortex.width + SIZE.columnGap),
+        y: bottom + SIZE.columnGap * 1.2,
+      },
+      width: SIZE.cortex.width,
+      height: SIZE.cortex.height,
+      ref: block.id,
+    });
+    for (const workerId of block.workers) {
+      const agent = agentNodes.get(workerId);
+      if (agent) edges.push(edge(agent, id, 'memory', 'running'));
+    }
+  });
   return { nodes, edges };
 }
 

@@ -12,6 +12,23 @@ import {
   type NexusAutopilotPlan,
 } from './nexus-autopilot';
 import {
+  cortexActivityQuerySchema,
+  cortexConnectSchema,
+  cortexCreateSchema,
+  cortexDraftSchema,
+  cortexEditSchema,
+  cortexMemoryQuerySchema,
+  cortexPermissionsSchema,
+  cortexResolveSchema,
+  cortexRevokeSchema,
+  cortexUpdateSchema,
+  type CortexActivity,
+  type CortexMemory,
+  type CortexOverview,
+  type CortexProposal,
+  type CortexSearchResult,
+} from './cortex';
+import {
   mcpServerSchema,
   planSchema,
   planTaskSchema,
@@ -386,6 +403,17 @@ export const emptyCanvasLayout: CanvasLayout = {
   frames: [],
 };
 
+/** One step of an agent's model chain, in the order calls try them. */
+export interface ModelRoutePlan {
+  providerId: string;
+  providerName: string;
+  model: string;
+  /** The agent's own model, a backup the user chose, or one Hive picked from other providers. */
+  source: 'primary' | 'backup' | 'automatic';
+  /** Milliseconds it still rests after running out; 0 when ready. */
+  restingMs: number;
+}
+
 export interface WorkerHistoryItem {
   task: Task;
   runId: string;
@@ -458,6 +486,8 @@ export const ipcContract = {
   'worker.delete': channel<void>()(id),
   'worker.history': channel<WorkerHistoryItem[]>()(id),
   'worker.compatibility': channel<string[]>()(id),
+  /** Where the agent's calls go, in order, when its model runs out (see Settings.failover). */
+  'worker.routes': channel<ModelRoutePlan[]>()(id),
 
   'skill.pickCatalog': channel<Settings>()(none),
   'skill.list': channel<SkillSummary[]>()(none),
@@ -687,6 +717,44 @@ export const ipcContract = {
     }),
   ),
 
+  /** Cortex blocks of the run's project, with what the Nexus block shows. */
+  'cortex.list': channel<CortexOverview[]>()(id),
+  'cortex.create': channel<CortexOverview>()(cortexCreateSchema),
+  'cortex.update': channel<CortexOverview>()(cortexUpdateSchema),
+  /** Removes the block; its memories are kept for the project unless `purge`. */
+  'cortex.delete': channel<void>()(z.object({ cortexId: id, purge: z.boolean() }).strict()),
+  'cortex.connect': channel<CortexOverview>()(cortexConnectSchema),
+  'cortex.disconnect': channel<CortexOverview>()(z.object({ cortexId: id, workerId: id }).strict()),
+  'cortex.permissions': channel<CortexOverview>()(
+    z.object({ cortexId: id, workerId: id, permissions: cortexPermissionsSchema }).strict(),
+  ),
+  'cortex.memories': channel<CortexMemory[]>()(cortexMemoryQuerySchema),
+  'cortex.memory': channel<CortexMemory>()(id),
+  /** The user writes a memory directly: it is approved by being written. */
+  'cortex.memory.create': channel<CortexMemory>()(
+    z.object({ cortexId: id, draft: cortexDraftSchema, supersedes: id.nullable() }).strict(),
+  ),
+  'cortex.memory.edit': channel<CortexMemory>()(cortexEditSchema),
+  'cortex.memory.revoke': channel<CortexMemory>()(cortexRevokeSchema),
+  'cortex.proposals': channel<CortexProposal[]>()(
+    z
+      .object({
+        cortexId: id,
+        status: z
+          .array(z.enum(['pending', 'approved', 'rejected', 'changes_requested']))
+          .optional(),
+      })
+      .strict(),
+  ),
+  'cortex.proposal.resolve': channel<CortexProposal>()(cortexResolveSchema),
+  /** The Queen reads one proposal against the memories and records an opinion; she decides nothing. */
+  'cortex.proposal.assess': channel<CortexProposal>()(z.object({ proposalId: id }).strict()),
+  'cortex.activity': channel<CortexActivity[]>()(cortexActivityQuerySchema),
+  /** The search the agents use, run by the user to check what they would receive. */
+  'cortex.search': channel<CortexSearchResult>()(
+    z.object({ cortexId: id, query: z.string().trim().min(1).max(500) }).strict(),
+  ),
+
   'autopilot.status': channel<AutopilotStatus>()(none),
   'autopilot.setEnabled': channel<AutopilotStatus>()(z.boolean()),
   'autopilot.enqueue': channel<AutopilotStatus>()(id),
@@ -733,6 +801,23 @@ export const canvasChannels: ReadonlySet<IpcChannel> = new Set<IpcChannel>([
   'canvas.worker.create',
   'canvas.worker.setModel',
   'canvas.terminal.open',
+  'cortex.list',
+  'cortex.create',
+  'cortex.update',
+  'cortex.delete',
+  'cortex.connect',
+  'cortex.disconnect',
+  'cortex.permissions',
+  'cortex.memories',
+  'cortex.memory',
+  'cortex.memory.create',
+  'cortex.memory.edit',
+  'cortex.memory.revoke',
+  'cortex.proposals',
+  'cortex.proposal.resolve',
+  'cortex.proposal.assess',
+  'cortex.activity',
+  'cortex.search',
   // Only for terminals this window opened; the main process checks the session (see index.ts).
   'terminal.input',
   'terminal.resize',
@@ -779,7 +864,8 @@ export type HivePush =
         | 'autopilot'
         | 'chat'
         | 'result'
-        | 'missionNote';
+        | 'missionNote'
+        | 'cortex';
       id: string | null;
     };
 

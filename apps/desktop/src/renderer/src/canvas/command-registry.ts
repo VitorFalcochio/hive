@@ -1,6 +1,6 @@
 import type { CanvasQueenRequest, CanvasSnapshot } from '@hive/core';
 
-export type CommandCategory = 'Criar' | 'Workspace' | 'Execução' | 'Queen AI';
+export type CommandCategory = 'Criar' | 'Cortex' | 'Workspace' | 'Execução' | 'Queen AI';
 export type CommandIcon =
   | 'agent'
   | 'task'
@@ -14,7 +14,8 @@ export type CommandIcon =
   | 'mission'
   | 'play'
   | 'queen'
-  | 'pin';
+  | 'pin'
+  | 'cortex';
 export type PaletteOperation =
   | 'new-mission'
   | 'new-agent'
@@ -34,7 +35,9 @@ export type PaletteOperation =
   | 'logs'
   | 'resume'
   | 'pin'
-  | 'group-selection';
+  | 'group-selection'
+  | 'new-cortex'
+  | 'blocks';
 export interface CommandContext {
   snapshot: CanvasSnapshot | null;
   ready: boolean;
@@ -65,7 +68,13 @@ const normalize = (value: string) =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLocaleLowerCase('pt-BR');
-export const commandCategories: CommandCategory[] = ['Criar', 'Workspace', 'Execução', 'Queen AI'];
+export const commandCategories: CommandCategory[] = [
+  'Criar',
+  'Cortex',
+  'Workspace',
+  'Execução',
+  'Queen AI',
+];
 
 /** Independent of React and extensible: registering a command does not change the palette UI. */
 export class CommandRegistry<C> {
@@ -205,6 +214,24 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
     'result',
     'result',
     ['novo bloco resultado', 'documentar', 'relatório'],
+  );
+  command(
+    'cortex.new',
+    'Cortex — Shared Memory',
+    'Adicionar um bloco de memória compartilhada e persistente do projeto.',
+    'Cortex',
+    'cortex',
+    'new-cortex',
+    ['criar', 'memória', 'memory', 'bloco', 'cérebro', 'conhecimento', 'decisões'],
+  );
+  command(
+    'blocks.open',
+    'Abrir menu de blocos',
+    'Arrastar notas, grupos e Cortex para o canvas.',
+    'Criar',
+    'note',
+    'blocks',
+    ['blocos', 'adicionar', 'arrastar', 'cortex'],
   );
   command(
     'view.center',

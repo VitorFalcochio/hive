@@ -143,6 +143,48 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
       </Section>
 
       <Section
+        title="Troca automática de modelo"
+        description="Quando um modelo esgota (limite 429, cota diária, sem créditos, modelo removido), a tarefa segue na hora em outro modelo ou provedor e volta ao principal quando ele libera."
+      >
+        <div className="choice-list">
+          {(
+            [
+              [
+                'enabled',
+                'Trocar de modelo automaticamente',
+                'Desligado, o agente espera o mesmo modelo liberar, como antes.',
+              ],
+              [
+                'automatic',
+                'Usar os outros provedores cadastrados',
+                'Depois das reservas de cada agente, o Hive escolhe modelos dos outros provedores pelo papel do agente.',
+              ],
+              [
+                'freeOnly',
+                'Só modelos gratuitos no pool automático',
+                'Em gateways (Kilo, OpenRouter) só modelos “:free”; provedores sem plano grátis ficam de fora.',
+              ],
+            ] as const
+          ).map(([key, label, detail]) => (
+            <label key={key} className="choice">
+              <input
+                type="checkbox"
+                checked={draft.failover[key]}
+                disabled={key !== 'enabled' && !draft.failover.enabled}
+                onChange={(event) =>
+                  set('failover', { ...draft.failover, [key]: event.target.checked })
+                }
+              />
+              <span>
+                <strong>{label}</strong>
+                <small>{detail}</small>
+              </span>
+            </label>
+          ))}
+        </div>
+      </Section>
+
+      <Section
         title="Aprovação de comandos"
         description="Quando um agente quer rodar um comando no terminal. Os comandos rodam na cópia isolada da tarefa."
       >

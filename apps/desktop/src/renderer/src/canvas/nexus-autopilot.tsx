@@ -455,6 +455,12 @@ export function NexusAutopilot({
                     </li>
                   ))}
                   <li>Criar {plan.draft.tasks.length} tarefa(s) pelo motor real</li>
+                  {(plan.draft.cortexAccess ?? []).map((access) => (
+                    <li key={`${access.cortexId}:${access.agentKey}`}>
+                      Conectar {access.agentKey} ao Cortex ({access.permissions.join(' + ')}) —
+                      conexões existentes não mudam
+                    </li>
+                  ))}
                   <li>Preservar nós e posições existentes</li>
                 </ul>
               </div>

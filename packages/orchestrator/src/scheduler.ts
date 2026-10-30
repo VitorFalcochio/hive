@@ -19,7 +19,7 @@ import {
   type Worker,
   type Workspace,
 } from '@hive/core';
-import type { AgentRuntime, AgentTaskInput, RuntimeEvent } from '@hive/agents';
+import type { AgentMemory, AgentRuntime, AgentTaskInput, RuntimeEvent } from '@hive/agents';
 import type { Repositories } from '@hive/persistence';
 import type { ChatClient } from '@hive/providers';
 import { HiveError, errorMessage, newId, nowIso, secretRedactor } from '@hive/shared';
@@ -51,6 +51,23 @@ export interface SchedulerOptions {
    * denied instead of waiting, and failed tasks are retried up to the configured attempts.
    */
   unattended?: (runId: string) => boolean;
+  /**
+   * The client an agent's task talks through, when it is more than its provider's: e.g. one that
+   * moves to another provider or model when this one is exhausted. `notify` writes in the task log.
+   */
+  chatForWorker?: (
+    worker: Worker,
+    notify: (message: string, data: Record<string, unknown>) => void,
+  ) => ChatClient;
+  /**
+   * Shared memory (the Cortex) for a task about to start: the safe point where context and change
+   * notices are handed over. A failure here is logged and the task runs without memory.
+   */
+  prepareMemory?: (context: {
+    run: Run;
+    task: Task;
+    worker: Worker;
+  }) => Promise<{ memory: AgentMemory; summary: string } | null>;
 }
 
 /** Prefix of the error given to tasks skipped because a dependency did not succeed. */
@@ -648,6 +665,26 @@ export class Scheduler {
         );
       checkCancelled();
 
+      let memory: AgentMemory | undefined;
+      if (this.options.prepareMemory)
+        try {
+          const prepared = await this.options.prepareMemory({ run, task: initial, worker });
+          if (prepared) {
+            memory = prepared.memory;
+            this.log(run, initial.id, worker.id, 'memory', 'info', prepared.summary);
+          }
+        } catch (error) {
+          this.log(
+            run,
+            initial.id,
+            worker.id,
+            'memory',
+            'warn',
+            `Cortex indisponível para esta tarefa; seguindo sem memória compartilhada: ${errorMessage(error)}`,
+          );
+        }
+      checkCancelled();
+
       const previousError = this.retryNotes.get(initial.id);
       this.retryNotes.delete(initial.id);
       const session = await this.options.runtime.start({
@@ -675,10 +712,15 @@ export class Scheduler {
         },
         worker,
         model: worker.modelId,
-        chat: this.options.chatFor(worker.providerId),
+        chat: this.options.chatForWorker
+          ? this.options.chatForWorker(worker, (message, data) =>
+              this.log(run, initial.id, worker.id, 'info', 'warn', message, data),
+            )
+          : this.options.chatFor(worker.providerId),
         worktreePath: worktree,
         skills,
         limits: worker.limits,
+        ...(memory ? { memory } : {}),
         requestApproval: ({ command }) => this.requestApproval(run, initial.id, worker, command),
       });
       this.sessions.set(initial.id, sessionId);

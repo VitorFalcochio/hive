@@ -25,6 +25,7 @@ import { Dot, Drawer, PageHeader, Select, useTask } from './ui';
 import { AgentBee, Mascot, SoldierBee } from './mascot';
 import { NumberField } from './settings';
 import { AgentMcpSection } from './mcp';
+import { FailoverSection } from './model-failover';
 
 const roleOrder: WorkerRole[] = [
   'queen',
@@ -329,6 +330,7 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
     draft.skills.join() !== worker.skills.join() ||
     JSON.stringify(draft.limits) !== JSON.stringify(worker.limits) ||
     JSON.stringify(draft.squad) !== JSON.stringify(worker.squad) ||
+    JSON.stringify(draft.fallbacks ?? []) !== JSON.stringify(worker.fallbacks ?? []) ||
     draft.autoApproveCommands.join('\n') !== worker.autoApproveCommands.join('\n');
   const patch = (next: Partial<Worker>) => setDraft((value) => ({ ...value, ...next }));
 
@@ -388,6 +390,11 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
         />
         <ProfileFields value={draft} onChange={patch} />
       </section>
+      <FailoverSection
+        worker={worker}
+        value={draft.fallbacks ?? []}
+        onChange={(fallbacks) => patch({ fallbacks })}
+      />
       {worker.role !== 'queen' && (
         <SquadSection captain={draft} onChange={(squad) => patch({ squad })} />
       )}

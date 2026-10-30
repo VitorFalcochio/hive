@@ -179,6 +179,13 @@ export const soldierSchema = z.object({
 });
 export type Soldier = z.infer<typeof soldierSchema>;
 
+/** A provider and model an agent can use; its backups are tried in order when one is exhausted. */
+export const modelRouteSchema = z.object({
+  providerId: z.string().min(1).max(100),
+  modelId: z.string().min(1).max(200),
+});
+export type ModelRoute = z.infer<typeof modelRouteSchema>;
+
 export const workerSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(60),
@@ -190,6 +197,8 @@ export const workerSchema = z.object({
   description: z.string().max(500),
   providerId: z.string().nullable(),
   modelId: z.string().nullable(),
+  /** Backups chosen by the user, before Hive's automatic pool (see Settings.failover). */
+  fallbacks: z.array(modelRouteSchema).max(8).optional(),
   skills: z.array(z.string()),
   tools: z.array(toolNameSchema),
   /** Ids of the MCP servers (see Settings.mcpServers) whose tools this agent may call. */
@@ -388,6 +397,8 @@ export const agentEventTypeSchema = z.enum([
   'plan',
   'error',
   'info',
+  /** Cortex: context handed to a task, searches, proposals and change notices. */
+  'memory',
 ]);
 export type AgentEventType = z.infer<typeof agentEventTypeSchema>;
 
@@ -483,6 +494,19 @@ export const autopilotSettingsSchema = z.object({
 });
 export type AutopilotSettings = z.infer<typeof autopilotSettingsSchema>;
 
+/**
+ * When a model runs out (rate limit, daily quota, no credits, gone), the task moves on to the next
+ * provider or model at once and comes back when the agent's own model has rested.
+ */
+export const failoverSettingsSchema = z.object({
+  enabled: z.boolean(),
+  /** After the agent's own backups, models Hive picks from the other configured providers. */
+  automatic: z.boolean(),
+  /** The automatic pool uses only free models and free tiers. */
+  freeOnly: z.boolean(),
+});
+export type FailoverSettings = z.infer<typeof failoverSettingsSchema>;
+
 export const settingsSchema = z.object({
   maxConcurrentTasks: z.number().int().min(1).max(8),
   skillforgeCatalogPath: z.string().nullable(),
@@ -498,6 +522,7 @@ export const settingsSchema = z.object({
   density: z.enum(['comfortable', 'compact']),
   autopilot: autopilotSettingsSchema,
   mcpServers: z.array(mcpServerSchema).max(30).default([]),
+  failover: failoverSettingsSchema.default({ enabled: true, automatic: true, freeOnly: true }),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -524,6 +549,7 @@ export const defaultSettings: Settings = {
   reduceMotion: 'system',
   density: 'comfortable',
   mcpServers: [],
+  failover: { enabled: true, automatic: true, freeOnly: true },
   autopilot: {
     enabled: false,
     // Checks only. Installs, deploys, publishing and git writes are denied while unattended.

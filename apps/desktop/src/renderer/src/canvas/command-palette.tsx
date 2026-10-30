@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
+  BrainCircuit,
   CheckSquare,
   FileText,
   Folder,
@@ -36,6 +37,7 @@ const icons: Record<CommandIcon, typeof Search> = {
   play: Play,
   queen: Bot,
   pin: MapPin,
+  cortex: BrainCircuit,
 };
 
 export function CommandPalette({

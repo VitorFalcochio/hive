@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import {
+  Blocks,
   Columns3,
   Crosshair,
   ExternalLink,
@@ -347,6 +348,15 @@ function Toolbar({
           ))}
         </div>
         <span className="nc-divider" />
+        {run && snapshot && (
+          <button
+            className="secondary nc-small"
+            title="Blocos: notas, grupos e Cortex — arraste para o canvas"
+            onClick={() => window.dispatchEvent(new Event('nc:blocks'))}
+          >
+            <Blocks size={12} /> Blocos
+          </button>
+        )}
         {run && snapshot && (
           <button
             className="secondary nc-small nc-autopilot-button"

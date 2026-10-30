@@ -48,6 +48,10 @@ const edgeMeaning: Record<EdgeKind, { title: string; text: string }> = {
     title: 'Coordenação',
     text: 'A Queen planejou este trabalho e o distribuiu no plano da missão.',
   },
+  memory: {
+    title: 'Acesso ao Cortex',
+    text: 'O agente acessa a memória compartilhada do projeto conforme as permissões da conexão. Sem esta linha, ele não lê nem propõe nada. Botão direito: permissões ou desconectar.',
+  },
 };
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -149,6 +153,39 @@ export function Inspector({
           </button>
         </div>
       );
+    if (type === 'cortex') {
+      const block = view.cortex.get(ref);
+      if (block)
+        return (
+          <div className="nc-inspector-body">
+            <header className="nc-inspector-head">
+              <p className="eyebrow">Cortex · Shared Memory</p>
+              <h2>{block.node.name}</h2>
+            </header>
+            <dl className="nc-fields">
+              <Field label="Escopo">Projeto ({view.snapshot.workspace?.name ?? '—'})</Field>
+              <Field label="Agentes conectados">
+                {block.node.connections
+                  .map(
+                    (connection) =>
+                      view.workers.get(connection.workerId)?.name ?? connection.workerId,
+                  )
+                  .join(', ') || 'nenhum'}
+              </Field>
+              <Field label="Memórias vigentes">{block.memories.active}</Field>
+              <Field label="Decisões">{block.decisions}</Field>
+              <Field label="Aprovações pendentes">{block.pendingApprovals}</Field>
+              <Field label="Avisos a entregar">{block.pendingNotifications}</Field>
+              <Field label="Busca">
+                {block.embedding.degraded ? `local (provedor falhou)` : block.embedding.model}
+              </Field>
+            </dl>
+            <button className="ghost" onClick={() => view.openCortex(ref)}>
+              Abrir Cortex Inspector
+            </button>
+          </div>
+        );
+    }
     if (type === 'task') {
       const task = view.tasks.get(ref);
       if (task)
@@ -190,7 +227,9 @@ function NodeLink({
   const label =
     type === 'task'
       ? view.tasks.get(ref)?.title
-      : (view.workers.get(ref)?.name ?? (type === 'group' ? 'Grupo' : undefined));
+      : type === 'cortex'
+        ? view.cortex.get(ref)?.node.name
+        : (view.workers.get(ref)?.name ?? (type === 'group' ? 'Grupo' : undefined));
   return (
     <button className="link" onClick={() => onSelect({ kind: 'node', id })}>
       {label ?? id}
