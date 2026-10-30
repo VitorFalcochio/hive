@@ -230,6 +230,12 @@ export class TerminalManager {
   }
 
   /** The terminal's size and project, for a Hive command running in it. */
+  /** A session with its output so far, finished or not; null once it was pruned or never existed. */
+  get(id: string): TerminalSession | null {
+    const managed = this.sessions.get(id);
+    return managed ? copySession(managed.session) : null;
+  }
+
   describe(id: string): { workspaceId: string; cwd: string; cols: number; rows: number } | null {
     const managed = this.sessions.get(id);
     if (!managed || managed.finished) return null;

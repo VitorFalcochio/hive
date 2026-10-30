@@ -46,6 +46,34 @@ const migrations: string[] = [
   CREATE TABLE chat_turns (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL);
   CREATE INDEX chat_turns_updated ON chat_turns(updated_at);
   `,
+  `
+  CREATE TABLE mission_notes (
+    mission_id TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
+    text TEXT NOT NULL, revision INTEGER NOT NULL, updated_at TEXT NOT NULL
+  );
+  CREATE TABLE live_results (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    data TEXT NOT NULL
+  );
+  CREATE TABLE generated_summaries (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    cursor INTEGER NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE INDEX generated_summaries_run ON generated_summaries(run_id, seq);
+  `,
+  `
+  CREATE TABLE nexus_autopilot_plans (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    data TEXT NOT NULL,
+    UNIQUE(run_id, version)
+  );
+  CREATE INDEX nexus_autopilot_plans_run ON nexus_autopilot_plans(run_id, version DESC);
+  `,
 ];
 
 export class HiveDatabase {

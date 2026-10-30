@@ -11,6 +11,7 @@ import {
   Info,
   Settings as SettingsIcon,
   LayoutGrid,
+  Network,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
@@ -130,6 +131,8 @@ export function App() {
   const [ready, setReady] = useState(false);
   const noticeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const openRunId = useRef<string | null>(null);
+  // Set below; the push listener reaches it to open a run asked for from the Nexus.
+  const navigateTo = useRef<(runId: string) => void>(() => undefined);
   // Where each project tab was left, so switching back returns there instead of the overview.
   const lastPlace = useRef(new Map<string, { view: View; runId: string | null }>());
   const eventListeners = useRef(new Set<(event: AgentEvent) => void>());
@@ -237,6 +240,10 @@ export function App() {
       }
       if (push.kind === 'terminal') {
         for (const listener of terminalListeners.current) listener(push.event);
+        return;
+      }
+      if (push.kind === 'navigate') {
+        navigateTo.current(push.runId);
         return;
       }
       timer ??= setTimeout(() => {
@@ -387,6 +394,27 @@ export function App() {
     await context.openMission(id);
   }
 
+  /** A run picked in the Nexus: its project comes to the front, then the mission opens. */
+  navigateTo.current = (runId) =>
+    void (async () => {
+      try {
+        const run = await window.hive.invoke('run.get', runId);
+        const workspace = workspaces.find((item) => item.id === run.run.workspaceId);
+        if (workspace && workspace.id !== activeWorkspace?.id) await activate(workspace);
+        await context.openRun(runId);
+      } catch (failure) {
+        context.fail(failure);
+      }
+    })();
+
+  async function openCanvas() {
+    try {
+      await window.hive.invoke('window.openCanvas');
+    } catch (failure) {
+      context.fail(failure);
+    }
+  }
+
   async function pinMission(id: string, pinned: boolean) {
     try {
       await window.hive.invoke('mission.pin', { id, pinned });
@@ -472,6 +500,17 @@ export function App() {
                 <Icon size={15} /> <span className="nav-label">{label}</span>
               </button>
             ))}
+            {/* Not a page: it opens its own window, which stays open beside this one. */}
+            <button
+              className="nav-item"
+              aria-label="Nexus"
+              title={
+                railed || menuCompact ? 'Nexus (abre em outra janela)' : 'Abre em outra janela'
+              }
+              onClick={() => void openCanvas()}
+            >
+              <Network size={15} /> <span className="nav-label">Nexus</span>
+            </button>
           </nav>
 
           <div className="sidebar-section">

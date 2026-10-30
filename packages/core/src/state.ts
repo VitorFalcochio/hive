@@ -19,9 +19,35 @@ export function stateForTool(tool: ToolName, command?: string): WorkerState {
 }
 
 export function looksLikeTestCommand(command: string): boolean {
-  return /\b(test|tests|vitest|jest|pytest|mocha|ava|tap|go test|cargo test|dotnet test|phpunit|rspec|tsc|lint|eslint|check)\b/i.test(
-    command,
-  );
+  // Match an executed check, not a mention of "tests" in echo, grep, filenames or docs.
+  const tokens = command.match(/"(?:\\.|[^"\\])*"|'[^']*'|&&|\|\||[;\n|]|[^\s;&|]+/g) ?? [];
+  const segments: string[][] = [[]];
+  for (const token of tokens) {
+    if (/^(?:&&|\|\||[;\n|])$/.test(token)) segments.push([]);
+    else segments.at(-1)!.push(token.replace(/^(['"])(.*)\1$/, '$2'));
+  }
+  const check = /^(?:tests?|lint|typecheck|check)(?::[\w-]+)?$/i;
+  const executable = /^(?:vitest|jest|pytest|mocha|ava|tap|phpunit|rspec|tsc|eslint)$/i;
+  return segments.some((args) => {
+    while (args[0] && /^[\w]+=.*/.test(args[0])) args.shift();
+    const program =
+      args
+        .shift()
+        ?.split(/[\\/]/)
+        .at(-1)
+        ?.replace(/\.(?:cmd|exe)$/i, '') ?? '';
+    if (args.some((arg) => arg === '--help' || arg === '--version')) return false;
+    if (executable.test(program)) return true;
+    if (/^(?:go|cargo|dotnet)$/i.test(program)) return args[0] === 'test';
+    if (/^python(?:3(?:\.\d+)?)?$/i.test(program)) return args[0] === '-m' && args[1] === 'pytest';
+    if (!/^(?:npm|pnpm|yarn|bun|npx)$/i.test(program)) return false;
+    while (args[0]?.startsWith('-')) {
+      const option = args.shift();
+      if (option && /^(?:--filter|-F|--workspace|-w|--prefix|--dir|-C)$/.test(option)) args.shift();
+    }
+    if (args[0] === 'run' || args[0] === 'exec' || args[0] === 'x') args.shift();
+    return check.test(args[0] ?? '') || executable.test(args[0] ?? '');
+  });
 }
 
 export function stateForTaskStatus(status: TaskStatus): WorkerState | null {

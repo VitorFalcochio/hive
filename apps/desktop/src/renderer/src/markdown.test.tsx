@@ -44,6 +44,17 @@ describe('parseMarkdown tables', () => {
 });
 
 describe('Markdown', () => {
+  it('renderiza checklists sem alterar o texto e mantém blocos de código', () => {
+    const { container } = render(
+      <Markdown source={'# Notas\n- [ ] Revisar\n- [x] Implementar\n```ts\nconst x = 1;\n```'} />,
+    );
+    const boxes = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect([...boxes].map((box) => [box.checked, box.disabled])).toEqual([
+      [false, true],
+      [true, true],
+    ]);
+    expect(container.querySelector('pre code')?.textContent).toBe('const x = 1;');
+  });
   it('draws bold, italic and code instead of their marks, and never HTML', () => {
     const { container } = render(
       <Markdown source={'**Python** usa `edge-tts` e _encerrou_ <img src=x onerror=alert(1)>'} />,

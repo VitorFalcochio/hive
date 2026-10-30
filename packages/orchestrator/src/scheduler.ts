@@ -1,5 +1,7 @@
 import {
   activeStatuses,
+  findCycle,
+  planTaskSchema,
   honeyBoost,
   isBlockedByFailure,
   isSafeCommand,
@@ -8,6 +10,7 @@ import {
   workerStateSchema,
   type AgentEvent,
   type AgentEventType,
+  type PlanTask,
   type ReviewComment,
   type Run,
   type RunStatus,
@@ -59,6 +62,18 @@ const RESUMABLE: ReadonlySet<RunStatus> = new Set([
   'cancelled',
 ]);
 const NEEDS_RETRY: ReadonlySet<Task['status']> = new Set(['failed', 'cancelled']);
+/** Runs whose plan can still take changes by hand: not one being planned or already closed. */
+const EDITABLE: ReadonlySet<RunStatus> = new Set([
+  'awaiting_plan_approval',
+  'running',
+  'review',
+  'failed',
+  'cancelled',
+]);
+/** Tasks that have not started: the only ones whose dependencies or agent may change. */
+const NOT_STARTED: ReadonlySet<Task['status']> = new Set(['pending', 'blocked']);
+/** A run planned by hand on top of the Queen's plan still stays a reviewable size. */
+export const MAX_RUN_TASKS = 40;
 
 /**
  * Runs a planned mission. Each task gets its own worktree and `hive/` branch created from the
@@ -320,7 +335,11 @@ export class Scheduler {
           `Conflito ao aplicar "${task.title}". Nada foi alterado. ${(merged.stdout || merged.stderr).trim().slice(0, 400)}`,
         );
       }
-      this.log(run, task.id, task.workerId, 'git', 'info', `Aplicado em ${run.baseBranch}.`);
+      this.log(run, task.id, task.workerId, 'git', 'info', `Aplicado em ${run.baseBranch}.`, {
+        action: 'merged',
+        branch: run.baseBranch,
+        commit: task.result.commit,
+      });
     }
     const updated = this.update(taskId, { status: 'approved', workerState: 'completed' });
     this.settle(run.id);
@@ -368,6 +387,115 @@ export class Scheduler {
     const updated = this.update(taskId, { boosted });
     this.pump(task.runId);
     return updated;
+  }
+
+  /* ---------------------------------------------------------------- changes by hand */
+
+  /**
+   * Adds a task to a run's plan, with the same rules as the Queen's: a unique key, known
+   * dependencies, no cycle, and an agent that can do the work. While the run is going it is
+   * picked up as soon as its dependencies are done; otherwise it waits for the next start.
+   */
+  addTask(runId: string, input: PlanTask): Task {
+    const run = this.repos.runs.require(runId, 'Execução');
+    if (!EDITABLE.has(run.status))
+      throw new HiveError('CONFLICT', 'Gere o plano antes de adicionar tarefas a esta missão.');
+    const plan = planTaskSchema.parse(input);
+    const tasks = this.repos.tasks.list('run_id = ?', runId);
+    if (tasks.length >= MAX_RUN_TASKS)
+      throw new HiveError('VALIDATION', `Uma missão tem no máximo ${MAX_RUN_TASKS} tarefas.`);
+    if (tasks.some((task) => task.key === plan.key))
+      throw new HiveError('CONFLICT', `Já existe uma tarefa com a chave "${plan.key}".`);
+    for (const dep of plan.dependsOn)
+      if (!tasks.some((task) => task.key === dep))
+        throw new HiveError('VALIDATION', `Dependência desconhecida: "${dep}".`);
+    if (plan.workerId) this.requireWorker(plan.workerId);
+    const task = this.repos.tasks.put({
+      ...plan,
+      id: newId('task'),
+      runId,
+      status: 'pending',
+      workerState: 'idle',
+      attempt: 0,
+      branch: null,
+      startCommit: null,
+      worktreePath: null,
+      result: null,
+      error: null,
+      createdAt: nowIso(),
+      startedAt: null,
+      finishedAt: null,
+    });
+    this.log(run, task.id, task.workerId, 'plan', 'info', `Tarefa adicionada: ${task.title}.`);
+    this.options.onChange('task', task.id);
+    this.pump(runId);
+    return task;
+  }
+
+  /** Makes `taskId` wait for (or stop waiting for) another task of the same run. */
+  setDependency(taskId: string, dependsOnTaskId: string, linked: boolean): Task {
+    const task = this.notStarted(taskId, 'mudar as dependências');
+    const dependency = this.repos.tasks.require(dependsOnTaskId, 'Tarefa');
+    if (dependency.runId !== task.runId || dependency.id === task.id)
+      throw new HiveError('VALIDATION', 'A dependência precisa ser outra tarefa da mesma missão.');
+    const others = task.dependsOn.filter((key) => key !== dependency.key);
+    const dependsOn = linked ? [...others, dependency.key] : others;
+    if (dependsOn.length > 10)
+      throw new HiveError('VALIDATION', 'Uma tarefa depende de no máximo 10 outras.');
+    const tasks = this.repos.tasks
+      .list('run_id = ?', task.runId)
+      .map((item) => (item.id === task.id ? { ...item, dependsOn } : item));
+    const cycle = findCycle(tasks);
+    if (cycle) throw new HiveError('VALIDATION', `Isso criaria um ciclo: ${cycle.join(' → ')}.`);
+    const updated = this.update(task.id, { dependsOn });
+    const run = this.repos.runs.require(task.runId, 'Execução');
+    this.log(
+      run,
+      task.id,
+      task.workerId,
+      'plan',
+      'info',
+      linked
+        ? `${task.title} agora depende de ${dependency.title}.`
+        : `${task.title} não depende mais de ${dependency.title}.`,
+    );
+    this.pump(task.runId);
+    return updated;
+  }
+
+  /** Hands a task that has not started (or will be tried again) to another agent. */
+  assign(taskId: string, workerId: string): Task {
+    const task = this.repos.tasks.require(taskId, 'Tarefa');
+    const open = NOT_STARTED.has(task.status) || NEEDS_RETRY.has(task.status);
+    if (!open || this.sessions.has(taskId) || this.launching.has(taskId))
+      throw new HiveError(
+        'CONFLICT',
+        'Só dá para delegar uma tarefa que ainda não começou ou que vai ser tentada de novo.',
+      );
+    const worker = this.requireWorker(workerId);
+    const updated = this.update(task.id, { workerId: worker.id });
+    const run = this.repos.runs.require(task.runId, 'Execução');
+    this.log(run, task.id, worker.id, 'plan', 'info', `${task.title} delegada a ${worker.name}.`);
+    return updated;
+  }
+
+  private notStarted(taskId: string, what: string): Task {
+    const task = this.repos.tasks.require(taskId, 'Tarefa');
+    if (!NOT_STARTED.has(task.status) || this.sessions.has(taskId) || this.launching.has(taskId))
+      throw new HiveError('CONFLICT', `Só dá para ${what} de uma tarefa que ainda não começou.`);
+    if (!EDITABLE.has(this.repos.runs.require(task.runId, 'Execução').status))
+      throw new HiveError('CONFLICT', 'Esta missão não aceita mudanças agora.');
+    return task;
+  }
+
+  /** An agent that can execute tasks: not the Queen, with a provider and a model. */
+  private requireWorker(workerId: string): Worker {
+    const worker = this.repos.workers.require(workerId, 'Agente');
+    if (worker.role === 'queen')
+      throw new HiveError('VALIDATION', 'A Queen planeja; tarefas vão para os outros agentes.');
+    if (!worker.providerId || !worker.modelId)
+      throw new HiveError('VALIDATION', `${worker.name} ainda não tem provedor e modelo.`);
+    return worker;
   }
 
   isActive(runId: string): boolean {
@@ -763,7 +891,16 @@ export class Scheduler {
       type,
       level,
       message: secretRedactor.redact(message),
-      data: data ?? null,
+      data:
+        type === 'task.status' && taskId
+          ? {
+              ...data,
+              status: this.repos.tasks.get(taskId)?.status ?? null,
+              attempt: this.repos.tasks.get(taskId)?.attempt ?? null,
+            }
+          : type === 'run.status'
+            ? { ...data, status: this.repos.runs.get(run.id)?.status ?? run.status }
+            : (data ?? null),
     };
     this.repos.appendEvent(event);
     this.options.onEvent(event);

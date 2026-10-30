@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   INVOKE_CHANNEL,
-  PUSH_CHANNEL,
+  canvasChannels,
   ipcContract,
   type IpcChannel,
   type IpcResult,
@@ -24,6 +24,7 @@ import { HiveError, errorMessage, secretRedactor } from '@hive/shared';
 import { DesktopService } from './service';
 import { attachDesignInspector } from './design-inspector';
 import { viewLocalPage } from './page-viewer';
+import { WindowManager } from './windows';
 import appIcon from '../../resources/icon.png?asset';
 import trayIcon from '../../resources/tray.png?asset';
 import trayIcon2x from '../../resources/tray@2x.png?asset';
@@ -38,6 +39,21 @@ let tray: Tray | undefined;
 let quitting = false;
 let awakeBlocker: number | null = null;
 let hiddenNoticeShown = false;
+const windows = new WindowManager({
+  directory,
+  icon: appIcon,
+  loadValue: (key) => desktopService?.repos.getValue(key) ?? null,
+  // The canvas sees the output of its own terminals only, and no file-watch noise.
+  canvasReceives: (push) =>
+    push.kind === 'files'
+      ? false
+      : push.kind === 'terminal'
+        ? !!desktopService?.isCanvasTerminal(
+            push.event.type === 'output' ? push.event.sessionId : push.event.session.id,
+          )
+        : true,
+  saveValue: (key, value) => desktopService?.repos.setValue(key, value),
+});
 
 const shiftLabels: Partial<Record<string, string>> = {
   review: 'pronta para revisão',
@@ -47,7 +63,7 @@ const shiftLabels: Partial<Record<string, string>> = {
 };
 
 function mainWindow(): BrowserWindow | null {
-  return BrowserWindow.getAllWindows()[0] ?? null;
+  return windows.mainWindow();
 }
 
 function showWindow() {
@@ -137,19 +153,11 @@ async function createWindow() {
     title: 'Hive',
     icon: appIcon,
     backgroundColor: '#08090a',
-    // The renderer draws its own title bar; Windows/Linux keep native controls on top of it.
-    titleBarStyle: 'hidden',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: { x: 14, y: 12 } }
-      : { titleBarOverlay: { color: '#08090a', symbolColor: '#8a8f98', height: 38 } }),
+    ...windows.titleBar(),
     show: false,
-    webPreferences: {
-      preload: path.join(directory, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: windows.webPreferences(),
   });
+  windows.registerMain(window);
   window.removeMenu();
   attachDesignInspector(window.webContents);
   // The renderer blocks unload while the editor has unsaved files; let the user decide.
@@ -181,10 +189,7 @@ async function createWindow() {
     }
   });
   window.once('ready-to-show', () => window.show());
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event) => event.preventDefault());
-  if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL);
-  else await window.loadFile(path.join(directory, '../renderer/index.html'));
+  await windows.load(window, 'index');
 }
 
 // One Hive per data folder: a second launch (e.g. while it runs in the tray) focuses the first.
@@ -202,8 +207,7 @@ app
     await mkdir(dataDir, { recursive: true });
     database = new HiveDatabase(path.join(dataDir, 'hive.sqlite'));
     const service = new DesktopService(database, dataDir, (push) => {
-      for (const window of BrowserWindow.getAllWindows())
-        window.webContents.send(PUSH_CHANNEL, push);
+      windows.broadcast(push);
       if (push.kind === 'changed' && ['autopilot', 'settings', 'run'].includes(push.entity))
         syncShift();
     });
@@ -214,6 +218,11 @@ app
       );
     // Design Mode notes keep a small picture of the element; wide ones are scaled down.
     service.viewPage = viewLocalPage;
+    service.openCanvas = () => void windows.openCanvas();
+    service.showRun = (runId) => {
+      showWindow();
+      windows.broadcast({ kind: 'navigate', runId });
+    };
     service.capturePage = async (rect) => {
       const window = mainWindow();
       if (!window) return null;
@@ -240,12 +249,20 @@ app
       INVOKE_CHANNEL,
       async (event, channel: string, input: unknown): Promise<IpcResult<unknown>> => {
         try {
-          const owner = BrowserWindow.fromWebContents(event.sender);
-          if (!owner || event.senderFrame !== event.sender.mainFrame)
+          const role = windows.roleOf(event.sender);
+          if (!role || event.senderFrame !== event.sender.mainFrame)
             throw new Error('Origem IPC inválida.');
           if (!Object.hasOwn(ipcContract, channel)) throw new Error('Canal IPC desconhecido.');
           const known = channel as IpcChannel;
+          // The canvas window reads runs and uses the scheduler's own guarded actions, no more.
+          if (role === 'canvas' && !canvasChannels.has(known))
+            throw new Error('Canal IPC não permitido nesta janela.');
           const valid = ipcContract[known].input.parse(input);
+          if (role === 'canvas' && known.startsWith('terminal.')) {
+            const target = typeof valid === 'string' ? valid : (valid as { id: string }).id;
+            if (!service.isCanvasTerminal(target))
+              throw new Error('Este terminal não foi aberto pelo Nexus.');
+          }
           return { ok: true, value: await service.invoke(known, valid) };
         } catch (error) {
           return {
@@ -260,7 +277,7 @@ app
     );
     await createWindow();
     app.on('activate', () => {
-      if (!BrowserWindow.getAllWindows().length) void createWindow();
+      if (!mainWindow()) void createWindow();
     });
   })
   .catch((error) => {

@@ -1,7 +1,21 @@
 import { z } from 'zod';
+import type { LiveResult, MissionNote, ResultEventPage } from './live-result';
+import {
+  canvasQueenRequestSchema,
+  type CanvasQueenApplied,
+  type CanvasQueenProposal,
+} from './canvas-commands';
+import {
+  nexusAutopilotRequestSchema,
+  nexusAutopilotRevisionSchema,
+  type NexusAutopilotApplyResult,
+  type NexusAutopilotPlan,
+} from './nexus-autopilot';
 import {
   mcpServerSchema,
   planSchema,
+  planTaskSchema,
+  workerRoleSchema,
   providerKindSchema,
   reviewCommentSchema,
   settingsSchema,
@@ -261,6 +275,117 @@ export interface CodeAssistantResponse {
   usage: { promptTokens: number; completionTokens: number } | null;
 }
 
+/** One mission run in the Nexus picker, across every project. */
+export interface CanvasRunSummary {
+  runId: string;
+  missionId: string;
+  missionTitle: string;
+  workspaceId: string;
+  workspaceName: string;
+  status: Run['status'];
+  createdAt: string;
+  finishedAt: string | null;
+  tasks: { total: number; done: number; running: number; failed: number };
+}
+
+/** Per task, what its finished attempt cost; null when the model's catalog has no price. */
+export interface CanvasTaskUsage {
+  promptTokens: number;
+  completionTokens: number;
+  costUsd: number | null;
+}
+
+/**
+ * Everything the Nexus draws for one run, read in one go from the same repositories the
+ * scheduler writes. Live changes arrive afterwards as pushes; the window never keeps its own state.
+ */
+export interface CanvasSnapshot {
+  detail: RunDetail;
+  workspace: { id: string; name: string } | null;
+  /** Every agent of the team (for pickers and agents placed by hand); no secrets or prompts. */
+  workers: CanvasWorker[];
+  /** Terminals this window opened, still known to the main process. */
+  terminals: CanvasTerminal[];
+  usage: Record<string, CanvasTaskUsage>;
+  /** The run is being planned by the Queen right now. */
+  planning: boolean;
+  /** Position in the shift queue (0 = next or current), null when not queued. */
+  queuePosition: number | null;
+  /** When the snapshot was read, for the "updated" hint and elapsed timers. */
+  at: string;
+}
+
+export interface CanvasWorker {
+  id: string;
+  name: string;
+  role: Worker['role'];
+  beeColor: Worker['beeColor'];
+  providerId: string | null;
+  providerName: string | null;
+  modelId: string | null;
+}
+
+/** A terminal the canvas opened beside an agent: a plain shell, or a conversation with it. */
+export interface CanvasTerminal {
+  session: TerminalSession;
+  workerId: string;
+  kind: 'shell' | 'chat';
+  /** Worktree of the task it was opened in; null for the project folder. */
+  taskId: string | null;
+}
+
+const coordinate = z.number().min(-1_000_000).max(1_000_000);
+const extent = z.number().min(40).max(5_000);
+const layoutKey = z.string().min(1).max(160);
+
+/**
+ * The spatial layer of the Nexus: where things sit and how they look. It never reaches
+ * the Queen or the scheduler; the execution graph (agents, tasks, dependencies) lives in runs
+ * and tasks and changes only through validated engine calls.
+ */
+export const canvasLayoutSchema = z.object({
+  version: z.literal(1),
+  /**
+   * Where the user put things, per view mode; anything else is placed automatically. A moved
+   * node keeps its place when the plan grows; a `locked` one also survives "Reorganizar".
+   */
+  pinned: z.partialRecord(
+    z.enum(['workspace', 'agent', 'none']),
+    z.record(layoutKey, z.object({ x: coordinate, y: coordinate, locked: z.boolean().optional() })),
+  ),
+  /** Sizes of resized windows, notes and frames. */
+  sizes: z.record(layoutKey, z.object({ width: extent, height: extent })),
+  /** Agent windows shown as a compact card. */
+  minimized: z.array(layoutKey).max(200),
+  /** Agents put on this canvas by hand, beside the ones the plan uses. */
+  agents: z.array(z.string().min(1).max(100)).max(30),
+  notes: z
+    .array(
+      z.object({
+        id: layoutKey,
+        text: z.string().max(8_000),
+        x: coordinate,
+        y: coordinate,
+        tone: z.enum(['plain', 'gold', 'cyan', 'rose']),
+      }),
+    )
+    .max(100),
+  frames: z
+    .array(z.object({ id: layoutKey, title: z.string().max(80), x: coordinate, y: coordinate }))
+    .max(50),
+});
+export type CanvasLayout = z.infer<typeof canvasLayoutSchema>;
+
+export const emptyCanvasLayout: CanvasLayout = {
+  version: 1,
+  pinned: {},
+  sizes: {},
+  minimized: [],
+  agents: [],
+  notes: [],
+  frames: [],
+};
+
 export interface WorkerHistoryItem {
   task: Task;
   runId: string;
@@ -475,6 +600,93 @@ export const ipcContract = {
   ),
   'dashboard.summary': channel<DashboardSummary>()(none),
 
+  /** Opens the Nexus in its own window, or brings it to the front when already open. */
+  'window.openCanvas': channel<void>()(none),
+  /** Brings the main window to the front with this run open, switching project if needed. */
+  'window.showRun': channel<void>()(id),
+  'canvas.runs': channel<CanvasRunSummary[]>()(none),
+  'canvas.queen.propose': channel<CanvasQueenProposal>()(canvasQueenRequestSchema),
+  'canvas.queen.apply': channel<CanvasQueenApplied>()(z.object({ runId: id, proposalId: id })),
+  'canvas.queen.cancel': channel<void>()(z.object({ runId: id, proposalId: id.optional() })),
+  'canvas.autopilot.current': channel<NexusAutopilotPlan[]>()(id),
+  'canvas.autopilot.propose': channel<NexusAutopilotPlan>()(nexusAutopilotRequestSchema),
+  'canvas.autopilot.revise': channel<NexusAutopilotPlan>()(nexusAutopilotRevisionSchema),
+  'canvas.autopilot.apply': channel<NexusAutopilotApplyResult>()(
+    z.object({ runId: id, planId: id, start: z.boolean() }).strict(),
+  ),
+  'canvas.autopilot.cancel': channel<void>()(
+    z.object({ runId: id, planId: id.optional() }).strict(),
+  ),
+  'canvas.snapshot': channel<CanvasSnapshot>()(id),
+  /** The spatial layout of one run's canvas; visual only, never read by the engine. */
+  'canvas.layout.get': channel<CanvasLayout>()(id),
+  'canvas.result.get': channel<LiveResult>()(id),
+  'canvas.result.events': channel<ResultEventPage>()(
+    z
+      .object({
+        runId: id,
+        after: z.number().int().nonnegative().optional(),
+        before: z.number().int().nonnegative().optional(),
+        limit: z.number().int().min(1).max(500).default(100),
+      })
+      .refine(
+        (value) => value.after === undefined || value.before === undefined,
+        'Use apenas um cursor.',
+      ),
+  ),
+  'canvas.notes.get': channel<MissionNote>()(id),
+  'canvas.notes.save': channel<MissionNote>()(
+    z.object({
+      missionId: id,
+      text: z.string().max(200_000),
+      revision: z.number().int().nonnegative(),
+    }),
+  ),
+  'canvas.layout.save': channel<void>()(z.object({ runId: id, layout: canvasLayoutSchema })),
+  /** Projects a mission can be created in, from the canvas. */
+  'canvas.workspaces': channel<{ id: string; name: string }[]>()(none),
+  'canvas.mission.create': channel<{ missionId: string; runId: string }>()(
+    z.object({
+      workspaceId: id,
+      title: z.string().trim().min(1).max(140),
+      objective: z.string().trim().min(1).max(10_000),
+    }),
+  ),
+  /** Adds a task by hand; the scheduler checks key, dependencies, cycles and the agent. */
+  'canvas.task.create': channel<Task>()(z.object({ runId: id, task: planTaskSchema })),
+  /** A dependency drawn or removed on the canvas: `taskId` waits for `dependsOnTaskId`. */
+  'canvas.task.link': channel<Task>()(
+    z.object({ taskId: id, dependsOnTaskId: id, linked: z.boolean() }),
+  ),
+  /** Delegation drawn on the canvas: the task goes to this agent if it has not started. */
+  'canvas.task.assign': channel<Task>()(z.object({ taskId: id, workerId: id })),
+  /** A new agent made on the canvas from a role's preset. */
+  'canvas.worker.create': channel<CanvasWorker>()(
+    z.object({
+      name: z.string().trim().min(1).max(60),
+      role: workerRoleSchema.exclude(['queen']),
+      providerId: id.nullable(),
+      modelId: z.string().min(1).max(200).nullable(),
+    }),
+  ),
+  /** Model for an agent; its next task (or conversation) uses it, a running one keeps its own. */
+  'canvas.worker.setModel': channel<CanvasWorker>()(
+    z.object({ workerId: id, providerId: id, modelId: z.string().min(1).max(200) }),
+  ),
+  /**
+   * A real terminal beside an agent: a shell in the worktree of its live task (or the project),
+   * or a conversation with it (the `agents` command, opened on that agent).
+   */
+  'canvas.terminal.open': channel<CanvasTerminal>()(
+    z.object({
+      runId: id,
+      workerId: id,
+      kind: z.enum(['shell', 'chat']),
+      cols: z.number().int().min(2).max(500).optional(),
+      rows: z.number().int().min(2).max(300).optional(),
+    }),
+  ),
+
   'autopilot.status': channel<AutopilotStatus>()(none),
   'autopilot.setEnabled': channel<AutopilotStatus>()(z.boolean()),
   'autopilot.enqueue': channel<AutopilotStatus>()(id),
@@ -491,6 +703,53 @@ export type IpcOutput<C extends IpcChannel> = IpcContract[C]['output'];
 
 export const ipcChannels = Object.keys(ipcContract) as IpcChannel[];
 
+/**
+ * What the Nexus window may call: reading runs and events, and the run and task actions
+ * the scheduler already guards. Settings, files, terminals and secrets stay with the main window.
+ */
+export const canvasChannels: ReadonlySet<IpcChannel> = new Set<IpcChannel>([
+  'app.info',
+  'canvas.runs',
+  'canvas.queen.propose',
+  'canvas.queen.apply',
+  'canvas.queen.cancel',
+  'canvas.autopilot.current',
+  'canvas.autopilot.propose',
+  'canvas.autopilot.revise',
+  'canvas.autopilot.apply',
+  'canvas.autopilot.cancel',
+  'canvas.snapshot',
+  'canvas.layout.get',
+  'canvas.result.get',
+  'canvas.result.events',
+  'canvas.notes.get',
+  'canvas.notes.save',
+  'canvas.layout.save',
+  'canvas.workspaces',
+  'canvas.mission.create',
+  'canvas.task.create',
+  'canvas.task.link',
+  'canvas.task.assign',
+  'canvas.worker.create',
+  'canvas.worker.setModel',
+  'canvas.terminal.open',
+  // Only for terminals this window opened; the main process checks the session (see index.ts).
+  'terminal.input',
+  'terminal.resize',
+  'terminal.stop',
+  'provider.list',
+  'provider.models',
+  'run.plan',
+  'events.query',
+  'run.start',
+  'run.cancel',
+  'task.cancel',
+  'task.retry',
+  'task.boost',
+  'approval.resolve',
+  'window.showRun',
+]);
+
 /** Push notifications from the main process to the renderer. */
 /** Result of picking a folder: opened, or a plain folder that must be initialized first. */
 export type WorkspacePick =
@@ -503,6 +762,8 @@ export type HivePush =
   /** Files changed on disk in a workspace that is open as a tab (relative paths). */
   | { kind: 'files'; workspaceId: string; paths: string[] }
   | { kind: 'terminal'; event: TerminalEvent }
+  /** Sent to the main window only: open this run (asked for from the Nexus). */
+  | { kind: 'navigate'; runId: string }
   | {
       kind: 'changed';
       entity:
@@ -516,7 +777,9 @@ export type HivePush =
         | 'workspace'
         | 'settings'
         | 'autopilot'
-        | 'chat';
+        | 'chat'
+        | 'result'
+        | 'missionNote';
       id: string | null;
     };
 

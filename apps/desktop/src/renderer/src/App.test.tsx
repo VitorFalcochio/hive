@@ -186,3 +186,11 @@ it('abre a tela Rodar com um terminal e o preview ao lado quando um servidor sob
     ),
   );
 });
+
+it('o Nexus no menu abre a janela própria sem sair da tela atual', async () => {
+  const invoke = mount({ 'window.openCanvas': () => undefined });
+  await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: 'Nexus' }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('window.openCanvas'));
+  expect(screen.getByRole('heading', { name: 'Vamos construir.' })).toBeTruthy();
+});

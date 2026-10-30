@@ -240,8 +240,19 @@ export class HiveTerminalApp {
     this.cursor = new CursorTracker(() => host.size().cols);
   }
 
-  start(command: string): void {
-    if (command === 'agents') this.openPicker();
+  /**
+   * `workerId` opens the conversation with that agent straight away (a terminal opened from the
+   * agent's window on the Nexus); without one, or if it cannot answer, the list shows.
+   */
+  start(command: string, workerId?: string): void {
+    const chosen = workerId
+      ? this.services.workers().find((worker) => worker.id === workerId)
+      : undefined;
+    if (command === 'agents' && chosen?.providerId && chosen.modelId) {
+      this.worker = chosen;
+      this.mode = 'prompt';
+      this.greet();
+    } else if (command === 'agents') this.openPicker();
     else {
       this.help();
       this.end();

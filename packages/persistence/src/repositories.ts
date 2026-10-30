@@ -5,6 +5,7 @@ import {
   defaultSettings,
   missionSchema,
   modelInfoSchema,
+  nexusAutopilotPlanSchema,
   providerConfigSchema,
   runSchema,
   settingsSchema,
@@ -23,8 +24,13 @@ import {
   type Task,
   type Worker,
   type Workspace,
+  type LiveResult,
+  type MissionNote,
+  type NexusAutopilotPlan,
+  type ResultEventPage,
 } from '@hive/core';
 import type { SQLInputValue } from 'node:sqlite';
+import { HiveError } from '@hive/shared';
 import type { z } from 'zod';
 import type { HiveDatabase } from './database';
 
@@ -99,6 +105,7 @@ export class Repositories {
   readonly tasks: JsonTable<Task>;
   readonly approvals: JsonTable<Approval>;
   readonly chatTurns: JsonTable<ChatTurn>;
+  readonly nexusAutopilotPlans: JsonTable<NexusAutopilotPlan>;
 
   constructor(private readonly db: HiveDatabase) {
     this.workspaces = new JsonTable(db, 'workspaces', workspaceSchema, (w) => ({ path: w.path }));
@@ -123,6 +130,12 @@ export class Repositories {
     this.chatTurns = new JsonTable(db, 'chat_turns', chatTurnSchema, (c) => ({
       workspace_id: c.workspaceId,
     }));
+    this.nexusAutopilotPlans = new JsonTable(
+      db,
+      'nexus_autopilot_plans',
+      nexusAutopilotPlanSchema,
+      (plan) => ({ run_id: plan.runId, version: plan.version, state: plan.state }),
+    );
   }
 
   transaction<T>(fn: () => T): T {
@@ -233,7 +246,7 @@ export class Repositories {
     const valid = agentEventSchema.parse(event);
     this.db.run(
       `INSERT INTO events (id, ts, workspace_id, run_id, task_id, worker_id, type, level, message, data)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
       valid.id,
       valid.ts,
       valid.workspaceId,
@@ -309,6 +322,113 @@ export class Repositories {
         data: row.data ? JSON.parse(row.data) : null,
       }),
     );
+  }
+
+  /** Stable database sequence, independent of timestamps and delivery order. */
+  resultEvents(
+    runId: string,
+    options: { after?: number; before?: number; limit?: number } = {},
+  ): ResultEventPage {
+    this.runs.require(runId, 'Execução');
+    const limit = options.limit ?? 500;
+    const forward = options.after !== undefined;
+    const rows = this.db.all<{
+      seq: number;
+      id: string;
+      ts: string;
+      workspace_id: string | null;
+      run_id: string;
+      task_id: string | null;
+      worker_id: string | null;
+      type: string;
+      level: string;
+      message: string;
+      data: string | null;
+    }>(
+      `SELECT * FROM events WHERE run_id = ? AND seq ${forward ? '>' : '<'} ? ORDER BY seq ${forward ? 'ASC' : 'DESC'} LIMIT ?`,
+      runId,
+      forward ? options.after! : (options.before ?? Number.MAX_SAFE_INTEGER),
+      limit + 1,
+    );
+    const selected = rows.slice(0, limit);
+    return {
+      hasMore: rows.length > limit,
+      events: (forward ? selected : selected.reverse()).map((row) => ({
+        cursor: row.seq,
+        event: agentEventSchema.parse({
+          id: row.id,
+          ts: row.ts,
+          workspaceId: row.workspace_id,
+          runId: row.run_id,
+          taskId: row.task_id,
+          workerId: row.worker_id,
+          type: row.type,
+          level: row.level,
+          message: row.message,
+          data: row.data ? JSON.parse(row.data) : null,
+        }),
+      })),
+    };
+  }
+
+  getLiveResult(runId: string): LiveResult | null {
+    const row = this.db.get<Row>('SELECT data FROM live_results WHERE run_id = ?', runId);
+    return row ? (JSON.parse(row.data) as LiveResult) : null;
+  }
+
+  /** This method cannot write mission_notes. Events remain in their original append-only table. */
+  saveLiveResult(result: LiveResult): void {
+    this.db.transaction(() => {
+      const previous = this.getLiveResult(result.runId);
+      this.db.run(
+        'INSERT INTO live_results (run_id, data) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET data = excluded.data',
+        result.runId,
+        JSON.stringify(result),
+      );
+      if (previous?.summary !== result.summary)
+        this.db.run(
+          'INSERT INTO generated_summaries (run_id, cursor, text, created_at) VALUES (?, ?, ?, ?)',
+          result.runId,
+          result.cursor,
+          result.summary,
+          result.updatedAt ?? new Date().toISOString(),
+        );
+    });
+  }
+
+  getMissionNote(missionId: string): MissionNote {
+    this.missions.require(missionId, 'Missão');
+    const row = this.db.get<{ text: string; revision: number; updated_at: string }>(
+      'SELECT text, revision, updated_at FROM mission_notes WHERE mission_id = ?',
+      missionId,
+    );
+    return {
+      missionId,
+      text: row?.text ?? '',
+      revision: row?.revision ?? 0,
+      updatedAt: row?.updated_at ?? null,
+    };
+  }
+
+  /** Compare-and-swap prevents stale windows from replacing newer manual edits. */
+  saveMissionNote(missionId: string, text: string, revision: number): MissionNote {
+    return this.db.transaction(() => {
+      const current = this.getMissionNote(missionId);
+      if (current.revision !== revision)
+        throw new HiveError(
+          'CONFLICT',
+          'As notas foram alteradas em outra janela. Seu rascunho foi preservado; revise a versão salva antes de substituir.',
+        );
+      const updatedAt = new Date().toISOString();
+      this.db.run(
+        'INSERT INTO mission_notes (mission_id, text, revision, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(mission_id) DO UPDATE SET text = excluded.text, revision = excluded.revision, updated_at = excluded.updated_at',
+        missionId,
+        text,
+        revision + 1,
+        updatedAt,
+      );
+      return { missionId, text, revision: revision + 1, updatedAt };
+    });
   }
 
   /** Tokens of the tasks, in every project, that finished at or after `since` (an ISO time). */

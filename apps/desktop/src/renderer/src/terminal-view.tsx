@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useContext, useEffect, useRef } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import type { TerminalSession } from '@hive/core';
-import { useHive } from './context';
+import { Hive, type HiveContext } from './context';
 
 // Colours follow the app's dark tokens, so the terminal does not look pasted in.
 const theme = {
@@ -38,12 +38,21 @@ const theme = {
 export function TerminalView({
   session,
   clearSignal,
+  subscribe,
+  autoFocus = true,
 }: {
   session: TerminalSession;
   /** Changes whenever the user clears the output. */
   clearSignal: number;
+  /** Terminal events, for windows other than the main one (which has the Hive context). */
+  subscribe?: HiveContext['onTerminal'];
+  /** Off where several terminals are on screen at once, so none steals the keyboard. */
+  autoFocus?: boolean;
 }) {
-  const { onTerminal } = useHive();
+  const hive = useContext(Hive);
+  const onTerminal = subscribe ?? hive?.onTerminal;
+  if (!onTerminal) throw new Error('TerminalView needs the Hive context or a subscribe prop.');
+  const focusOnOpen = useRef(autoFocus);
   const host = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   // Read when the view mounts and on each keystroke, without rebuilding the terminal.
@@ -125,7 +134,7 @@ export function TerminalView({
       timer = setTimeout(sendSize, 80);
     });
     observer.observe(element);
-    terminal.focus();
+    if (focusOnOpen.current) terminal.focus();
 
     return () => {
       stopOutput();

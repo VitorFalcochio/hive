@@ -393,4 +393,40 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     release();
     await until(() => ctx.status() === 'review', 'review');
   });
+
+  it('aceita tarefas, dependências e delegações feitas à mão, com as mesmas regras do plano', async () => {
+    const ctx = await setup(async () => ({}), [{ key: 'a' }, { key: 'b' }]);
+    const added = ctx.scheduler.addTask(ctx.run.id, {
+      key: 'c',
+      title: 'Tarefa c',
+      description: 'Criada no canvas',
+      workerId: 'w1',
+      dependsOn: ['a'],
+      acceptanceCriteria: ['ok'],
+    });
+    expect(added).toMatchObject({ status: 'pending', dependsOn: ['a'], workerId: 'w1' });
+    expect(() => ctx.scheduler.addTask(ctx.run.id, { ...added, key: 'c', dependsOn: [] })).toThrow(
+      /Já existe/,
+    );
+    expect(() =>
+      ctx.scheduler.addTask(ctx.run.id, { ...added, key: 'd', dependsOn: ['nada'] }),
+    ).toThrow(/desconhecida/);
+
+    // b → c, then c → b would close a loop.
+    expect(ctx.scheduler.setDependency(added.id, 'task_b', true).dependsOn).toEqual(['a', 'b']);
+    expect(() => ctx.scheduler.setDependency('task_b', added.id, true)).toThrow(/ciclo/);
+    expect(ctx.scheduler.setDependency(added.id, 'task_a', false).dependsOn).toEqual(['b']);
+
+    expect(ctx.scheduler.assign('task_a', 'w1').workerId).toBe('w1');
+    ctx.repos.workers.put({ ...ctx.repos.workers.require('w1', 'Agente'), id: 'q', role: 'queen' });
+    expect(() => ctx.scheduler.assign('task_a', 'q')).toThrow(/Queen/);
+
+    // Once started, the plan of a task is no longer changed by hand.
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'review');
+    expect(ctx.task('a').status).toBe('completed');
+    expect(() => ctx.scheduler.setDependency('task_a', 'task_b', true)).toThrow(/não começou/);
+    expect(() => ctx.scheduler.assign('task_a', 'w1')).toThrow(/não começou/);
+    expect(ctx.repos.tasks.require(added.id, 'Tarefa').status).toBe('completed');
+  });
 });

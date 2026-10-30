@@ -10,6 +10,10 @@ import {
   formatCost,
   usageCost,
   type AutopilotStatus,
+  type CanvasLayout,
+  type CanvasTerminal,
+  canvasLayoutSchema,
+  emptyCanvasLayout,
   type DashboardSummary,
   type ExecutionLimits,
   type RecommendedSetup,
@@ -59,6 +63,10 @@ import { assistCode } from './code-assistant';
 import { describeProject } from './project-context';
 import { startStaticServer, type StaticServer } from './static-server';
 import { locateElement } from './locate';
+import { canvasRuns, canvasSnapshot, canvasWorker } from './canvas-data';
+import { LiveResults } from './live-result';
+import { CanvasQueen } from './canvas-queen';
+import { NexusAutopilot } from './nexus-autopilot';
 
 /** Local midnight as an ISO time: "today" for the token meter is the user's calendar day. */
 function startOfToday(): string {
@@ -69,6 +77,9 @@ function startOfToday(): string {
 
 export class DesktopService {
   readonly repos: Repositories;
+  readonly liveResults: LiveResults;
+  readonly canvasQueen: CanvasQueen;
+  readonly nexusAutopilot: NexusAutopilot;
   readonly scheduler: Scheduler;
   readonly autopilot: Autopilot;
   readonly terminals: TerminalManager;
@@ -83,6 +94,10 @@ export class DesktopService {
   }) => Promise<string | null>;
   /** Set by the app shell: opens a local page in a hidden window for the agents' view_page. */
   viewPage?: PageViewer;
+  /** Set by the app shell: opens (or focuses) the Nexus window. */
+  openCanvas?: () => void;
+  /** Set by the app shell: brings the main window forward with a run open. */
+  showRun?: (runId: string) => void;
   private readonly runtime: AgentRuntime;
   private readonly planning = new Set<string>();
   /** One per provider, shared by everything that calls it. */
@@ -92,6 +107,11 @@ export class DesktopService {
   private readonly fileServices = new Map<string, FileService>();
   private readonly previewServers = new Map<string, StaticServer>();
   private control: ControlServer | null = null;
+  /** Terminals the Nexus opened: the only ones it may type into, resize or stop. */
+  private readonly canvasTerminals = new Map<
+    string,
+    Omit<CanvasTerminal, 'session'> & { runId: string }
+  >();
   private terminalAgents: TerminalAgents | null = null;
 
   constructor(
@@ -101,6 +121,32 @@ export class DesktopService {
     runtime?: AgentRuntime,
   ) {
     this.repos = new Repositories(database);
+    this.liveResults = new LiveResults(this.repos, (runId) =>
+      this.push({ kind: 'changed', entity: 'result', id: runId }),
+    );
+    this.canvasQueen = new CanvasQueen({
+      repos: this.repos,
+      layout: (runId) => this.canvasLayout(runId),
+      chatFor: (providerId) => this.chatClient(providerId),
+      invoke: (channel, input) => this.invoke(channel, input),
+      planning: (runId) => this.planning.has(runId),
+      resultContext: (runId) => this.liveResults.context(runId),
+      onEvent: (event) => {
+        this.push({ kind: 'event', event });
+        this.liveResults.schedule(event.runId!);
+      },
+    });
+    this.nexusAutopilot = new NexusAutopilot({
+      repos: this.repos,
+      layout: (runId) => this.canvasLayout(runId),
+      chatFor: (providerId) => this.chatClient(providerId),
+      invoke: (channel, input) => this.invoke(channel, input),
+      resultContext: (runId) => this.liveResults.context(runId),
+      onEvent: (event) => {
+        this.push({ kind: 'event', event });
+        this.liveResults.schedule(event.runId!);
+      },
+    });
     this.runtime =
       runtime ??
       new NativeAgentRuntime({
@@ -118,7 +164,10 @@ export class DesktopService {
       resolveSkills: (names) => this.skills().resolve(names),
       // Outside the user's repository, on the same drive as Hive's data.
       worktreeRoot: (workspace) => path.join(this.dataDir, 'worktrees', workspace.id),
-      onEvent: (event) => this.push({ kind: 'event', event }),
+      onEvent: (event) => {
+        this.push({ kind: 'event', event });
+        if (event.runId) this.liveResults.schedule(event.runId);
+      },
       onChange: (entity, id) => this.changed(entity, id),
       unattended: (runId) => this.autopilot.isUnattended(runId),
     });
@@ -185,6 +234,7 @@ export class DesktopService {
         });
     }
     this.scheduler.recover();
+    for (const run of this.repos.runs.list()) this.liveResults.schedule(run.id);
     this.terminals = new TerminalManager((event) => this.push({ kind: 'terminal', event }));
     // A shift that was on when Hive closed picks its queue back up.
     this.advanceShift();
@@ -331,7 +381,12 @@ export class DesktopService {
         },
       );
       detachInput = this.terminals.attach(terminalId, (data) => app.input(data));
-      app.start(command === 'hive' && argument !== 'agents' ? 'help' : 'agents');
+      const fromCanvas = this.canvasTerminals.get(terminalId);
+      app.start(
+        command === 'hive' && argument !== 'agents' ? 'help' : 'agents',
+        // A conversation opened from an agent's window on the canvas starts with that agent.
+        fromCanvas?.kind === 'chat' ? fromCanvas.workerId : undefined,
+      );
       return () => {
         detachInput();
         app.dispose();
@@ -346,6 +401,9 @@ export class DesktopService {
   }
 
   dispose(): void {
+    this.canvasQueen.dispose();
+    this.nexusAutopilot.dispose();
+    this.liveResults.dispose();
     clearTimeout(this.shiftTimer);
     this.shiftTimer = undefined;
     void this.control?.close();
@@ -447,6 +505,11 @@ export class DesktopService {
     id: string | null = null,
   ) {
     this.push({ kind: 'changed', entity, id });
+    if (id && entity === 'run') this.liveResults.schedule(id);
+    if (id && entity === 'task') {
+      const task = this.repos.tasks.get(id);
+      if (task) this.liveResults.schedule(task.runId);
+    }
     if (entity === 'run' || entity === 'settings') this.advanceShift();
   }
 
@@ -507,10 +570,13 @@ export class DesktopService {
         title: mission.title,
         objective: mission.objective,
         workers: this.repos.workers.list(),
-        projectContext: await describeProject(workspace.path, {
-          name: workspace.name,
-          branch: run.baseBranch,
-        }),
+        projectContext:
+          (await describeProject(workspace.path, {
+            name: workspace.name,
+            branch: run.baseBranch,
+          })) +
+          '\n\n' +
+          this.liveResults.context(runId),
         queen,
         skills: (await this.skills().resolve(queen.skills)).skills,
         model: queen.modelId,
@@ -982,38 +1048,7 @@ export class DesktopService {
         const value = parse(channel);
         const workspace = this.active();
         if (!workspace) throw new HiveError('VALIDATION', 'Selecione um repositório primeiro.');
-        const repo = await inspectRepository(workspace.path);
-        if (!repo.head)
-          throw new HiveError(
-            'GIT',
-            'Crie o primeiro commit do repositório antes de criar uma missão.',
-          );
-        const mission = {
-          ...value,
-          id: newId('mission'),
-          workspaceId: workspace.id,
-          createdAt: nowIso(),
-        };
-        const run = {
-          id: newId('run'),
-          missionId: mission.id,
-          workspaceId: workspace.id,
-          status: 'draft' as const,
-          baseBranch: repo.branch ?? workspace.defaultBranch,
-          baseCommit: repo.head,
-          queenWorkerId: null,
-          planNotes: null,
-          report: null,
-          error: null,
-          createdAt: nowIso(),
-          finishedAt: null,
-        };
-        this.repos.transaction(() => {
-          this.repos.missions.put(mission);
-          this.repos.runs.put(run);
-        });
-        this.changed('mission', mission.id);
-        return { mission, runs: [run], runId: run.id };
+        return this.createMission(workspace, value.title, value.objective);
       }
       case 'mission.get': {
         const id = parse(channel);
@@ -1232,6 +1267,145 @@ export class DesktopService {
         };
         return summary;
       }
+      case 'window.openCanvas':
+        if (!this.openCanvas)
+          throw new HiveError('VALIDATION', 'O Nexus não está disponível agora.');
+        return this.openCanvas();
+      case 'window.showRun': {
+        const runId = parse(channel);
+        this.repos.runs.require(runId, 'Execução');
+        return this.showRun?.(runId);
+      }
+      case 'canvas.runs':
+        return canvasRuns(this.repos);
+      case 'canvas.queen.propose':
+        return this.canvasQueen.propose(ipcContract['canvas.queen.propose'].input.parse(input));
+      case 'canvas.queen.apply': {
+        const { runId, proposalId } = parse(channel);
+        return this.canvasQueen.apply(runId, proposalId);
+      }
+      case 'canvas.queen.cancel': {
+        const { runId, proposalId } = parse(channel);
+        this.canvasQueen.cancel(runId, proposalId);
+        return;
+      }
+      case 'canvas.autopilot.current':
+        return this.nexusAutopilot.list(parse(channel));
+      case 'canvas.autopilot.propose':
+        return this.nexusAutopilot.propose(
+          ipcContract['canvas.autopilot.propose'].input.parse(input),
+        );
+      case 'canvas.autopilot.revise': {
+        const { runId, planId, draft, changeSummary } = parse(channel);
+        return this.nexusAutopilot.revise(runId, planId, draft, changeSummary);
+      }
+      case 'canvas.autopilot.apply': {
+        const { runId, planId, start } = parse(channel);
+        return this.nexusAutopilot.apply(runId, planId, start);
+      }
+      case 'canvas.autopilot.cancel': {
+        const { runId, planId } = parse(channel);
+        this.nexusAutopilot.cancel(runId, planId);
+        return;
+      }
+      case 'canvas.snapshot': {
+        const runId = parse(channel);
+        return canvasSnapshot(this.repos, this.runDetail(runId), {
+          planning: this.planning.has(runId),
+          queue: this.autopilot.queue(),
+          terminals: this.canvasTerminalsOf(runId),
+        });
+      }
+      case 'canvas.layout.get': {
+        const runId = parse(channel);
+        this.repos.runs.require(runId, 'Execução');
+        return this.canvasLayout(runId);
+      }
+      case 'canvas.result.get':
+        return this.liveResults.refresh(parse(channel));
+      case 'canvas.result.events': {
+        const { runId, before, after, limit } = parse(channel);
+        return this.repos.resultEvents(runId, { before, after, limit });
+      }
+      case 'canvas.notes.get':
+        return this.repos.getMissionNote(parse(channel));
+      case 'canvas.notes.save': {
+        const { missionId, text, revision } = parse(channel);
+        const note = this.repos.saveMissionNote(missionId, text, revision);
+        this.push({ kind: 'changed', entity: 'missionNote', id: missionId });
+        return note;
+      }
+      case 'canvas.layout.save': {
+        const { runId, layout } = parse(channel);
+        this.repos.runs.require(runId, 'Execução');
+        this.repos.setValue(`canvasLayout:${runId}`, JSON.stringify(layout));
+        return;
+      }
+      case 'canvas.workspaces':
+        return this.repos.workspaces.list().map((workspace) => ({
+          id: workspace.id,
+          name: workspace.name,
+        }));
+      case 'canvas.mission.create': {
+        const { workspaceId, title, objective } = parse(channel);
+        const workspace = this.repos.workspaces.require(workspaceId, 'Projeto');
+        const { mission, runId } = await this.createMission(workspace, title, objective);
+        return { missionId: mission.id, runId };
+      }
+      case 'canvas.task.create': {
+        const { runId, task } = parse(channel);
+        if (this.planning.has(runId))
+          throw new HiveError('CONFLICT', 'Aguarde a Queen terminar o planejamento.');
+        return this.scheduler.addTask(runId, task);
+      }
+      case 'canvas.task.link': {
+        const { taskId, dependsOnTaskId, linked } = parse(channel);
+        return this.scheduler.setDependency(taskId, dependsOnTaskId, linked);
+      }
+      case 'canvas.task.assign': {
+        const { taskId, workerId } = parse(channel);
+        return this.scheduler.assign(taskId, workerId);
+      }
+      case 'canvas.worker.create': {
+        const value = parse(channel);
+        if (value.providerId) this.repos.providers.require(value.providerId, 'Provedor');
+        const preset = rolePresets[value.role];
+        const worker = this.repos.workers.put({
+          id: newId('worker'),
+          name: value.name,
+          role: value.role,
+          beeColor: null,
+          squad: [],
+          description: preset.description,
+          providerId: value.providerId,
+          modelId: value.providerId ? value.modelId : null,
+          skills: [...preset.skills],
+          tools: preset.tools,
+          autoApproveCommands: [],
+          mcpServers: [],
+          systemPrompt: preset.systemPrompt,
+          limits: { ...this.repos.getSettings().defaultLimits },
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        });
+        this.changed('worker', worker.id);
+        return canvasWorker(this.repos, worker);
+      }
+      case 'canvas.worker.setModel': {
+        const { workerId, providerId, modelId } = parse(channel);
+        this.repos.providers.require(providerId, 'Provedor');
+        const worker = this.repos.workers.require(workerId, 'Agente');
+        const saved = this.repos.workers.put({
+          ...worker,
+          providerId,
+          modelId,
+          updatedAt: nowIso(),
+        });
+        this.changed('worker', saved.id);
+        return canvasWorker(this.repos, saved);
+      }
+      case 'canvas.terminal.open':
+        return this.openCanvasTerminal(parse(channel));
       case 'autopilot.status':
         return this.autopilotStatus();
       case 'autopilot.setEnabled': {
@@ -1261,6 +1435,115 @@ export class DesktopService {
           `O recurso ${channel} ainda não foi implementado nesta versão.`,
         );
     }
+  }
+
+  /** The stored layout of a run's canvas; a damaged one starts over rather than failing. */
+  private canvasLayout(runId: string): CanvasLayout {
+    try {
+      const parsed = canvasLayoutSchema.safeParse(
+        JSON.parse(this.repos.getValue(`canvasLayout:${runId}`) ?? 'null'),
+      );
+      return parsed.success ? parsed.data : emptyCanvasLayout;
+    } catch {
+      return emptyCanvasLayout;
+    }
+  }
+
+  /**
+   * A terminal next to an agent on the canvas. A shell opens in the worktree of the task the
+   * agent is on (so the user sees the same files), or in the project folder; a conversation runs
+   * the `agents` command, opened on that agent, which works in the project like in any terminal.
+   */
+  private async openCanvasTerminal(
+    value: IpcInput<'canvas.terminal.open'>,
+  ): Promise<CanvasTerminal> {
+    const run = this.repos.runs.require(value.runId, 'Execução');
+    const workspace = this.repos.workspaces.require(run.workspaceId, 'Projeto');
+    const worker = this.repos.workers.require(value.workerId, 'Agente');
+    if (value.kind === 'chat' && (!worker.providerId || !worker.modelId))
+      throw new HiveError('VALIDATION', `${worker.name} ainda não tem provedor e modelo.`);
+    if (value.kind === 'chat' && !this.control)
+      throw new HiveError('VALIDATION', 'A conversa no terminal não está disponível agora.');
+    const live = this.repos.tasks
+      .list('run_id = ?', run.id)
+      .find(
+        (task) =>
+          task.workerId === worker.id &&
+          ['running', 'waiting_approval'].includes(task.status) &&
+          !!task.worktreePath,
+      );
+    const inWorktree = value.kind === 'shell' && live?.worktreePath ? live : null;
+    const session = await this.terminals.start(
+      workspace.id,
+      inWorktree?.worktreePath ?? workspace.path,
+      value.kind === 'chat' ? 'agents' : '',
+      '.',
+      value.cols && value.rows ? { cols: value.cols, rows: value.rows } : undefined,
+    );
+    const entry = {
+      runId: run.id,
+      workerId: worker.id,
+      kind: value.kind,
+      taskId: inWorktree?.id ?? null,
+    };
+    this.canvasTerminals.set(session.id, entry);
+    return { session, workerId: entry.workerId, kind: entry.kind, taskId: entry.taskId };
+  }
+
+  private canvasTerminalsOf(runId: string): CanvasTerminal[] {
+    const result: CanvasTerminal[] = [];
+    for (const [sessionId, entry] of this.canvasTerminals) {
+      const session = this.terminals.get(sessionId);
+      if (!session) {
+        this.canvasTerminals.delete(sessionId);
+        continue;
+      }
+      if (entry.runId === runId)
+        result.push({ session, workerId: entry.workerId, kind: entry.kind, taskId: entry.taskId });
+    }
+    return result;
+  }
+
+  /** True for a terminal the Nexus opened (and that still exists). */
+  isCanvasTerminal(sessionId: string): boolean {
+    return this.canvasTerminals.has(sessionId) && !!this.terminals.get(sessionId);
+  }
+
+  /** A mission with its first run, from the project's current branch and commit. */
+  private async createMission(workspace: Workspace, title: string, objective: string) {
+    const repo = await inspectRepository(workspace.path);
+    if (!repo.head)
+      throw new HiveError(
+        'GIT',
+        'Crie o primeiro commit do repositório antes de criar uma missão.',
+      );
+    const mission = {
+      title,
+      objective,
+      id: newId('mission'),
+      workspaceId: workspace.id,
+      createdAt: nowIso(),
+    };
+    const run = {
+      id: newId('run'),
+      missionId: mission.id,
+      workspaceId: workspace.id,
+      status: 'draft' as const,
+      baseBranch: repo.branch ?? workspace.defaultBranch,
+      baseCommit: repo.head,
+      queenWorkerId: null,
+      planNotes: null,
+      report: null,
+      error: null,
+      createdAt: nowIso(),
+      finishedAt: null,
+    };
+    this.repos.transaction(() => {
+      this.repos.missions.put(mission);
+      this.repos.runs.put(run);
+    });
+    this.changed('mission', mission.id);
+    return { mission, runs: [run], runId: run.id };
   }
 
   /** Agents pointing at a removed provider would keep a model they can no longer call. */

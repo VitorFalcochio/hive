@@ -119,9 +119,21 @@ export function Markdown({ source, className }: { source: string; className?: st
             const List = block.ordered ? 'ol' : 'ul';
             return (
               <List key={index}>
-                {block.items.map((item, at) => (
-                  <li key={at}>{renderInline(item)}</li>
-                ))}
+                {block.items.map((item, at) =>
+                  /^\[([ xX])\]\s+/.test(item) ? (
+                    <li key={at} className="md-check-item">
+                      <input
+                        type="checkbox"
+                        checked={/^\[[xX]\]/.test(item)}
+                        disabled
+                        aria-label={item.replace(/^\[[ xX]\]\s+/, '')}
+                      />{' '}
+                      {renderInline(item.replace(/^\[[ xX]\]\s+/, ''))}
+                    </li>
+                  ) : (
+                    <li key={at}>{renderInline(item)}</li>
+                  ),
+                )}
               </List>
             );
           }
