@@ -63,7 +63,7 @@ export class TerminalAgents {
       onWorkerChanged: (workerId: string) => void;
       /** Agents started or stopped work, or switched between working and waiting. */
       onChange: () => void;
-      /** Every step of a terminal agent, for the Colmeia screen to show live. */
+      /** Every step of a terminal agent, pushed live to the windows as it happens. */
       onActivity?: (chat: ActiveChat, event: RuntimeEvent) => void;
       runtime?: AgentRuntime;
     },
