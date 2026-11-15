@@ -1,0 +1,50 @@
+# Packaging for Windows: `npm run dist` (local files) or `npm run release` (publishes to GitHub).
+# The installer (NSIS) updates itself from GitHub Releases; the portable .exe does not.
+appId: com.hive.desktop # must match app.setAppUserModelId in src/main/index.ts
+productName: Hive
+copyright: Copyright © Hive contributors
+directories:
+  output: ../../release/${version}
+  buildResources: resources
+files:
+  - out/**
+  - resources/**
+  - package.json
+# The main process loads these from disk at runtime.
+asarUnpack:
+  - resources/**
+  - '**/node_modules/node-pty/**'
+# node-pty ships prebuilt N-API binaries that work in Electron as they are, so no compiler
+# (Visual Studio build tools) is needed to package.
+npmRebuild: false
+
+win:
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  artifactName: Hive-Setup-${version}.${ext}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Hive
+  # User data (%APPDATA%\Hive) stays on uninstall, so a reinstall finds everything.
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: Hive-Portatil-${version}.${ext}
+
+# Where the installed app looks for new versions. `npm run release` uploads there, using the
+# GH_TOKEN environment variable (a GitHub token with permission to write to the repository).
+publish:
+  provider: github
+  owner: VitorFalcochio
+  repo: hive
+  # A draft first: installed apps only see it after you publish it on GitHub.
+  releaseType: draft

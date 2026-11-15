@@ -110,6 +110,9 @@ const migrations: string[] = [
   `,
 ];
 
+/** The schema version this build creates; a database above it came from a newer Hive. */
+export const SCHEMA_VERSION = migrations.length;
+
 export class HiveDatabase {
   readonly db: DatabaseSync;
 

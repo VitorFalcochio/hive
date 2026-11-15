@@ -124,6 +124,37 @@ npm run build
 npm start
 ```
 
+### Gerar o instalador
+
+```powershell
+npm run dist
+```
+
+Os arquivos saem em `release/<versão>/`:
+
+- `Hive-Setup-<versão>.exe`: instalador com atalhos no Menu Iniciar e na Área de Trabalho. **Atualiza-se sozinho.**
+- `Hive-Portatil-<versão>.exe`: abre direto, sem instalar. Não se atualiza sozinho.
+
+Os executáveis não são assinados, então o Windows SmartScreen pode avisar na primeira execução (**Mais informações → Executar assim mesmo**). Os dados do app instalado ficam em `%APPDATA%\Hive` e continuam lá depois de uma desinstalação.
+
+### Publicar uma atualização
+
+O Hive instalado procura versões novas no GitHub Releases do repositório definido em `publish` de [`apps/desktop/electron-builder.yml`](apps/desktop/electron-builder.yml). Para publicar:
+
+1. Aumente `version` em [`apps/desktop/package.json`](apps/desktop/package.json) (por exemplo, `0.1.0` → `0.2.0`).
+2. Defina um token do GitHub com permissão de escrita no repositório e publique:
+
+   ```powershell
+   $env:GH_TOKEN = "<seu token>"
+   npm run release
+   ```
+
+3. No GitHub, revise o rascunho criado em **Releases** e publique. Os apps instalados baixam a versão em segundo plano e a instalam ao fechar (ou na hora, em **Configurações → Atualizações**).
+
+### Backup
+
+Em **Configurações → Backup** você faz, exporta e restaura backups. Cada backup é um único arquivo `.hive-backup` com missões, agentes, provedores, configurações, memórias do Cortex e skills. Por padrão, o Hive faz um backup automático por dia e guarda os 7 mais recentes. Restaurar reinicia o app e guarda antes uma cópia dos dados atuais. As chaves de API só funcionam no mesmo usuário do Windows em que o backup foi feito.
+
 ## Equipe e provedores de IA
 
 Na tela **Agentes** você monta a equipe: cada agente tem papel, descrição, provedor, modelo, ferramentas, skills e um esquadrão de abelhas soldado para dividir o trabalho. A Queen distribui as tarefas pela descrição de cada um.

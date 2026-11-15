@@ -507,6 +507,18 @@ export const failoverSettingsSchema = z.object({
 });
 export type FailoverSettings = z.infer<typeof failoverSettingsSchema>;
 
+export const backupSettingsSchema = z.object({
+  /** A daily copy of the database and skills in the data folder's `backups`. */
+  auto: z.boolean(),
+  /** How many automatic copies are kept; older ones are deleted. */
+  keep: z.number().int().min(1).max(60),
+});
+
+export const updateSettingsSchema = z.object({
+  /** Look for a new version at startup and every few hours, and download it in the background. */
+  auto: z.boolean(),
+});
+
 export const settingsSchema = z.object({
   maxConcurrentTasks: z.number().int().min(1).max(8),
   skillforgeCatalogPath: z.string().nullable(),
@@ -523,6 +535,8 @@ export const settingsSchema = z.object({
   autopilot: autopilotSettingsSchema,
   mcpServers: z.array(mcpServerSchema).max(30).default([]),
   failover: failoverSettingsSchema.default({ enabled: true, automatic: true, freeOnly: true }),
+  backup: backupSettingsSchema.default({ auto: true, keep: 7 }),
+  updates: updateSettingsSchema.default({ auto: true }),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -550,6 +564,8 @@ export const defaultSettings: Settings = {
   density: 'comfortable',
   mcpServers: [],
   failover: { enabled: true, automatic: true, freeOnly: true },
+  backup: { auto: true, keep: 7 },
+  updates: { auto: true },
   autopilot: {
     enabled: false,
     // Checks only. Installs, deploys, publishing and git writes are denied while unattended.

@@ -3,6 +3,7 @@ import { FolderOpen, RotateCcw, Save, X } from 'lucide-react';
 import { defaultSettings, type Settings } from '@hive/core';
 import { useHive } from './context';
 import { McpServersSection } from './mcp';
+import { BackupSection, UpdatesSection } from './maintenance';
 import { PageHeader, useTask } from './ui';
 
 const approvalChoices: { value: Settings['commandApproval']; label: string; detail: string }[] = [
@@ -323,6 +324,10 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
           Validar skills com o CLI do SkillForge
         </label>
       </Section>
+
+      <BackupSection value={draft.backup} onChange={(value) => set('backup', value)} />
+
+      <UpdatesSection value={draft.updates} onChange={(value) => set('updates', value)} />
 
       <Section title="Aparência" description="Como a interface se comporta.">
         <label className="settings-check">

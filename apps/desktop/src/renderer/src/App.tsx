@@ -243,6 +243,8 @@ export function App() {
         navigateTo.current(push.runId);
         return;
       }
+      // Download progress is frequent; the settings page listens for it on its own.
+      if (push.kind === 'update') return;
       timer ??= setTimeout(() => {
         timer = undefined;
         if (alive) load();

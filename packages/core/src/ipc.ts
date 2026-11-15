@@ -80,6 +80,28 @@ export interface AppInfo {
   secretStorage: { available: boolean; backend: string };
 }
 
+export interface BackupInfo {
+  /** File name inside the backups folder. */
+  name: string;
+  kind: 'auto' | 'manual' | 'pre-restore';
+  createdAt: string;
+  size: number;
+}
+
+export interface BackupOverview {
+  dir: string;
+  items: BackupInfo[];
+}
+
+export type UpdateState =
+  | { status: 'disabled'; reason: 'dev' | 'portable' }
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'none'; checkedAt: string }
+  | { status: 'downloading'; version: string; percent: number }
+  | { status: 'ready'; version: string }
+  | { status: 'error'; message: string };
+
 export interface WorkspaceStatus {
   workspace: Workspace;
   branch: string | null;
@@ -438,6 +460,23 @@ export const ipcContract = {
 
   'settings.get': channel<Settings>()(none),
   'settings.update': channel<Settings>()(settingsSchema.partial()),
+
+  'backup.overview': channel<BackupOverview>()(none),
+  /** A copy now, in the backups folder. */
+  'backup.create': channel<BackupInfo>()(none),
+  /** A copy saved where the user picks; null when cancelled. */
+  'backup.export': channel<string | null>()(none),
+  /**
+   * Restores a copy from the backups folder (by name) or one the user picks, after confirming.
+   * Hive restarts to apply it; false when cancelled.
+   */
+  'backup.restore': channel<boolean>()(z.object({ name: z.string().max(200).optional() })),
+  'backup.openFolder': channel<void>()(none),
+
+  'update.status': channel<UpdateState>()(none),
+  'update.check': channel<UpdateState>()(none),
+  /** Restarts Hive into the downloaded version. */
+  'update.install': channel<void>()(none),
 
   'workspace.list': channel<Workspace[]>()(none),
   'workspace.pick': channel<WorkspacePick>()(none),
@@ -849,6 +888,8 @@ export type HivePush =
   | { kind: 'terminal'; event: TerminalEvent }
   /** Sent to the main window only: open this run (asked for from the Nexus). */
   | { kind: 'navigate'; runId: string }
+  /** Sent to the main window only: where the app update stands. */
+  | { kind: 'update'; state: UpdateState }
   | {
       kind: 'changed';
       entity:

@@ -1,5 +1,5 @@
 import { app, dialog, safeStorage, shell } from 'electron';
-import { stat } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
   ipcContract,
@@ -17,6 +17,7 @@ import {
   type DashboardSummary,
   type ExecutionLimits,
   type RecommendedSetup,
+  type BackupInfo,
   type HivePush,
   type IpcChannel,
   type IpcInput,
@@ -24,7 +25,7 @@ import {
   type WorkerRole,
   type Workspace,
 } from '@hive/core';
-import { HiveDatabase, Repositories } from '@hive/persistence';
+import { HiveDatabase, Repositories, SCHEMA_VERSION } from '@hive/persistence';
 import {
   GatedClient,
   OpenAICompatibleClient,
@@ -70,6 +71,18 @@ import { NexusAutopilot } from './nexus-autopilot';
 import { CortexService } from './cortex';
 import { ModelRouter } from './model-router';
 import type { RouteSwitch } from '@hive/providers';
+import type { Updater } from './updater';
+import {
+  autoBackupDue,
+  backupName,
+  backupsDir,
+  cancelRestore,
+  createBackup,
+  listBackups,
+  prune,
+  resolveBackup,
+  stageRestore,
+} from './backup';
 
 /** Local midnight as an ISO time: "today" for the token meter is the user's calendar day. */
 function startOfToday(): string {
@@ -103,6 +116,13 @@ export class DesktopService {
   openCanvas?: () => void;
   /** Set by the app shell: brings the main window forward with a run open. */
   showRun?: (runId: string) => void;
+  /** Set by the app shell: app updates (absent in tests). */
+  updater?: Updater;
+  /** Set by the app shell: quits and opens Hive again (applies a staged restore). */
+  restart?: () => void;
+  private backupTimer: ReturnType<typeof setInterval> | undefined;
+  private firstBackup: ReturnType<typeof setTimeout> | undefined;
+  private backingUp: Promise<BackupInfo> | null = null;
   private readonly runtime: AgentRuntime;
   private readonly planning = new Set<string>();
   /** One per provider, shared by everything that calls it. */
@@ -120,7 +140,7 @@ export class DesktopService {
   private terminalAgents: TerminalAgents | null = null;
 
   constructor(
-    database: HiveDatabase,
+    private readonly database: HiveDatabase,
     private readonly dataDir: string,
     private readonly push: (push: HivePush) => void,
     runtime?: AgentRuntime,
@@ -435,12 +455,51 @@ export class DesktopService {
     });
   }
 
+  /** A backup in the backups folder; automatic ones also prune the oldest. One at a time. */
+  async backup(kind: 'auto' | 'manual'): Promise<BackupInfo> {
+    while (this.backingUp) await this.backingUp.catch(() => undefined);
+    const dir = backupsDir(this.dataDir);
+    const name = backupName(kind);
+    this.backingUp = (async () => {
+      await createBackup(this.database, this.dataDir, path.join(dir, name), app.getVersion());
+      if (kind === 'auto') await prune(dir, 'auto', this.repos.getSettings().backup.keep);
+      const info = (await listBackups(dir)).find((item) => item.name === name);
+      if (!info) throw new HiveError('INTERNAL', 'O backup não foi gravado.');
+      return info;
+    })();
+    try {
+      return await this.backingUp;
+    } finally {
+      this.backingUp = null;
+    }
+  }
+
+  /** Checks every hour whether the daily automatic backup is due. */
+  startAutoBackups(): void {
+    const tick = async () => {
+      if (!this.repos.getSettings().backup.auto) return;
+      if (!(await autoBackupDue(backupsDir(this.dataDir)))) return;
+      await this.backup('auto');
+    };
+    const safeTick = () =>
+      void tick().catch((error: unknown) =>
+        console.error('Backup automático falhou:', errorMessage(error)),
+      );
+    clearInterval(this.backupTimer);
+    clearTimeout(this.firstBackup);
+    this.firstBackup = setTimeout(safeTick, 60_000);
+    this.backupTimer = setInterval(safeTick, 60 * 60 * 1000);
+  }
+
   dispose(): void {
     this.canvasQueen.dispose();
     this.nexusAutopilot.dispose();
     this.liveResults.dispose();
     clearTimeout(this.shiftTimer);
     this.shiftTimer = undefined;
+    clearInterval(this.backupTimer);
+    clearTimeout(this.firstBackup);
+    this.updater?.dispose();
     void this.control?.close();
     this.terminals.dispose();
     this.files.dispose();
@@ -697,7 +756,16 @@ export class DesktopService {
     const provider = this.repos.providers.require(providerId, 'Provedor');
     if (!provider.enabled) throw new HiveError('PROVIDER', 'O provedor está desativado.');
     const secret = this.repos.getSecret(providerId);
-    const apiKey = secret ? safeStorage.decryptString(Buffer.from(secret.ciphertext)) : null;
+    let apiKey: string | null;
+    try {
+      apiKey = secret ? safeStorage.decryptString(Buffer.from(secret.ciphertext)) : null;
+    } catch {
+      // Keys are encrypted with the Windows account; a backup from another one cannot read them.
+      throw new HiveError(
+        'PROVIDER',
+        `Não foi possível ler a chave de API de “${provider.name}”. Isso acontece com backups vindos de outro computador ou usuário do Windows. Cadastre a chave novamente em Provedores.`,
+      );
+    }
     return new OpenAICompatibleClient({
       providerId,
       kind: provider.kind,
@@ -782,9 +850,73 @@ export class DesktopService {
         return this.repos.getSettings();
       case 'settings.update': {
         const result = this.repos.saveSettings({ ...this.repos.getSettings(), ...parse(channel) });
+        this.updater?.setAutomatic(result.updates.auto);
         this.changed('settings');
         return result;
       }
+      case 'backup.overview': {
+        const dir = backupsDir(this.dataDir);
+        return { dir, items: await listBackups(dir) };
+      }
+      case 'backup.create':
+        return this.backup('manual');
+      case 'backup.export': {
+        const selected = await dialog.showSaveDialog({
+          title: 'Exportar backup do Hive',
+          defaultPath: path.join(
+            app.getPath('documents'),
+            backupName('manual').replace('manual', 'hive'),
+          ),
+          filters: [{ name: 'Backup do Hive', extensions: ['hive-backup'] }],
+        });
+        if (selected.canceled || !selected.filePath) return null;
+        await createBackup(this.database, this.dataDir, selected.filePath, app.getVersion());
+        return selected.filePath;
+      }
+      case 'backup.restore': {
+        const { name } = parse(channel);
+        let file: string;
+        if (name) file = resolveBackup(backupsDir(this.dataDir), name);
+        else {
+          const selected = await dialog.showOpenDialog({
+            title: 'Restaurar backup do Hive',
+            properties: ['openFile'],
+            filters: [{ name: 'Backup do Hive', extensions: ['hive-backup'] }],
+          });
+          if (selected.canceled || !selected.filePaths[0]) return false;
+          file = selected.filePaths[0];
+        }
+        const meta = await stageRestore(this.dataDir, file, SCHEMA_VERSION);
+        const choice = await dialog.showMessageBox({
+          type: 'warning',
+          buttons: ['Restaurar e reiniciar', 'Cancelar'],
+          defaultId: 1,
+          cancelId: 1,
+          title: 'Restaurar backup',
+          message: `Restaurar o backup de ${new Date(meta.createdAt).toLocaleString('pt-BR')}?`,
+          detail:
+            'Missões, agentes, provedores, configurações, memórias do Cortex e skills voltam ao estado do backup, e o Hive reinicia. Uma cópia dos dados atuais fica guardada em Backups, para desfazer se precisar.\n\nChaves de API só funcionam no mesmo usuário do Windows em que o backup foi feito.',
+        });
+        if (choice.response !== 0) {
+          await cancelRestore(this.dataDir);
+          return false;
+        }
+        setTimeout(() => this.restart?.(), 100);
+        return true;
+      }
+      case 'backup.openFolder': {
+        const dir = backupsDir(this.dataDir);
+        await mkdir(dir, { recursive: true });
+        const failure = await shell.openPath(dir);
+        if (failure) throw new HiveError('INTERNAL', failure);
+        return;
+      }
+      case 'update.status':
+        return this.updater?.state ?? { status: 'disabled', reason: 'dev' };
+      case 'update.check':
+        return this.updater ? this.updater.check() : { status: 'disabled', reason: 'dev' };
+      case 'update.install':
+        return this.updater?.install();
       case 'workspace.list':
         return this.repos.workspaces.list();
       case 'workspace.active':

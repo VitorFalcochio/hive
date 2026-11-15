@@ -25,6 +25,8 @@ import { DesktopService } from './service';
 import { attachDesignInspector } from './design-inspector';
 import { viewLocalPage } from './page-viewer';
 import { WindowManager } from './windows';
+import { applyPendingRestore, createBackup } from './backup';
+import { Updater } from './updater';
 import appIcon from '../../resources/icon.png?asset';
 import trayIcon from '../../resources/tray.png?asset';
 import trayIcon2x from '../../resources/tray@2x.png?asset';
@@ -45,7 +47,7 @@ const windows = new WindowManager({
   loadValue: (key) => desktopService?.repos.getValue(key) ?? null,
   // The canvas sees the output of its own terminals only, and no file-watch noise.
   canvasReceives: (push) =>
-    push.kind === 'files'
+    push.kind === 'files' || push.kind === 'update'
       ? false
       : push.kind === 'terminal'
         ? !!desktopService?.isCanvasTerminal(
@@ -205,6 +207,21 @@ app
   .then(async () => {
     if (!primaryInstance) return;
     await mkdir(dataDir, { recursive: true });
+    // A restore staged before the restart replaces the data now, before anything opens it.
+    const restored = await applyPendingRestore(dataDir, async (target) => {
+      const current = new HiveDatabase(path.join(dataDir, 'hive.sqlite'));
+      try {
+        await createBackup(current, dataDir, target, app.getVersion());
+      } finally {
+        current.close();
+      }
+    }).catch((error: unknown) => {
+      dialog.showErrorBox(
+        'Não foi possível restaurar o backup',
+        `${errorMessage(error)}\n\nO Hive abre com os dados de antes.`,
+      );
+      return false;
+    });
     database = new HiveDatabase(path.join(dataDir, 'hive.sqlite'));
     const service = new DesktopService(database, dataDir, (push) => {
       windows.broadcast(push);
@@ -236,6 +253,20 @@ app
       const { width } = image.getSize();
       return (width > 480 ? image.resize({ width: 480, quality: 'good' }) : image).toDataURL();
     };
+    const updater = new Updater((state) => windows.broadcast({ kind: 'update', state }));
+    updater.onReady = (version) =>
+      notify(
+        `Hive ${version} pronto para instalar`,
+        'A atualização entra quando você fechar o Hive. Para instalar agora, use Configurações → Atualizações.',
+      );
+    service.updater = updater;
+    service.restart = () => {
+      quitting = true;
+      app.relaunch();
+      app.quit();
+    };
+    updater.setAutomatic(service.repos.getSettings().updates.auto);
+    service.startAutoBackups();
     desktopService = service;
     await service
       .installBuiltinSkills()
@@ -276,6 +307,11 @@ app
       },
     );
     await createWindow();
+    if (restored)
+      notify(
+        'Backup restaurado',
+        'Os dados do backup já estão em uso. A cópia anterior ficou em Backups.',
+      );
     app.on('activate', () => {
       if (!mainWindow()) void createWindow();
     });
