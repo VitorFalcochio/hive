@@ -76,6 +76,7 @@ function snapshot(tasks: Task[], patch: Partial<CanvasSnapshot> = {}): CanvasSna
     usage: {},
     planning: false,
     queuePosition: null,
+    recoveries: [],
     terminals: [],
     at,
     ...patch,

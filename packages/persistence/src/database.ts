@@ -108,6 +108,18 @@ const migrations: string[] = [
     PRIMARY KEY (memory_id, model)
   );
   `,
+  `
+  CREATE TABLE nexus_autopilot_recoveries (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX nexus_autopilot_recoveries_run ON nexus_autopilot_recoveries(run_id);
+  CREATE INDEX nexus_autopilot_recoveries_task ON nexus_autopilot_recoveries(task_id, state);
+  `,
 ];
 
 /** The schema version this build creates; a database above it came from a newer Hive. */

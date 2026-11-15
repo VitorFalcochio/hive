@@ -113,6 +113,7 @@ const snapshot = (
   usage: {},
   planning: false,
   queuePosition: null,
+  recoveries: [],
   terminals: [],
   at,
 });

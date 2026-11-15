@@ -6,6 +6,7 @@ import {
   missionSchema,
   modelInfoSchema,
   nexusAutopilotPlanSchema,
+  nexusAutopilotRecoverySchema,
   providerConfigSchema,
   runSchema,
   settingsSchema,
@@ -27,6 +28,7 @@ import {
   type LiveResult,
   type MissionNote,
   type NexusAutopilotPlan,
+  type NexusAutopilotRecovery,
   type ResultEventPage,
 } from '@hive/core';
 import type { SQLInputValue } from 'node:sqlite';
@@ -45,6 +47,7 @@ export class Repositories {
   readonly approvals: JsonTable<Approval>;
   readonly chatTurns: JsonTable<ChatTurn>;
   readonly nexusAutopilotPlans: JsonTable<NexusAutopilotPlan>;
+  readonly nexusAutopilotRecoveries: JsonTable<NexusAutopilotRecovery>;
   readonly cortex: CortexRepository;
 
   constructor(private readonly db: HiveDatabase) {
@@ -76,6 +79,12 @@ export class Repositories {
       'nexus_autopilot_plans',
       nexusAutopilotPlanSchema,
       (plan) => ({ run_id: plan.runId, version: plan.version, state: plan.state }),
+    );
+    this.nexusAutopilotRecoveries = new JsonTable(
+      db,
+      'nexus_autopilot_recoveries',
+      nexusAutopilotRecoverySchema,
+      (recovery) => ({ run_id: recovery.runId, task_id: recovery.taskId, state: recovery.state }),
     );
   }
 

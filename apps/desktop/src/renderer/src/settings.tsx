@@ -325,6 +325,43 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
         </label>
       </Section>
 
+      <Section
+        title="Replanejamento adaptativo"
+        description="Quando uma tarefa falha de vez durante a execução, as que dependem dela esperam e a Queen propõe outro caminho no Nexus. Nada muda sem a sua aprovação."
+      >
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={draft.replanning.enabled}
+            onChange={(event) =>
+              set('replanning', { ...draft.replanning, enabled: event.target.checked })
+            }
+          />
+          Propor outro caminho quando uma tarefa falhar
+          <span className="hint">
+            Desligado, as tarefas que dependem da que falhou são canceladas na hora, como antes.
+          </span>
+        </label>
+        <div className="settings-grid">
+          <NumberField
+            label="Replanejamentos por tarefa"
+            hint="De 1 a 3. Conta a substituta que falhar de novo."
+            min={1}
+            max={3}
+            value={draft.replanning.maxPerTask}
+            onChange={(value) => set('replanning', { ...draft.replanning, maxPerTask: value })}
+          />
+          <NumberField
+            label="Sugestões por missão"
+            hint="De 1 a 10, aprovadas ou não. Cada uma consome tokens da Queen."
+            min={1}
+            max={10}
+            value={draft.replanning.maxPerRun}
+            onChange={(value) => set('replanning', { ...draft.replanning, maxPerRun: value })}
+          />
+        </div>
+      </Section>
+
       <BackupSection value={draft.backup} onChange={(value) => set('backup', value)} />
 
       <UpdatesSection value={draft.updates} onChange={(value) => set('updates', value)} />

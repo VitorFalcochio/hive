@@ -55,7 +55,12 @@ export function canvasRuns(repos: Repositories): CanvasRunSummary[] {
 export function canvasSnapshot(
   repos: Repositories,
   detail: RunDetail,
-  state: { planning: boolean; queue: string[]; terminals: CanvasTerminal[] },
+  state: {
+    planning: boolean;
+    queue: string[];
+    terminals: CanvasTerminal[];
+    recoveries?: CanvasSnapshot['recoveries'];
+  },
 ): CanvasSnapshot {
   const { run, tasks } = detail;
   const workspace = repos.workspaces.get(run.workspaceId);
@@ -83,6 +88,7 @@ export function canvasSnapshot(
     workspace: workspace ? { id: workspace.id, name: workspace.name } : null,
     workers,
     usage,
+    recoveries: state.recoveries ?? [],
     planning: state.planning || run.status === 'planning',
     queuePosition: position < 0 ? null : position,
     terminals: state.terminals,

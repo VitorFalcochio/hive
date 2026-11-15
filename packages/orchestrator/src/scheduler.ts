@@ -52,6 +52,17 @@ export interface SchedulerOptions {
    */
   unattended?: (runId: string) => boolean;
   /**
+   * Adaptive replanning. Called once a task has failed for good (after any automatic retries),
+   * before the scheduler looks at what depends on it: a listener that wants to propose another
+   * path registers it synchronously so that `holds` already answers true.
+   */
+  onTaskFailed?: (run: Run, task: Task) => void;
+  /**
+   * True while a failed task waits for a replanning decision. Its dependents then stay pending
+   * instead of being cancelled, and the run stays running until the decision is made.
+   */
+  holds?: (task: Task) => boolean;
+  /**
    * The client an agent's task talks through, when it is more than its provider's: e.g. one that
    * moves to another provider or model when this one is exhausted. `notify` writes in the task log.
    */
@@ -515,6 +526,100 @@ export class Scheduler {
     return worker;
   }
 
+  /**
+   * Adaptive replanning: sets a failed task aside and makes the tasks that waited on it wait on
+   * `replacementKeys` instead (none to let them go on without it). Only tasks that have not
+   * started change; the failed task becomes "Descartada" with `note` as the reason.
+   */
+  reroute(taskId: string, replacementKeys: string[], note: string): void {
+    const failed = this.repos.tasks.require(taskId, 'Tarefa');
+    if (failed.status !== 'failed')
+      throw new HiveError('CONFLICT', 'A tarefa não está mais falha; nada foi alterado.');
+    const run = this.repos.runs.require(failed.runId, 'Execução');
+    if (run.status !== 'running')
+      throw new HiveError('CONFLICT', 'A missão não está mais em execução.');
+    const tasks = this.repos.tasks.list('run_id = ?', failed.runId);
+    const keys = new Set(tasks.map((task) => task.key));
+    for (const key of replacementKeys)
+      if (!keys.has(key) || key === failed.key)
+        throw new HiveError('VALIDATION', `Tarefa de continuação desconhecida: "${key}".`);
+    const dependents = tasks.filter(
+      (task) => task.dependsOn.includes(failed.key) && NOT_STARTED.has(task.status),
+    );
+    const changes = new Map<string, string[]>();
+    for (const task of dependents) {
+      if (this.sessions.has(task.id) || this.launching.has(task.id))
+        throw new HiveError('CONFLICT', `${task.title} já começou; nada foi alterado.`);
+      const dependsOn = [
+        ...new Set([...task.dependsOn.filter((key) => key !== failed.key), ...replacementKeys]),
+      ];
+      if (dependsOn.length > 10)
+        throw new HiveError(
+          'VALIDATION',
+          `${task.title} passaria a depender de mais de 10 tarefas.`,
+        );
+      changes.set(task.id, dependsOn);
+    }
+    const cycle = findCycle(
+      tasks.map((task) => ({ ...task, dependsOn: changes.get(task.id) ?? task.dependsOn })),
+    );
+    if (cycle) throw new HiveError('VALIDATION', `Isso criaria um ciclo: ${cycle.join(' → ')}.`);
+    this.repos.transaction(() => {
+      for (const [id, dependsOn] of changes) this.update(id, { dependsOn });
+      this.update(failed.id, {
+        status: 'rejected',
+        workerState: 'failed',
+        error: note.slice(0, 2_000),
+        finishedAt: failed.finishedAt ?? nowIso(),
+      });
+    });
+    this.log(run, failed.id, failed.workerId, 'plan', 'info', note);
+    this.pump(failed.runId);
+  }
+
+  /** Looks at a run again: after a replanning decision, held tasks may go on or be cancelled. */
+  refresh(runId: string): void {
+    this.pump(runId);
+    this.settle(runId);
+  }
+
+  private held(task: Task): boolean {
+    if (task.status !== 'failed' || !this.options.holds) return false;
+    try {
+      return this.options.holds(task);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Every dependency that ended without success is a failed task held for replanning. */
+  private waitsOnHold(task: Task, tasks: Task[]): boolean {
+    const byKey = new Map(tasks.map((item) => [item.key, item]));
+    const bad = task.dependsOn
+      .map((key) => byKey.get(key))
+      .filter((dep) => !dep || ['failed', 'cancelled', 'rejected'].includes(dep.status));
+    return bad.length > 0 && bad.every((dep) => !!dep && this.held(dep));
+  }
+
+  /** Lets a replanning listener know, without ever breaking the scheduler. */
+  private failedForGood(run: Run, taskId: string): void {
+    if (!this.options.onTaskFailed) return;
+    const task = this.repos.tasks.get(taskId);
+    if (task?.status !== 'failed') return;
+    try {
+      this.options.onTaskFailed(run, task);
+    } catch (error) {
+      this.log(
+        run,
+        taskId,
+        task.workerId,
+        'info',
+        'warn',
+        `Replanejamento indisponível: ${errorMessage(error)}`,
+      );
+    }
+  }
+
   isActive(runId: string): boolean {
     return this.repos.tasks
       .list('run_id = ?', runId)
@@ -534,7 +639,8 @@ export class Scheduler {
     for (const task of tasks) {
       if (
         (task.status === 'pending' || task.status === 'blocked') &&
-        isBlockedByFailure(task, tasks)
+        isBlockedByFailure(task, tasks) &&
+        !this.waitsOnHold(task, tasks)
       )
         this.update(task.id, {
           status: 'cancelled',
@@ -573,6 +679,8 @@ export class Scheduler {
     );
     if (busy || (run.status === 'running' && readyTasks(tasks).length)) return;
     if (run.status === 'running' && tasks.some((task) => task.status === 'pending')) return;
+    // A failed task waiting for a replanning decision keeps the run open, even as a leaf.
+    if (run.status === 'running' && tasks.some((task) => this.held(task))) return;
     const failed = tasks.filter((task) => task.status === 'failed').length;
     const status: RunStatus =
       run.status === 'cancelled'
@@ -771,6 +879,7 @@ export class Scheduler {
           ? `Concluída: ${result.filesChanged.length} arquivo(s), +${result.insertions} −${result.deletions}.`
           : `${outcome.status === 'cancelled' ? 'Cancelada' : 'Falhou'}: ${outcome.error ?? ''}`,
       );
+      if (outcome.status === 'failed') this.failedForGood(run, initial.id);
       // The revised branch holds the earlier work too, so the old branch is no longer needed.
       if (previousBranch && previousBranch !== branch && outcome.status === 'completed')
         await git(workspace.path, ['branch', '-D', previousBranch], { allowFailure: true });
@@ -786,6 +895,7 @@ export class Scheduler {
         worktreePath: null,
       });
       this.log(run, initial.id, initial.workerId, 'error', cancelled ? 'warn' : 'error', message);
+      if (!cancelled) this.failedForGood(run, initial.id);
     } finally {
       this.launching.delete(initial.id);
       this.sessions.delete(initial.id);

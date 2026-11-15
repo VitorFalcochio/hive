@@ -61,6 +61,7 @@ const snapshot: CanvasSnapshot = {
   usage: {},
   planning: false,
   queuePosition: null,
+  recoveries: [],
   at,
 };
 const draft: NexusAutopilotDraft = {

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defaultLimits, type Run, type Task } from '@hive/core';
 import type { AgentOutcome, AgentRuntime, AgentTaskInput, RuntimeEvent } from '@hive/agents';
 import { HiveDatabase, Repositories } from '@hive/persistence';
-import { Scheduler } from './scheduler';
+import { Scheduler, type SchedulerOptions } from './scheduler';
 
 type Behaviour = (input: AgentTaskInput) => Promise<Partial<AgentOutcome>>;
 
@@ -42,6 +42,7 @@ async function setup(
   behaviour: Behaviour,
   tasks: { key: string; dependsOn?: string[] }[],
   unattended = false,
+  hooks: Pick<SchedulerOptions, 'holds' | 'onTaskFailed'> = {},
 ) {
   const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-sched-'));
   const git = (...args: string[]) =>
@@ -137,6 +138,7 @@ async function setup(
     onEvent: () => undefined,
     onChange: () => undefined,
     unattended: () => unattended,
+    ...hooks,
   });
   const task = (key: string) => repos.tasks.require(`task_${key}`, 'Tarefa');
   const status = () => repos.runs.require(run.id, 'Execução').status;
@@ -245,6 +247,89 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     const statuses = (['a', 'b'] as const).map((key) => ctx.task(key));
     expect(statuses.map((task: Task) => task.status)).toEqual(['completed', 'completed']);
     expect(ctx.task('a').attempt).toBe(2);
+  });
+
+  it('segura o ramo de uma tarefa falha durante o replanejamento e religa no reroute', async () => {
+    const held = new Set<string>();
+    const failedSeen: string[] = [];
+    const ctx = await setup(
+      async (input) => {
+        if (input.task.title === 'Tarefa a') return { status: 'failed', error: 'boom' };
+        await writeTaskFile(input);
+        return {};
+      },
+      [{ key: 'a' }, { key: 'b', dependsOn: ['a'] }, { key: 'c' }],
+      false,
+      {
+        onTaskFailed: (_run, task) => {
+          failedSeen.push(task.key);
+          held.add(task.id);
+        },
+        holds: (task) => held.has(task.id),
+      },
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(
+      () => ctx.task('a').status === 'failed' && ctx.task('c').status === 'completed',
+      'a falha e c conclui',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(failedSeen).toEqual(['a']);
+    // Held: the dependent waits instead of being cancelled, and the run stays open.
+    expect(ctx.task('b').status).toBe('pending');
+    expect(ctx.status()).toBe('running');
+
+    ctx.scheduler.addTask(ctx.run.id, {
+      key: 'a2',
+      title: 'Tarefa a2',
+      description: 'outro caminho',
+      workerId: 'w1',
+      dependsOn: [],
+      acceptanceCriteria: ['ok'],
+    });
+    ctx.scheduler.reroute('task_a', ['a2'], 'Replanejamento aprovado.');
+    held.clear();
+    await until(() => ctx.status() === 'review', 'review');
+
+    expect(ctx.task('a').status).toBe('rejected');
+    expect(ctx.task('a').error).toBe('Replanejamento aprovado.');
+    expect(ctx.task('b').dependsOn).toEqual(['a2']);
+    expect(ctx.task('b').status).toBe('completed');
+  });
+
+  it('encerrar o ramo em espera cancela os dependentes como sem replanejamento', async () => {
+    const held = new Set<string>();
+    const ctx = await setup(
+      async (input) => {
+        if (input.task.title === 'Tarefa a') return { status: 'failed', error: 'boom' };
+        await writeTaskFile(input);
+        return {};
+      },
+      [{ key: 'a' }, { key: 'b', dependsOn: ['a'] }],
+      false,
+      { onTaskFailed: (_run, task) => held.add(task.id), holds: (task) => held.has(task.id) },
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.task('a').status === 'failed', 'a falha');
+    // The scheduler is done with the task once its worktree and empty branch are gone.
+    await until(
+      () =>
+        ctx.git('worktree', 'list').trim().split('\n').length === 1 &&
+        ctx.git('branch', '--list', 'hive/*').trim() === '',
+      'worktree e branch removidos',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(ctx.status()).toBe('running');
+
+    held.clear();
+    ctx.scheduler.refresh(ctx.run.id);
+    expect(ctx.task('b').status).toBe('cancelled');
+    expect(ctx.status()).toBe('failed');
+  });
+
+  it('reroute recusa continuação desconhecida ou tarefa que não está falha', async () => {
+    const ctx = await setup(async () => ({}), [{ key: 'a' }]);
+    expect(() => ctx.scheduler.reroute('task_a', [], 'x')).toThrow('não está mais falha');
   });
 
   it('sem ninguém olhando, libera só comandos seguros e não cria pedidos', async () => {

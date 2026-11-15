@@ -519,6 +519,19 @@ export const updateSettingsSchema = z.object({
   auto: z.boolean(),
 });
 
+/**
+ * Adaptive replanning (Autopilot 2.0): when a task fails for good during a run, the tasks waiting
+ * on it are held, the Queen proposes another path and the branch continues after approval.
+ */
+export const replanningSettingsSchema = z.object({
+  enabled: z.boolean(),
+  /** Approved replans per original task, counting replacements of replacements. */
+  maxPerTask: z.number().int().min(1).max(3),
+  /** Replans the Queen may propose in one run, approved or not. */
+  maxPerRun: z.number().int().min(1).max(10),
+});
+export type ReplanningSettings = z.infer<typeof replanningSettingsSchema>;
+
 export const settingsSchema = z.object({
   maxConcurrentTasks: z.number().int().min(1).max(8),
   skillforgeCatalogPath: z.string().nullable(),
@@ -537,6 +550,7 @@ export const settingsSchema = z.object({
   failover: failoverSettingsSchema.default({ enabled: true, automatic: true, freeOnly: true }),
   backup: backupSettingsSchema.default({ auto: true, keep: 7 }),
   updates: updateSettingsSchema.default({ auto: true }),
+  replanning: replanningSettingsSchema.default({ enabled: true, maxPerTask: 2, maxPerRun: 5 }),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -566,6 +580,7 @@ export const defaultSettings: Settings = {
   failover: { enabled: true, automatic: true, freeOnly: true },
   backup: { auto: true, keep: 7 },
   updates: { auto: true },
+  replanning: { enabled: true, maxPerTask: 2, maxPerRun: 5 },
   autopilot: {
     enabled: false,
     // Checks only. Installs, deploys, publishing and git writes are denied while unattended.

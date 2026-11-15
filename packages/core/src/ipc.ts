@@ -10,6 +10,7 @@ import {
   nexusAutopilotRevisionSchema,
   type NexusAutopilotApplyResult,
   type NexusAutopilotPlan,
+  type NexusAutopilotRecovery,
 } from './nexus-autopilot';
 import {
   cortexActivityQuerySchema,
@@ -350,6 +351,8 @@ export interface CanvasSnapshot {
   planning: boolean;
   /** Position in the shift queue (0 = next or current), null when not queued. */
   queuePosition: number | null;
+  /** Adaptive replans of this run that still need a decision, newest first. */
+  recoveries: NexusAutopilotRecovery[];
   /** When the snapshot was read, for the "updated" hint and elapsed timers. */
   at: string;
 }
@@ -686,6 +689,18 @@ export const ipcContract = {
   'canvas.autopilot.cancel': channel<void>()(
     z.object({ runId: id, planId: id.optional() }).strict(),
   ),
+  /** Adaptive replanning: apply the Queen's patch to the running mission. */
+  'canvas.autopilot.recovery.apply': channel<NexusAutopilotRecovery>()(
+    z.object({ runId: id, recoveryId: id }).strict(),
+  ),
+  /** Let the branch end: the tasks waiting on the failed one are cancelled, as without replanning. */
+  'canvas.autopilot.recovery.dismiss': channel<NexusAutopilotRecovery>()(
+    z.object({ runId: id, recoveryId: id }).strict(),
+  ),
+  /** Ask the Queen again after a proposal failed or was not good enough; limits still apply. */
+  'canvas.autopilot.recovery.retry': channel<NexusAutopilotRecovery>()(
+    z.object({ runId: id, recoveryId: id }).strict(),
+  ),
   'canvas.snapshot': channel<CanvasSnapshot>()(id),
   /** The spatial layout of one run's canvas; visual only, never read by the engine. */
   'canvas.layout.get': channel<CanvasLayout>()(id),
@@ -825,6 +840,9 @@ export const canvasChannels: ReadonlySet<IpcChannel> = new Set<IpcChannel>([
   'canvas.autopilot.revise',
   'canvas.autopilot.apply',
   'canvas.autopilot.cancel',
+  'canvas.autopilot.recovery.apply',
+  'canvas.autopilot.recovery.dismiss',
+  'canvas.autopilot.recovery.retry',
   'canvas.snapshot',
   'canvas.layout.get',
   'canvas.result.get',

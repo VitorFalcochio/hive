@@ -61,6 +61,7 @@ import {
 import { CommandPalette } from './command-palette';
 import { QueenCommand } from './queen-command';
 import { NexusAutopilot } from './nexus-autopilot';
+import { RecoveryPanel } from './recovery-panel';
 import { useCortex } from './cortex/use-cortex';
 import { CortexInspector, type CortexTab } from './cortex/CortexInspector';
 import { BLOCK_MIME, BlockLibrary, type BlockKind } from './cortex/BlockLibrary';
@@ -1442,6 +1443,7 @@ export function Workspace({
               />
             </ReactFlow>
             {empty}
+            <RecoveryPanel snapshot={snapshot} />
             {blocksOpen && (
               <BlockLibrary
                 onClose={() => setBlocksOpen(false)}

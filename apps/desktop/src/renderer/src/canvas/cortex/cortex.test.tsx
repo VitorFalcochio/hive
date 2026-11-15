@@ -78,6 +78,7 @@ const snapshot: CanvasSnapshot = {
   usage: {},
   planning: false,
   queuePosition: null,
+  recoveries: [],
   terminals: [],
   at,
 };

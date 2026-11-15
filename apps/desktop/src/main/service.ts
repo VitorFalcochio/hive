@@ -196,6 +196,9 @@ export class DesktopService {
         this.push({ kind: 'event', event });
         this.liveResults.schedule(event.runId!);
       },
+      reroute: (taskId, keys, note) => this.scheduler.reroute(taskId, keys, note),
+      refresh: (runId) => this.scheduler.refresh(runId),
+      onChange: (runId) => this.changed('autopilot', runId),
     });
     this.runtime =
       runtime ??
@@ -220,6 +223,8 @@ export class DesktopService {
       },
       onChange: (entity, id) => this.changed(entity, id),
       unattended: (runId) => this.autopilot.isUnattended(runId),
+      onTaskFailed: (run, task) => this.nexusAutopilot.detect(run, task),
+      holds: (task) => this.nexusAutopilot.holds(task),
       prepareMemory: (context) => this.cortex.prepareTask(context),
       chatForWorker: (worker, notify) =>
         this.router.clientFor(worker, (change) =>
@@ -1508,6 +1513,18 @@ export class DesktopService {
         const { runId, planId, start } = parse(channel);
         return this.nexusAutopilot.apply(runId, planId, start);
       }
+      case 'canvas.autopilot.recovery.apply': {
+        const { runId, recoveryId } = parse(channel);
+        return this.nexusAutopilot.applyRecovery(runId, recoveryId);
+      }
+      case 'canvas.autopilot.recovery.dismiss': {
+        const { runId, recoveryId } = parse(channel);
+        return this.nexusAutopilot.dismissRecovery(runId, recoveryId);
+      }
+      case 'canvas.autopilot.recovery.retry': {
+        const { runId, recoveryId } = parse(channel);
+        return this.nexusAutopilot.retryRecovery(runId, recoveryId);
+      }
       case 'canvas.autopilot.cancel': {
         const { runId, planId } = parse(channel);
         this.nexusAutopilot.cancel(runId, planId);
@@ -1519,6 +1536,7 @@ export class DesktopService {
           planning: this.planning.has(runId),
           queue: this.autopilot.queue(),
           terminals: this.canvasTerminalsOf(runId),
+          recoveries: this.nexusAutopilot.recoveries(runId),
         });
       }
       case 'canvas.layout.get': {
