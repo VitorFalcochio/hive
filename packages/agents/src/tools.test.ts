@@ -78,6 +78,54 @@ describe('caixa de areia das ferramentas dos agentes', () => {
     expect(missing).toMatchObject({ isError: true });
   });
 
+  it('aceita trechos com recuo errado quando só há um lugar possível (caso real)', async () => {
+    const { root, ctx } = await sandbox();
+    // From a real run: the file is indented 6/8 spaces; the model sent 10 on the inner lines.
+    const file =
+      '    {\r\n' +
+      '      removeTagFromDoc: (docId, tagId) => {\r\n' +
+      '        const doc = get().docs[docId];\r\n' +
+      '        if (!doc) return;\r\n' +
+      '      },\r\n' +
+      '    }\r\n';
+    await writeFile(path.join(root, 'store.ts'), file);
+    const edit = await executeTool(ctx, 'replace_in_file', {
+      path: 'store.ts',
+      old_string:
+        'removeTagFromDoc: (docId, tagId) => {\n          const doc = get().docs[docId];\n          if (!doc) return;\n        },',
+      new_string:
+        'removeTagFromDoc: (docId, tagId) => {\n          const doc = get().docs[docId];\n          if (!doc) return;\n        },\n\n        lock: () => {\n          locked = true;\n        },',
+    });
+    expect(edit).toMatchObject({ isError: false });
+    expect(edit.output).toContain('indentation');
+    expect(await readFile(path.join(root, 'store.ts'), 'utf8')).toBe(
+      '    {\r\n' +
+        '      removeTagFromDoc: (docId, tagId) => {\r\n' +
+        '        const doc = get().docs[docId];\r\n' +
+        '        if (!doc) return;\r\n' +
+        '      },\r\n' +
+        '\r\n' +
+        '      lock: () => {\r\n' +
+        '        locked = true;\r\n' +
+        '      },\r\n' +
+        '    }\r\n',
+    );
+  });
+
+  it('recusa o trecho com recuo errado quando ele aparece em mais de um lugar', async () => {
+    const { root, ctx } = await sandbox();
+    const file = 'if (a) {\n  run();\n}\nif (a) {\n    run();\n}\n';
+    await writeFile(path.join(root, 'dup.ts'), file);
+    const edit = await executeTool(ctx, 'replace_in_file', {
+      path: 'dup.ts',
+      old_string: 'if (a) {\n      run();\n}',
+      new_string: 'if (b) {\n  run();\n}',
+    });
+    expect(edit).toMatchObject({ isError: true });
+    expect(edit.output).toContain('several places');
+    expect(await readFile(path.join(root, 'dup.ts'), 'utf8')).toBe(file);
+  });
+
   it('pede aprovação para comandos fora da lista e respeita a recusa', async () => {
     const { ctx, approvals } = await sandbox({ allow: ['node --version'] });
     const denied = await executeTool(ctx, 'run_command', { command: 'node -e "1"' });

@@ -383,6 +383,60 @@ async function writeTool(ctx: ToolContext, args: Record<string, unknown>): Promi
   return `${existed ? 'Updated' : 'Created'} ${rel} (${content.split('\n').length} lines).`;
 }
 
+const leading = (line: string) => line.slice(0, line.length - line.trimStart().length);
+
+/**
+ * Fallback for replace_in_file: finds old_string comparing whole lines with surrounding
+ * whitespace ignored. On exactly one match, replaces those lines with new_string, moving its
+ * indentation by the same amount the file's differs from old_string's. Returns the updated
+ * text, null when nothing matches, or 'ambiguous' when several places match.
+ */
+export function replaceIgnoringIndent(
+  original: string,
+  oldString: string,
+  newString: string,
+): string | null | 'ambiguous' {
+  const split = (text: string) => {
+    const lines = text.replace(/\r\n/g, '\n').split('\n');
+    if (lines.length > 1 && lines.at(-1) === '') lines.pop();
+    return lines;
+  };
+  const oldLines = split(oldString);
+  const newLines = newString === '' ? [] : split(newString);
+  if (!oldLines.some((line) => line.trim())) return null;
+  const fileLines = original.split('\n');
+  const matches: number[] = [];
+  for (let start = 0; start + oldLines.length <= fileLines.length; start++) {
+    if (oldLines.every((line, k) => fileLines[start + k]!.trim() === line.trim()))
+      matches.push(start);
+    if (matches.length > 1) return 'ambiguous';
+  }
+  const start = matches[0];
+  if (start === undefined) return null;
+  // Models often start old_string at the first line's text, without its indentation, so the
+  // indentation shift is measured on a later line when there is one.
+  const indented = (line: string) => line.trim() !== '';
+  const later = oldLines.findIndex((line, k) => k > 0 && indented(line));
+  const anchor = later > 0 ? later : oldLines.findIndex(indented);
+  const fromIndent = leading(oldLines[anchor]!);
+  const toIndent = leading(fileLines[start + anchor]!.replace(/\r$/, ''));
+  const shift = toIndent.length - fromIndent.length;
+  const firstBare = leading(oldLines[0]!) === '';
+  const firstIndent = leading(fileLines[start]!);
+  const cr = fileLines[start]!.endsWith('\r') ? '\r' : '';
+  const replaced = newLines.map((line, k) => {
+    if (!line.trim()) return cr;
+    // Like an exact mid-line match, a bare first line keeps the file's own prefix.
+    if (k === 0 && firstBare) return firstIndent + line.trimStart() + cr;
+    const own = leading(line);
+    const width = Math.max(0, own.length + shift);
+    const unit = toIndent[0] ?? own[0] ?? ' ';
+    return unit.repeat(width) + line.slice(own.length) + cr;
+  });
+  fileLines.splice(start, oldLines.length, ...replaced);
+  return fileLines.join('\n');
+}
+
 async function replaceTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
   const requested = str(args, 'path');
   const file = await writableTarget(ctx, requested);
@@ -399,11 +453,29 @@ async function replaceTool(ctx: ToolContext, args: Record<string, unknown>): Pro
   const needle = crlf ? oldString.replace(/\n/g, '\r\n') : oldString;
   const replacement = crlf ? newString.replace(/\n/g, '\r\n') : newString;
   const count = original.split(needle).length - 1;
-  if (count === 0)
-    throw new HiveError(
-      'VALIDATION',
-      'old_string was not found. Read the file again and copy the text exactly.',
-    );
+  if (count === 0) {
+    // Models often miscount leading spaces when copying from read_file's numbered lines.
+    const loose = replaceIgnoringIndent(original, oldString, newString);
+    if (loose === 'ambiguous')
+      throw new HiveError(
+        'VALIDATION',
+        'old_string was not found exactly, and matches several places when indentation is ignored. Read the file again and copy the text exactly.',
+      );
+    if (!loose)
+      throw new HiveError(
+        'VALIDATION',
+        'old_string was not found. Read the file again and copy the text exactly.',
+      );
+    await writeFile(file, loose, 'utf8');
+    const rel = toPosixRelative(ctx.root, file);
+    ctx.emit({
+      type: 'file.changed',
+      level: 'info',
+      message: `Edited ${rel}`,
+      data: { path: rel, action: 'modified', replacements: 1 },
+    });
+    return `Edited ${rel} (1 replacement; indentation of old_string did not match the file and was adjusted to the file's).`;
+  }
   if (count > 1 && args.replace_all !== true) {
     throw new HiveError(
       'VALIDATION',
