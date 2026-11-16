@@ -1,0 +1,18 @@
+{
+  "name": "@hive/bench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Hive Bench: measures what Hive's agents can do, with fixed tasks and hidden checks.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hive/agents": "workspace:*",
+    "@hive/core": "workspace:*",
+    "@hive/providers": "workspace:*",
+    "@hive/shared": "workspace:*",
+    "@hive/skills": "workspace:*"
+  }
+}

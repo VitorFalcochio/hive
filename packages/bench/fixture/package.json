@@ -1,0 +1,9 @@
+{
+  "name": "loja",
+  "private": true,
+  "type": "module",
+  "description": "Biblioteca de uma pequena loja: produtos, carrinho, preços e textos.",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\""
+  }
+}

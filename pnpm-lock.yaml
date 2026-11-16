@@ -163,6 +163,24 @@ importers:
         specifier: ^1.32.2
         version: 1.32.2(zod@4.6.7)
 
+  packages/bench:
+    dependencies:
+      '@hive/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@hive/core':
+        specifier: workspace:*
+        version: link:../core
+      '@hive/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@hive/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@hive/skills':
+        specifier: workspace:*
+        version: link:../skills
+
   packages/core:
     dependencies:
       zod:

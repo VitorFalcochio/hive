@@ -1,0 +1,54 @@
+import { FRETE_GRATIS_ACIMA, FRETE_PADRAO, MAX_ITEMS } from './config.ts';
+import { percentOf } from './money.ts';
+
+export interface CartItem {
+  sku: string;
+  name: string;
+  priceCents: number;
+  quantity: number;
+}
+
+export interface Cart {
+  items: CartItem[];
+  discountPercent: number;
+}
+
+export function createCart(): Cart {
+  return { items: [], discountPercent: 0 };
+}
+
+export function itemCount(cart: Cart): number {
+  return cart.items.reduce((sum, item) => sum + item.quantity, 0);
+}
+
+/** Adds units of an item to the cart (changes the cart it receives). */
+export function addItem(cart: Cart, item: CartItem): void {
+  if (item.quantity <= 0) throw new Error('Quantidade deve ser positiva.');
+  if (itemCount(cart) + item.quantity > MAX_ITEMS)
+    throw new Error(`O carrinho aceita no máximo ${MAX_ITEMS} itens.`);
+  const existing = cart.items.find((line) => line.sku === item.sku);
+  if (existing) existing.quantity += item.quantity;
+  else cart.items.push({ ...item });
+}
+
+export function setDiscount(cart: Cart, percent: number): void {
+  if (percent < 0 || percent > 100) throw new Error('Desconto inválido.');
+  cart.discountPercent = percent;
+}
+
+export function subtotal(cart: Cart): number {
+  return cart.items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
+}
+
+export function discount(cart: Cart): number {
+  return percentOf(subtotal(cart), cart.discountPercent);
+}
+
+export function shipping(cart: Cart): number {
+  if (!cart.items.length) return 0;
+  return subtotal(cart) >= FRETE_GRATIS_ACIMA ? 0 : FRETE_PADRAO;
+}
+
+export function total(cart: Cart): number {
+  return subtotal(cart) - discount(cart) + shipping(cart);
+}
