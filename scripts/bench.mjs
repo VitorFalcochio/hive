@@ -23,12 +23,16 @@ await build({
   output: { file: path.join(outDir, 'cli.mjs'), format: 'esm', codeSplitting: false },
 });
 
-const env = { ...process.env, HIVE_BENCH_ROOT: path.join(root, 'packages/bench') };
+const env = {
+  ...process.env,
+  HIVE_BENCH_ROOT: path.join(root, 'packages/bench'),
+  HIVE_BENCH_PARENT: String(process.pid),
+  // Not on Electron's command line: Chromium parses it too, and some combinations (such as
+  // `--models a/b:free --label x`) make Electron exit (code 127) before any script runs.
+  HIVE_BENCH_ARGS: JSON.stringify(process.argv.slice(2)),
+};
 delete env.ELECTRON_RUN_AS_NODE;
 const direct = !!process.env.HIVE_BENCH_BASE_URL;
 const command = direct ? process.execPath : require('electron');
-const child = spawn(command, [path.join(outDir, 'cli.mjs'), ...process.argv.slice(2)], {
-  env,
-  stdio: 'inherit',
-});
+const child = spawn(command, [path.join(outDir, 'cli.mjs')], { env, stdio: 'inherit' });
 child.on('exit', (code) => process.exit(code ?? 1));

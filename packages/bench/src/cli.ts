@@ -19,10 +19,12 @@ import { runTask, type BenchResult } from './runner';
 import { benchTasks } from './tasks';
 import { benchRoot } from './workspace';
 
-// Under Electron, argv also holds Electron's own switches: only what follows this script counts.
-const script = process.argv.findIndex((arg) => /cli\.(mjs|ts)$/.test(arg));
+// The launcher hands the arguments over in HIVE_BENCH_ARGS: Electron's command line is also
+// parsed by Chromium, which chokes on some of them (see scripts/bench.mjs).
 const { values: args } = parseArgs({
-  args: process.argv.slice(script >= 0 ? script + 1 : 2),
+  args: process.env.HIVE_BENCH_ARGS
+    ? (JSON.parse(process.env.HIVE_BENCH_ARGS) as string[])
+    : process.argv.slice(2),
   options: {
     models: { type: 'string' },
     tasks: { type: 'string' },
@@ -60,6 +62,20 @@ if (electron) {
   electron.app.setPath('userData', dataDir);
   electron.app.setPath('sessionData', path.join(dataDir, 'session'));
 }
+
+// When the launcher is killed (Ctrl+C, a closed terminal), Electron is not taken down with it on
+// Windows: the bench watches its launcher and stops on its own.
+const launcher = Number(process.env.HIVE_BENCH_PARENT);
+if (launcher)
+  setInterval(() => {
+    try {
+      process.kill(launcher, 0);
+    } catch {
+      console.error('O processo que iniciou o bench terminou; encerrando.');
+      if (electron) electron.app.exit(1);
+      else process.exit(1);
+    }
+  }, 2_000).unref();
 
 interface Setup {
   endpoint: ProviderEndpoint;
