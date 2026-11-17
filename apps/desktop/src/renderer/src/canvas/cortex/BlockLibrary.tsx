@@ -1,4 +1,4 @@
-import { BrainCircuit, Frame, Gauge, Plug, StickyNote, X } from 'lucide-react';
+import { BrainCircuit, Frame, Gauge, GripVertical, Plug, StickyNote, X } from 'lucide-react';
 
 /** Blocks the user can drag onto the canvas; the drop decides where they go. */
 export type BlockKind = 'note' | 'frame' | 'cortex' | 'tokens' | 'provider';
@@ -55,7 +55,7 @@ const categories: {
   },
 ];
 
-/** The block menu of the Nexus: drag a block to the canvas, or click to place it in view. */
+/** The block menu of the Workspace: drag a block to the canvas, or click to place it in view. */
 export function BlockLibrary({
   onPlace,
   onClose,
@@ -69,7 +69,10 @@ export function BlockLibrary({
   return (
     <aside className="nc-blocks" aria-label="Blocos">
       <header>
-        <strong>Blocos</strong>
+        <span>
+          <strong>Blocos</strong>
+          <small>Arraste para o canvas ou clique para adicionar</small>
+        </span>
         <button className="icon-button" aria-label="Fechar blocos" onClick={onClose}>
           <X size={14} />
         </button>
@@ -98,6 +101,7 @@ export function BlockLibrary({
                 <strong>{title}</strong>
                 <span>{description}</span>
               </span>
+              <GripVertical size={14} className="nc-block-grip" aria-hidden />
             </button>
           ))}
         </section>

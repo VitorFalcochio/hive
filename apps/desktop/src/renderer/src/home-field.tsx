@@ -92,9 +92,10 @@ function motionReduced(): boolean {
 
 /**
  * `home` is the tall band behind the greeting; `cover` is a shorter one behind a page title, such
- * as a mission's, quieter on the left where the title sits.
+ * as a mission's, quieter on the left where the title sits; `splash` fills the loading screen and
+ * opens from the centre in a wave of honey.
  */
-export function HiveField({ variant = 'home' }: { variant?: 'home' | 'cover' }) {
+export function HiveField({ variant = 'home' }: { variant?: 'home' | 'cover' | 'splash' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -108,15 +109,18 @@ export function HiveField({ variant = 'home' }: { variant?: 'home' | 'cover' }) 
     let frame = 0;
     let last = 0;
     const started = performance.now();
+    const still = motionReduced();
 
     const resize = () => {
       scale = Math.min(2, window.devicePixelRatio || 1);
       width = host.clientWidth;
       // A band across the top of the page, fading to black (see .home-field); below it, plain.
       height =
-        variant === 'cover'
-          ? 420
-          : Math.round(Math.min(820, Math.max(560, host.clientHeight * 0.85)));
+        variant === 'splash'
+          ? host.clientHeight
+          : variant === 'cover'
+            ? 420
+            : Math.round(Math.min(820, Math.max(560, host.clientHeight * 0.85)));
       canvas.width = Math.round(width * scale);
       canvas.height = Math.round(height * scale);
       canvas.style.width = `${width}px`;
@@ -132,11 +136,21 @@ export function HiveField({ variant = 'home' }: { variant?: 'home' | 'cover' }) 
       const half = honey.width / 2;
       // Quiet behind the greeting and the prompt, brighter towards the edges.
       const cx = variant === 'cover' ? Math.min(width * 0.32, 520) : width / 2;
-      const cy = variant === 'cover' ? height * 0.42 : Math.min(height * 0.32, 300);
+      const cy =
+        variant === 'splash'
+          ? height / 2
+          : variant === 'cover'
+            ? height * 0.42
+            : Math.min(height * 0.32, 300);
+      // The splash opens from the centre: a bright front of cells sweeps outwards.
+      const front = variant === 'splash' && !still ? t * 900 : Infinity;
       const reach = Math.max(420, Math.min(width, 1100) * 0.5);
       for (let r = 0, y = ROW / 2; y < height + ROW; r++, y += ROW) {
         for (let x = r % 2 ? GAP / 2 : 0; x < width + GAP; x += GAP) {
-          const value = smooth(0.46, 0.78, honeyAt(x, y, t));
+          const far = front === Infinity ? 0 : Math.hypot(x - cx, y - cy);
+          if (far > front) continue;
+          const crest = front - far < 46;
+          const value = crest ? 1 : smooth(0.46, 0.78, honeyAt(x, y, t));
           const dx = (x - cx) / reach;
           const dy = (y - cy) / (reach * 0.7);
           const mask = 0.3 + 0.7 * smooth(0.3, 1.2, Math.sqrt(dx * dx + dy * dy));
@@ -144,7 +158,7 @@ export function HiveField({ variant = 'home' }: { variant?: 'home' | 'cover' }) 
           const level = Math.round(alpha * LEVELS) / LEVELS;
           if (level <= 0) continue;
           ctx.globalAlpha = level;
-          ctx.drawImage(value > 0.92 ? glint : honey, x * scale - half, y * scale - half);
+          ctx.drawImage(crest || value > 0.92 ? glint : honey, x * scale - half, y * scale - half);
         }
       }
       // The bees.
@@ -180,19 +194,26 @@ export function HiveField({ variant = 'home' }: { variant?: 'home' | 'cover' }) 
 
     resize();
     draw(started);
+    // Resized on the next frame, not inside the observer: changing the canvas there makes the
+    // browser report a "ResizeObserver loop" error.
+    let pending = 0;
     const observer = new ResizeObserver(() => {
-      resize();
-      draw(performance.now());
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(() => {
+        resize();
+        draw(performance.now());
+      });
     });
     observer.observe(host);
-    if (!motionReduced()) frame = requestAnimationFrame(loop);
+    if (!still) frame = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(pending);
       observer.disconnect();
     };
   }, [variant]);
   return (
-    <div className={variant === 'cover' ? 'home-field cover' : 'home-field'} aria-hidden>
+    <div className={variant === 'home' ? 'home-field' : `home-field ${variant}`} aria-hidden>
       <canvas ref={canvasRef} />
     </div>
   );

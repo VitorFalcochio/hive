@@ -47,7 +47,7 @@ import { MissionCards, type SidebarMission } from './mission-cards';
 // Monaco is large; it loads the first time the code view opens.
 const CodeView = lazy(() => import('./code/CodeView'));
 import { ModalHost } from './modals';
-import { SplashScreen } from './splash';
+import { SplashScreen, useSplash } from './splash';
 import { AgentsPage } from './agents';
 import { AgentBee } from './mascot';
 import { TokenMeter } from './token-meter';
@@ -127,6 +127,7 @@ export function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [ready, setReady] = useState(false);
+  const splash = useSplash(!ready && !error);
   const noticeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const openRunId = useRef<string | null>(null);
   // Set below; the push listener reaches it to open a run asked for from the Nexus.
@@ -451,269 +452,282 @@ export function App() {
     }
   }
 
-  if (!ready && !error) return <SplashScreen />;
+  // The splash keeps its place (second child) as the app appears under it, so its animation
+  // carries on while it fades instead of starting over.
+  if (splash === 'on')
+    return (
+      <>
+        {null}
+        <SplashScreen />
+      </>
+    );
 
   return (
-    <Hive.Provider value={context}>
-      <div
-        className={`app-shell platform-${info?.platform ?? 'unknown'}${railed ? ' sidebar-railed' : ''}`}
-      >
-        <div className="titlebar">
-          <span className="titlebar-brand">
-            <Hexagon size={15} strokeWidth={2.4} /> hive
-            <button
-              className="icon-button sidebar-toggle"
-              aria-label={railed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
-              title={`${railed ? 'Expandir' : 'Recolher'} barra lateral (Ctrl+B)`}
-              onClick={() => setRailed(!railed)}
-            >
-              {railed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-            </button>
-          </span>
-          <span className="titlebar-path">
-            {activeWorkspace?.name ?? 'sem repositório'}
-            <span className="sep">/</span>
-            {page === 'mission' && detail ? detail.mission.title : viewTitles[page]}
-          </span>
-        </div>
-
-        <ProjectTabs
-          tabs={tabs}
-          activeId={activeWorkspace?.id ?? null}
-          onActivate={(workspace) => void activate(workspace)}
-          onClose={(workspace) => void closeProject(workspace)}
-          onOpen={() => void context.pickWorkspace()}
-        />
-        <aside className="sidebar">
-          <button
-            className="sidebar-section sidebar-section-toggle"
-            aria-expanded={!menuCompact}
-            title={menuCompact ? 'Expandir menu' : 'Recolher menu em ícones'}
-            onClick={() => setMenuCompact(!menuCompact)}
-          >
-            <span>Menu</span>
-            <ChevronDown size={13} className={menuCompact ? 'chevron' : 'chevron open'} />
-          </button>
-          <nav aria-label="Navegação principal" className={menuCompact ? 'compact' : undefined}>
-            {navigation.map(({ view: item, label, icon: Icon }) => (
-              <button
-                key={item}
-                className={page === item ? 'nav-item selected' : 'nav-item'}
-                aria-current={page === item ? 'page' : undefined}
-                aria-label={label}
-                title={railed || menuCompact ? label : undefined}
-                onClick={() => setView(item)}
-              >
-                <Icon size={15} /> <span className="nav-label">{label}</span>
-              </button>
-            ))}
-            {/* Not a page: it opens its own window, which stays open beside this one. */}
-            <button
-              className="nav-item"
-              aria-label="Workspace"
-              title={
-                railed || menuCompact ? 'Workspace (abre em outra janela)' : 'Abre em outra janela'
-              }
-              onClick={() => void openCanvas()}
-            >
-              <Network size={15} /> <span className="nav-label">Workspace</span>
-            </button>
-          </nav>
-
-          <div className="sidebar-section">
-            <span>Projetos</span>
-            <button
-              className="icon-button"
-              aria-label="Abrir repositório"
-              title="Abrir repositório"
-              onClick={() => void context.pickWorkspace()}
-            >
-              <FolderPlus size={14} />
-            </button>
-          </div>
-          <div className="tree">
-            {!workspaces.length && (
-              <button className="tree-empty" onClick={() => void context.pickWorkspace()}>
-                Abrir um repositório Git
-              </button>
-            )}
-            {workspaces.map((workspace) => {
-              const active = workspace.id === activeWorkspace?.id;
-              const open = !collapsedProjects.includes(workspace.id);
-              const missions = missionsByProject[workspace.id] ?? [];
-              return (
-                <div key={workspace.id} className={active ? 'tree-group active' : 'tree-group'}>
-                  {/* One row: a click opens another project with its missions shown, and on
-                      the open project it shows or hides the missions. */}
-                  <button
-                    className="tree-root"
-                    aria-expanded={open}
-                    title={
-                      railed
-                        ? workspace.name
-                        : open && active
-                          ? 'Recolher missões'
-                          : 'Abrir projeto e missões'
-                    }
-                    onClick={() => {
-                      const collapse = active && open;
-                      setCollapsedProjects((current) =>
-                        collapse
-                          ? [...current, workspace.id]
-                          : current.filter((id) => id !== workspace.id),
-                      );
-                      if (!active) void activate(workspace);
-                    }}
-                  >
-                    <ChevronDown size={13} className={open ? 'chevron open' : 'chevron'} />
-                    {active ? <FolderOpen size={14} /> : <Folder size={14} />}
-                    <span className="truncate">{workspace.name}</span>
-                    <span className="count">{missions.length}</span>
-                  </button>
-                  {open && !railed && (
-                    <div className="tree-missions">
-                      <MissionCards
-                        missions={missions}
-                        selectedId={
-                          active && page === 'mission' ? (detail?.mission.id ?? null) : null
-                        }
-                        onOpen={(id) => void openProjectMission(workspace, id)}
-                        onPin={(id, pinned) => void pinMission(id, pinned)}
-                      />
-                      {active && (
-                        <button
-                          className="tree-item add"
-                          onClick={() => setModal({ kind: 'mission' })}
-                        >
-                          <Plus size={13} /> Nova missão
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="sidebar-bottom">
-            <button
-              className={page === 'settings' ? 'nav-item selected' : 'nav-item'}
-              title={railed ? 'Configurações' : undefined}
-              onClick={() => setView('settings')}
-            >
-              <SettingsIcon size={15} /> <span className="nav-label">Configurações</span>
-            </button>
-            <button
-              className={page === 'about' ? 'nav-item selected' : 'nav-item'}
-              title={railed ? 'Sobre' : undefined}
-              onClick={() => setView('about')}
-            >
-              <Info size={15} /> <span className="nav-label">Sobre</span>
-            </button>
-          </div>
-        </aside>
-
-        <main
-          className={
-            page === 'code'
-              ? 'content code-mode'
-              : page === 'run'
-                ? 'content run-mode'
-                : page === 'overview'
-                  ? 'content home-mode'
-                  : page === 'mission'
-                    ? 'content cover-mode'
-                    : 'content'
-          }
+    <>
+      <Hive.Provider value={context}>
+        <div
+          className={`app-shell platform-${info?.platform ?? 'unknown'}${railed ? ' sidebar-railed' : ''}`}
         >
-          {page === 'overview' && <HiveField key="home" />}
-          {page === 'mission' && detail && <HiveField key="cover" variant="cover" />}
-          {approvals.length > 0 &&
-            !(page === 'mission' && approvals.some((a) => a.runId === detail?.run.id)) && (
+          <div className="titlebar">
+            <span className="titlebar-brand">
+              <Hexagon size={15} strokeWidth={2.4} /> hive
               <button
-                className="approval-banner"
-                onClick={() => void context.openRun(approvals[0]!.runId)}
+                className="icon-button sidebar-toggle"
+                aria-label={railed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
+                title={`${railed ? 'Expandir' : 'Recolher'} barra lateral (Ctrl+B)`}
+                onClick={() => setRailed(!railed)}
               >
-                <ShieldQuestion size={15} />
-                {approvals.length === 1
-                  ? `${approvals[0]!.title}: ${approvals[0]!.detail}`
-                  : `${approvals.length} comandos aguardando sua aprovação`}
-                <span className="banner-action">Responder</span>
+                {railed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
               </button>
-            )}
-          {codeVisited && (
-            <div className="code-host" hidden={page !== 'code'}>
-              <Suspense fallback={<p role="status">Carregando o editor…</p>}>
-                <CodeView />
-              </Suspense>
-            </div>
-          )}
-          <div className={page === 'run' ? 'page page-full' : 'page'} hidden={page === 'code'}>
-            {page === 'overview' && <OverviewPage />}
-            {page === 'search' && <SearchPage key={activeWorkspace?.id ?? 'none'} />}
-            {page === 'mission' && <MissionPage />}
-            {page === 'run' && <RunPage key={activeWorkspace?.id ?? 'none'} />}
-            {page === 'agents' && <AgentsPage />}
-            {page === 'providers' && <ProvidersPage />}
-            {page === 'skills' && <SkillsPage />}
-            {page === 'about' && <AboutPage />}
-            {page === 'settings' && <SettingsPage settings={settings} onSaved={refresh} />}
-            {page === 'shift' && <ShiftPage settings={settings} onSaved={refresh} />}
+            </span>
+            <span className="titlebar-path">
+              {activeWorkspace?.name ?? 'sem repositório'}
+              <span className="sep">/</span>
+              {page === 'mission' && detail ? detail.mission.title : viewTitles[page]}
+            </span>
           </div>
-        </main>
 
-        <footer className="statusbar">
-          <span>
-            <Dot tone={ready ? 'ok' : 'busy'} /> {ready ? 'Local' : 'Iniciando'}
-          </span>
-          <span>
-            {connected.length}/{providers.length} provedores
-          </span>
-          <span>
-            Queen <code>{queen?.modelId ?? 'sem modelo'}</code>
-          </span>
-          <span className="spacer" />
-          <BusyBees
-            tasks={summary?.activeTasks ?? []}
-            chats={summary?.activeChats ?? []}
-            planning={summary?.recentRuns.find((run) => run.status === 'planning') ?? null}
-            workers={workers}
-            onOpenRun={(runId) => void context.openRun(runId)}
-            onOpenTerminal={() => setView('run')}
+          <ProjectTabs
+            tabs={tabs}
+            activeId={activeWorkspace?.id ?? null}
+            onActivate={(workspace) => void activate(workspace)}
+            onClose={(workspace) => void closeProject(workspace)}
+            onOpen={() => void context.pickWorkspace()}
           />
-          {approvals.length > 0 && (
-            <span className="warn-text">{approvals.length} aprovação(ões) pendente(s)</span>
-          )}
-          {summary?.honey && <HoneyMeter honey={summary.honey} />}
-          {summary?.today && <TokenMeter usage={summary.today} />}
-          <span>
-            {workers.filter((worker) => worker.modelId).length}/{workers.length} agentes
-          </span>
-          <span>v{info?.version ?? '0.1.0'}</span>
-        </footer>
+          <aside className="sidebar">
+            <button
+              className="sidebar-section sidebar-section-toggle"
+              aria-expanded={!menuCompact}
+              title={menuCompact ? 'Expandir menu' : 'Recolher menu em ícones'}
+              onClick={() => setMenuCompact(!menuCompact)}
+            >
+              <span>Menu</span>
+              <ChevronDown size={13} className={menuCompact ? 'chevron' : 'chevron open'} />
+            </button>
+            <nav aria-label="Navegação principal" className={menuCompact ? 'compact' : undefined}>
+              {navigation.map(({ view: item, label, icon: Icon }) => (
+                <button
+                  key={item}
+                  className={page === item ? 'nav-item selected' : 'nav-item'}
+                  aria-current={page === item ? 'page' : undefined}
+                  aria-label={label}
+                  title={railed || menuCompact ? label : undefined}
+                  onClick={() => setView(item)}
+                >
+                  <Icon size={15} /> <span className="nav-label">{label}</span>
+                </button>
+              ))}
+              {/* Not a page: it opens its own window, which stays open beside this one. */}
+              <button
+                className="nav-item"
+                aria-label="Workspace"
+                title={
+                  railed || menuCompact
+                    ? 'Workspace (abre em outra janela)'
+                    : 'Abre em outra janela'
+                }
+                onClick={() => void openCanvas()}
+              >
+                <Network size={15} /> <span className="nav-label">Workspace</span>
+              </button>
+            </nav>
 
-        <div className="toasts">
-          {error && (
-            <div role="alert" className="toast error">
-              <span>{error}</span>
+            <div className="sidebar-section">
+              <span>Projetos</span>
               <button
                 className="icon-button"
-                aria-label="Fechar aviso"
-                onClick={() => setError('')}
+                aria-label="Abrir repositório"
+                title="Abrir repositório"
+                onClick={() => void context.pickWorkspace()}
               >
-                <X size={14} />
+                <FolderPlus size={14} />
               </button>
             </div>
-          )}
-          {notice && (
-            <div role="status" className="toast">
-              <span>{notice}</span>
+            <div className="tree">
+              {!workspaces.length && (
+                <button className="tree-empty" onClick={() => void context.pickWorkspace()}>
+                  Abrir um repositório Git
+                </button>
+              )}
+              {workspaces.map((workspace) => {
+                const active = workspace.id === activeWorkspace?.id;
+                const open = !collapsedProjects.includes(workspace.id);
+                const missions = missionsByProject[workspace.id] ?? [];
+                return (
+                  <div key={workspace.id} className={active ? 'tree-group active' : 'tree-group'}>
+                    {/* One row: a click opens another project with its missions shown, and on
+                      the open project it shows or hides the missions. */}
+                    <button
+                      className="tree-root"
+                      aria-expanded={open}
+                      title={
+                        railed
+                          ? workspace.name
+                          : open && active
+                            ? 'Recolher missões'
+                            : 'Abrir projeto e missões'
+                      }
+                      onClick={() => {
+                        const collapse = active && open;
+                        setCollapsedProjects((current) =>
+                          collapse
+                            ? [...current, workspace.id]
+                            : current.filter((id) => id !== workspace.id),
+                        );
+                        if (!active) void activate(workspace);
+                      }}
+                    >
+                      <ChevronDown size={13} className={open ? 'chevron open' : 'chevron'} />
+                      {active ? <FolderOpen size={14} /> : <Folder size={14} />}
+                      <span className="truncate">{workspace.name}</span>
+                      <span className="count">{missions.length}</span>
+                    </button>
+                    {open && !railed && (
+                      <div className="tree-missions">
+                        <MissionCards
+                          missions={missions}
+                          selectedId={
+                            active && page === 'mission' ? (detail?.mission.id ?? null) : null
+                          }
+                          onOpen={(id) => void openProjectMission(workspace, id)}
+                          onPin={(id, pinned) => void pinMission(id, pinned)}
+                        />
+                        {active && (
+                          <button
+                            className="tree-item add"
+                            onClick={() => setModal({ kind: 'mission' })}
+                          >
+                            <Plus size={13} /> Nova missão
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          )}
+
+            <div className="sidebar-bottom">
+              <button
+                className={page === 'settings' ? 'nav-item selected' : 'nav-item'}
+                title={railed ? 'Configurações' : undefined}
+                onClick={() => setView('settings')}
+              >
+                <SettingsIcon size={15} /> <span className="nav-label">Configurações</span>
+              </button>
+              <button
+                className={page === 'about' ? 'nav-item selected' : 'nav-item'}
+                title={railed ? 'Sobre' : undefined}
+                onClick={() => setView('about')}
+              >
+                <Info size={15} /> <span className="nav-label">Sobre</span>
+              </button>
+            </div>
+          </aside>
+
+          <main
+            className={
+              page === 'code'
+                ? 'content code-mode'
+                : page === 'run'
+                  ? 'content run-mode'
+                  : page === 'overview'
+                    ? 'content home-mode'
+                    : page === 'mission'
+                      ? 'content cover-mode'
+                      : 'content'
+            }
+          >
+            {page === 'overview' && <HiveField key="home" />}
+            {page === 'mission' && detail && <HiveField key="cover" variant="cover" />}
+            {approvals.length > 0 &&
+              !(page === 'mission' && approvals.some((a) => a.runId === detail?.run.id)) && (
+                <button
+                  className="approval-banner"
+                  onClick={() => void context.openRun(approvals[0]!.runId)}
+                >
+                  <ShieldQuestion size={15} />
+                  {approvals.length === 1
+                    ? `${approvals[0]!.title}: ${approvals[0]!.detail}`
+                    : `${approvals.length} comandos aguardando sua aprovação`}
+                  <span className="banner-action">Responder</span>
+                </button>
+              )}
+            {codeVisited && (
+              <div className="code-host" hidden={page !== 'code'}>
+                <Suspense fallback={<p role="status">Carregando o editor…</p>}>
+                  <CodeView />
+                </Suspense>
+              </div>
+            )}
+            <div className={page === 'run' ? 'page page-full' : 'page'} hidden={page === 'code'}>
+              {page === 'overview' && <OverviewPage />}
+              {page === 'search' && <SearchPage key={activeWorkspace?.id ?? 'none'} />}
+              {page === 'mission' && <MissionPage />}
+              {page === 'run' && <RunPage key={activeWorkspace?.id ?? 'none'} />}
+              {page === 'agents' && <AgentsPage />}
+              {page === 'providers' && <ProvidersPage />}
+              {page === 'skills' && <SkillsPage />}
+              {page === 'about' && <AboutPage />}
+              {page === 'settings' && <SettingsPage settings={settings} onSaved={refresh} />}
+              {page === 'shift' && <ShiftPage settings={settings} onSaved={refresh} />}
+            </div>
+          </main>
+
+          <footer className="statusbar">
+            <span>
+              <Dot tone={ready ? 'ok' : 'busy'} /> {ready ? 'Local' : 'Iniciando'}
+            </span>
+            <span>
+              {connected.length}/{providers.length} provedores
+            </span>
+            <span>
+              Queen <code>{queen?.modelId ?? 'sem modelo'}</code>
+            </span>
+            <span className="spacer" />
+            <BusyBees
+              tasks={summary?.activeTasks ?? []}
+              chats={summary?.activeChats ?? []}
+              planning={summary?.recentRuns.find((run) => run.status === 'planning') ?? null}
+              workers={workers}
+              onOpenRun={(runId) => void context.openRun(runId)}
+              onOpenTerminal={() => setView('run')}
+            />
+            {approvals.length > 0 && (
+              <span className="warn-text">{approvals.length} aprovação(ões) pendente(s)</span>
+            )}
+            {summary?.honey && <HoneyMeter honey={summary.honey} />}
+            {summary?.today && <TokenMeter usage={summary.today} />}
+            <span>
+              {workers.filter((worker) => worker.modelId).length}/{workers.length} agentes
+            </span>
+            <span>v{info?.version ?? '0.1.0'}</span>
+          </footer>
+
+          <div className="toasts">
+            {error && (
+              <div role="alert" className="toast error">
+                <span>{error}</span>
+                <button
+                  className="icon-button"
+                  aria-label="Fechar aviso"
+                  onClick={() => setError('')}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+            {notice && (
+              <div role="status" className="toast">
+                <span>{notice}</span>
+              </div>
+            )}
+          </div>
+          <ModalHost modal={modal} />
         </div>
-        <ModalHost modal={modal} />
-      </div>
-    </Hive.Provider>
+      </Hive.Provider>
+      {splash === 'leaving' && <SplashScreen leaving />}
+    </>
   );
 }
 

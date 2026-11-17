@@ -3312,44 +3312,96 @@ pre.command {
   color: var(--success);
 }
 
-/* Splash shown until the first load finishes */
+/* Splash: the home's honeycomb field opening from the centre behind the comb and the name,
+   fading over the app once it is ready. */
 .splash {
   position: fixed;
   inset: 0;
   z-index: 100;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
   padding: 16px;
-  background: var(--background);
+  background: #070605;
   animation: fade-in 0.2s ease-out;
 }
+.splash.leaving {
+  pointer-events: none;
+  animation: splash-leave 520ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes splash-leave {
+  to {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+.home-field.splash {
+  position: absolute;
+  inset: 0;
+  height: auto;
+}
+.home-field.splash canvas {
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 40%, transparent 85%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 40%, transparent 85%);
+}
+/* A dark pool behind the centre, so the name reads over the honey. */
+.splash-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(260px 200px at 50% 50%, rgb(7 6 5 / 92%), transparent 70%),
+    radial-gradient(520px 360px at 50% 50%, rgb(245 181 68 / 7%), transparent 70%);
+  pointer-events: none;
+}
+.splash-center {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
 .splash-mark {
-  color: var(--foreground);
-  animation: rise-in 0.4s ease-out both;
+  filter: drop-shadow(0 0 22px rgb(245 181 68 / 45%));
+  animation:
+    splash-pop 620ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both,
+    splash-breathe 2.4s ease-in-out 620ms infinite;
+}
+@keyframes splash-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6) rotate(-8deg);
+  }
+}
+@keyframes splash-breathe {
+  50% {
+    filter: drop-shadow(0 0 34px rgb(245 181 68 / 70%));
+    transform: scale(1.04);
+  }
 }
 .splash-title {
-  margin: 6px 0 0;
-  font-family: var(--font-mono);
-  font-size: 15px;
-  letter-spacing: 0.02em;
+  margin: 10px 0 0;
   color: var(--foreground);
+  font: 600 22px var(--font-mono);
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  text-shadow: 0 0 24px rgb(245 181 68 / 35%);
+  animation: rise-in 0.5s ease-out 0.15s both;
 }
 .splash-caption {
   margin: 0;
-  font-size: 12.5px;
   color: var(--muted-foreground);
+  font: 12px var(--font-mono);
+  animation: rise-in 0.5s ease-out 0.25s both;
 }
 .splash-track {
   position: relative;
-  width: 160px;
+  width: 180px;
   height: 2px;
-  margin-top: 14px;
+  margin-top: 12px;
   overflow: hidden;
   border-radius: 999px;
-  background: var(--border-strong);
+  background: rgb(245 181 68 / 15%);
+  animation: rise-in 0.5s ease-out 0.35s both;
 }
 .splash-bar {
   position: absolute;
@@ -3358,8 +3410,13 @@ pre.command {
   left: 0;
   width: 40%;
   border-radius: 999px;
-  background: var(--foreground);
+  background: linear-gradient(90deg, transparent, var(--warning), #ffe39a);
+  box-shadow: 0 0 10px rgb(245 181 68 / 70%);
   animation: splash-slide 1.2s ease-in-out infinite;
+}
+.splash.leaving .splash-bar {
+  width: 100%;
+  animation: none;
 }
 @keyframes splash-slide {
   from {
@@ -3370,6 +3427,13 @@ pre.command {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .splash-mark,
+  .splash.leaving {
+    animation: none;
+  }
+  .splash.leaving {
+    opacity: 0;
+  }
   .splash-bar {
     animation-duration: 3s;
   }
