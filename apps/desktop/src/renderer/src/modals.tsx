@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import {
   Check,
   CircleAlert,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import {
   providerPresets,
+  selectablePresets,
   type ConnectionTest,
   type ModelInfo,
   type ProviderConfig,
@@ -26,7 +27,8 @@ import {
 } from '@hive/core';
 import { hasAccess, useHive, usableWorkers, type MissionMode, type ModalState } from './context';
 import { buildComparisonPlan, MAX_CANDIDATES, MIN_CANDIDATES } from './comparison';
-import { Modal, Select, useTask, type SelectOption } from './ui';
+import { Modal, Select, useTask } from './ui';
+import { ProviderLogo, providerColor } from './provider-logo';
 import { taskDiffTab, useCode } from './code/store';
 import { draftKey, loadDraft, saveDraft } from './review';
 import { ReviewDiff } from './review-diff';
@@ -77,16 +79,12 @@ async function connect(provider: ProviderConfig, key: string) {
   return window.hive.invoke('provider.models', { providerId: provider.id, refresh: true });
 }
 
-const presets = Object.values(providerPresets);
-const kindOptions: SelectOption[] = [
-  ...presets.filter((item) => item.free.available),
-  ...presets.filter((item) => !item.free.available),
-].map((item) => ({
-  value: item.kind,
-  label: item.label,
-  group: item.free.available ? 'Com plano gratuito' : 'Pagos',
-  tag: item.free.available ? { label: 'Grátis', tone: 'free' } : { label: 'Pago' },
-}));
+const presets = selectablePresets;
+/** The provider choices of the add-provider modal: free plans first, then paid ones. */
+const kindGroups = [
+  { title: 'Com plano gratuito', items: presets.filter((item) => item.free.available) },
+  { title: 'Pagos', items: presets.filter((item) => !item.free.available) },
+];
 
 function ProviderModal() {
   const { closeModal, openModal, refresh, notify, workers } = useHive();
@@ -170,35 +168,79 @@ function ProviderModal() {
   return (
     <Modal
       title="Adicionar provedor"
-      description="Conectamos, testamos a chave e carregamos os modelos em um passo."
+      description="Escolha de onde vêm os modelos. Conectamos, testamos e carregamos o catálogo em um passo."
       onClose={closeModal}
+      wide
+      className="provider-modal"
     >
       <form onSubmit={submit}>
-        <label>
-          Tipo
-          <Select
-            value={kind}
-            options={kindOptions}
-            onChange={(value) => {
-              const next = value as ProviderKind;
-              setKind(next);
-              setSavedId(undefined);
-              setName(providerPresets[next].label);
-              setUrl(providerPresets[next].defaultBaseUrl);
-            }}
-          />
-        </label>
-        <div className="plan-note">
-          <p>{preset.free.summary}</p>
-          {kind !== 'openai-compatible' && (
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => void window.hive.invoke('app.openExternal', preset.keyUrl)}
+        {kindGroups.map((group) => (
+          <div key={group.title} className="provider-pick-group">
+            <div className="provider-pick-label" id={`pick-${group.title}`}>
+              {group.title}
+            </div>
+            <div
+              className="provider-pick-grid"
+              role="radiogroup"
+              aria-labelledby={`pick-${group.title}`}
             >
-              <ExternalLink size={13} /> {signIn ? 'Gerenciar uso' : 'Criar chave'}
-            </button>
-          )}
+              {group.items.map((item) => (
+                <button
+                  key={item.kind}
+                  type="button"
+                  role="radio"
+                  aria-checked={kind === item.kind}
+                  aria-label={`${item.label}, ${item.free.available ? 'Grátis' : 'Pago'}`}
+                  className={kind === item.kind ? 'provider-pick selected' : 'provider-pick'}
+                  style={{ '--brand': providerColor(item.kind) } as CSSProperties}
+                  onClick={() => {
+                    if (item.kind === kind) return;
+                    setKind(item.kind);
+                    setSavedId(undefined);
+                    setName(item.label);
+                    setUrl(item.defaultBaseUrl);
+                  }}
+                >
+                  <span className="provider-pick-logo">
+                    <ProviderLogo kind={item.kind} size={20} />
+                  </span>
+                  <span className="provider-pick-name">{item.label}</span>
+                  {kind === item.kind && (
+                    <span className="provider-pick-check" aria-hidden>
+                      <Check size={11} />
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <div
+          className="provider-detail"
+          style={{ '--brand': providerColor(kind) } as CSSProperties}
+        >
+          <div className="provider-detail-head">
+            <span className="provider-pick-logo large">
+              <ProviderLogo kind={kind} size={24} />
+            </span>
+            <div>
+              <strong>{preset.label}</strong>
+              <span className={preset.free.available ? 'provider-tag free' : 'provider-tag'}>
+                {preset.free.available ? 'Grátis' : 'Pago'}
+              </span>
+            </div>
+            {kind !== 'openai-compatible' && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => void window.hive.invoke('app.openExternal', preset.keyUrl)}
+              >
+                <ExternalLink size={13} /> {signIn ? 'Gerenciar uso' : 'Criar chave'}
+              </button>
+            )}
+          </div>
+          <p>{preset.free.summary}</p>
         </div>
         {signIn ? (
           <p className="modal-description">

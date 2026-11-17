@@ -89,9 +89,12 @@ it('abre sem credenciais, explica a preparação e abre o cadastro de provedor e
   fireEvent.click(screen.getAllByRole('button', { name: /Adicionar provedor/ })[0]!);
   const dialog = screen.getByRole('dialog', { name: 'Adicionar provedor' });
   expect(within(dialog).getByLabelText(/Chave de API/)).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole('combobox', { name: /Tipo/ }));
-  expect(screen.getByRole('option', { name: /Groq.*Grátis/ })).toBeTruthy();
-  fireEvent.click(screen.getByRole('option', { name: /Google Gemini/ }));
+  expect(
+    within(dialog)
+      .getByRole('radio', { name: /Groq.*Grátis/ })
+      .getAttribute('aria-checked'),
+  ).toBe('true');
+  fireEvent.click(within(dialog).getByRole('radio', { name: /Google Gemini/ }));
   expect(within(dialog).getByText(/modelos Flash/)).toBeTruthy();
   expect(within(dialog).getByLabelText('URL da API')).toBeTruthy();
   fireEvent.keyDown(window, { key: 'Escape' });

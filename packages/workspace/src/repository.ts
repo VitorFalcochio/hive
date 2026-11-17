@@ -1,4 +1,4 @@
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { lstat, mkdir, rm, stat, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { HiveError } from '@hive/shared';
 import { git, hiveCommitFlags } from './git';
@@ -100,6 +100,48 @@ export function taskBranchName(runId: string, taskKey: string, attempt: number):
   return `${HIVE_BRANCH_PREFIX}${runId.replace(/^run_/, '').slice(0, 8)}/${safeKey}-a${attempt}`;
 }
 
+/** Installed dependencies a checkout borrows from the project instead of reinstalling. */
+const DEPENDENCY_DIRS = ['node_modules'];
+
+/**
+ * Lets a checkout use the project's installed dependencies, linked (a junction on Windows) rather
+ * than copied, so agents and checks can run the project's lint, tests and build. Only folders the
+ * checkout's git ignores are linked, so they can never end up in a commit.
+ */
+export async function linkDependencies(repoRoot: string, checkout: string): Promise<void> {
+  for (const name of DEPENDENCY_DIRS) {
+    const source = path.join(repoRoot, name);
+    const target = path.join(checkout, name);
+    const present = await stat(source).then(
+      (info) => info.isDirectory(),
+      () => false,
+    );
+    if (!present) continue;
+    if (
+      await lstat(target).then(
+        () => true,
+        () => false,
+      )
+    )
+      continue;
+    const ignored = await git(checkout, ['check-ignore', '-q', name], { allowFailure: true });
+    if (ignored.code !== 0) continue;
+    await symlink(source, target, 'junction').catch(() => undefined);
+  }
+}
+
+/**
+ * Removes the links made by `linkDependencies` (the link only, never what it points to), before a
+ * checkout is deleted, so no recursive delete can ever walk into the project's own dependencies.
+ */
+export async function unlinkDependencies(checkout: string): Promise<void> {
+  for (const name of DEPENDENCY_DIRS) {
+    const target = path.join(checkout, name);
+    const info = await lstat(target).catch(() => null);
+    if (info?.isSymbolicLink()) await rm(target, { force: true }).catch(() => undefined);
+  }
+}
+
 /**
  * Manages worktrees for one repository under a Hive-owned directory. Only paths inside
  * `worktreeRoot` and branches under `hive/` are ever removed: the user's branches and the
@@ -131,11 +173,14 @@ export class WorktreeManager {
     await git(this.repoRoot, ['worktree', 'add', '-b', branch, target, startPoint], {
       timeoutMs: 180_000,
     });
+    // Agents verify their work with the project's own commands, which need its dependencies.
+    await linkDependencies(this.repoRoot, target);
     return target;
   }
 
   async remove(target: string, branch: string | null): Promise<void> {
     this.assertOwned(target);
+    await unlinkDependencies(target);
     await git(this.repoRoot, ['worktree', 'remove', '--force', target], { allowFailure: true });
     await rm(target, { recursive: true, force: true });
     await git(this.repoRoot, ['worktree', 'prune'], { allowFailure: true });

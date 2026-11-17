@@ -1,4 +1,5 @@
-import { app, dialog, safeStorage, shell } from 'electron';
+import { app, dialog, Notification, safeStorage, shell } from 'electron';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -22,11 +23,13 @@ import {
   type HivePush,
   type IpcChannel,
   type IpcInput,
+  type ProviderKind,
   type RunDetail,
   type WorkerRole,
   type Workspace,
 } from '@hive/core';
 import { HiveDatabase, Repositories, SCHEMA_VERSION } from '@hive/persistence';
+import { FlowEngine } from './flow-engine';
 import {
   ChatGPTPlanClient,
   ChatGPTSession,
@@ -106,6 +109,7 @@ export class DesktopService {
   readonly cortex: CortexService;
   readonly router: ModelRouter;
   readonly scheduler: Scheduler;
+  private readonly flow: FlowEngine;
   readonly autopilot: Autopilot;
   readonly terminals: TerminalManager;
   /** Set by the app shell to notify the user when the shift finishes a mission. */
@@ -156,6 +160,10 @@ export class DesktopService {
     runtime?: AgentRuntime,
   ) {
     this.repos = new Repositories(database);
+    // ChatGPT providers used to be named after the old preset label; drop the "(sua assinatura)".
+    for (const provider of this.repos.providers.list())
+      if (provider.kind === 'chatgpt' && provider.name === 'ChatGPT (sua assinatura)')
+        this.repos.providers.put({ ...provider, name: 'ChatGPT' });
     this.router = new ModelRouter({
       repos: this.repos,
       chatFor: (providerId) => this.chatClient(providerId),
@@ -241,6 +249,44 @@ export class DesktopService {
           notify(describeSwitch(change), switchData(change)),
         ),
     });
+    this.flow = new FlowEngine({
+      repos: this.repos,
+      layout: (runId) => this.canvasLayout(runId),
+      worktreeRoot: (workspaceId) => path.join(this.dataDir, 'worktrees', workspaceId),
+      // The task goes back to its agent with the note, and the run resumes for it.
+      revise: (taskId, note) => this.scheduler.revise(taskId, [], note),
+      approve: (taskId) => this.scheduler.approve(taskId),
+      start: async (runId) => {
+        const run = this.repos.runs.require(runId, 'Execução');
+        if (run.status === 'running' || run.status === 'planning') return;
+        // Without a plan, the shift plans it first and then runs it.
+        if (!this.repos.tasks.list('run_id = ?', runId).length) this.autopilot.enqueue(runId);
+        else this.scheduler.start(runId);
+      },
+      notify: (title, body) => {
+        if (Notification.isSupported()) new Notification({ title, body }).show();
+      },
+      onChange: (runId) => this.push({ kind: 'changed', entity: 'run', id: runId }),
+      log: (runId, text, level = 'info') => {
+        const run = this.repos.runs.get(runId);
+        if (!run) return;
+        const event = {
+          id: newId('event'),
+          ts: nowIso(),
+          workspaceId: run.workspaceId,
+          runId,
+          taskId: null,
+          workerId: null,
+          type: 'info' as const,
+          level,
+          message: text,
+          data: { source: 'flow' },
+        };
+        this.repos.appendEvent(event);
+        this.push({ kind: 'event', event });
+      },
+    });
+    this.flow.start();
     this.autopilot = new Autopilot({
       repos: this.repos,
       plan: async (runId) => {
@@ -455,7 +501,7 @@ export class DesktopService {
       app.start(
         command === 'hive' && argument !== 'agents' ? 'help' : 'agents',
         // A conversation opened from an agent's window on the canvas starts with that agent.
-        fromCanvas?.kind === 'chat' ? fromCanvas.workerId : undefined,
+        fromCanvas?.kind === 'chat' ? (fromCanvas.workerId ?? undefined) : undefined,
       );
       return () => {
         detachInput();
@@ -507,6 +553,7 @@ export class DesktopService {
   }
 
   dispose(): void {
+    this.flow.dispose();
     this.canvasQueen.dispose();
     this.nexusAutopilot.dispose();
     this.liveResults.dispose();
@@ -614,10 +661,17 @@ export class DesktopService {
     id: string | null = null,
   ) {
     this.push({ kind: 'changed', entity, id });
-    if (id && entity === 'run') this.liveResults.schedule(id);
+    if (id && entity === 'run') {
+      this.liveResults.schedule(id);
+      const run = this.repos.runs.get(id);
+      if (run) this.flow.onRun(run);
+    }
     if (id && entity === 'task') {
       const task = this.repos.tasks.get(id);
-      if (task) this.liveResults.schedule(task.runId);
+      if (task) {
+        this.liveResults.schedule(task.runId);
+        this.flow.onTask(task);
+      }
     }
     if (entity === 'run' || entity === 'settings') this.advanceShift();
   }
@@ -675,6 +729,7 @@ export class DesktopService {
     this.repos.runs.put({ ...run, status: 'planning', queenWorkerId, error: null });
     this.changed('run', runId);
     try {
+      const checks = await this.flow.commands(workspace.path);
       const result = await planMission({
         title: mission.title,
         objective: mission.objective,
@@ -684,6 +739,9 @@ export class DesktopService {
             name: workspace.name,
             branch: run.baseBranch,
           })) +
+          (checks.length
+            ? `\n\nFluxo do Hive: depois de cada tarefa, o Hive roda "${checks[0]}" no resultado do agente; se falhar, a tarefa volta para ele com o erro. Planeje tarefas que deixem ${checks.map((command) => `"${command}"`).join(', ')} passando e cite esses comandos nos critérios de aceite.`
+            : '') +
           '\n\n' +
           this.liveResults.context(runId) +
           (await this.queenMemory(run, queen.id, [mission.title, mission.objective].join(' - '))),
@@ -695,7 +753,9 @@ export class DesktopService {
         ),
         signal: AbortSignal.timeout(180_000),
       });
-      return this.setPlan(runId, result.plan);
+      const detail = this.setPlan(runId, result.plan);
+      void this.scaffoldFlow(runId);
+      return detail;
     } catch (error) {
       const failure = this.modelFailure(queen.modelId, error);
       this.repos.runs.put({ ...run, queenWorkerId, status: 'failed', error: failure });
@@ -703,6 +763,105 @@ export class DesktopService {
       throw error instanceof HiveError ? new HiveError(error.code, failure) : error;
     } finally {
       this.planning.delete(runId);
+    }
+  }
+
+  /**
+   * After the Queen plans, the flow around the team: each agent's work is checked with the
+   * project's own command, a failure goes back to that agent with the error, what passes waits
+   * for your approval, and the end of the mission is notified. Only on a canvas without flow
+   * blocks, so it never overrides a flow the user built.
+   */
+  private async scaffoldFlow(runId: string): Promise<void> {
+    try {
+      const layout = this.canvasLayout(runId);
+      const run = this.repos.runs.get(runId);
+      if (!run || layout.flow.length) return;
+      const workspace = this.repos.workspaces.require(run.workspaceId, 'Projeto');
+      const agents = [
+        ...new Set(
+          this.repos.tasks
+            .list('run_id = ?', runId)
+            .map((task) => task.workerId)
+            .filter((id): id is string => !!id),
+        ),
+      ];
+      if (!agents.length) return;
+      const [command] = await this.flow.commands(workspace.path);
+      // Right of where the agents sit, when the user has placed them; otherwise a fixed column.
+      const placed = Object.values(layout.pinned)
+        .flatMap((points) => Object.entries(points))
+        .filter(([id]) => id.startsWith('agent:'))
+        .map(([, point]) => point.x);
+      const x = placed.length ? Math.max(...placed) + 460 : 980;
+      const key = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+      const flow: CanvasLayout['flow'] = [];
+      const links: CanvasLayout['links'] = [];
+      const approval = {
+        id: `flow:${key()}`,
+        x: x + 340,
+        y: 60,
+        kind: 'approval' as const,
+        auto: false,
+      };
+      if (command) {
+        const check = {
+          id: `flow:${key()}`,
+          x,
+          y: 40,
+          kind: 'check' as const,
+          command,
+          retries: 1,
+        };
+        flow.push(check);
+        for (const agent of agents)
+          links.push(
+            { id: `link:${key()}`, source: `agent:${agent}`, target: check.id, port: 'out' },
+            { id: `link:${key()}`, source: check.id, target: `agent:${agent}`, port: 'fail' },
+          );
+        links.push({ id: `link:${key()}`, source: check.id, target: approval.id, port: 'pass' });
+      } else
+        for (const agent of agents)
+          links.push({
+            id: `link:${key()}`,
+            source: `agent:${agent}`,
+            target: approval.id,
+            port: 'out',
+          });
+      flow.push(approval);
+      if (run.queenWorkerId) {
+        const notify = { id: `flow:${key()}`, x: x + 340, y: 280, kind: 'notify' as const };
+        flow.push(notify);
+        links.push({
+          id: `link:${key()}`,
+          source: `agent:${run.queenWorkerId}`,
+          target: notify.id,
+          port: 'out',
+        });
+      }
+      this.repos.setValue(
+        `canvasLayout:${runId}`,
+        JSON.stringify({ ...layout, flow, links: [...layout.links, ...links] }),
+      );
+      this.push({ kind: 'changed', entity: 'layout', id: runId });
+      const event = {
+        id: newId('event'),
+        ts: nowIso(),
+        workspaceId: run.workspaceId,
+        runId,
+        taskId: null,
+        workerId: run.queenWorkerId,
+        type: 'info' as const,
+        level: 'info' as const,
+        message: command
+          ? `A Queen montou o fluxo: cada entrega passa por "${command}", falhas voltam ao agente, e o que passar espera a sua aprovação.`
+          : 'A Queen montou o fluxo: cada entrega espera a sua aprovação.',
+        data: { source: 'flow' },
+      };
+      this.repos.appendEvent(event);
+      this.push({ kind: 'event', event });
+    } catch {
+      // The flow is a help, never a reason for planning to fail.
     }
   }
 
@@ -1660,7 +1819,9 @@ export class DesktopService {
       }
       case 'canvas.autopilot.apply': {
         const { runId, planId, start } = parse(channel);
-        return this.nexusAutopilot.apply(runId, planId, start);
+        const applied = await this.nexusAutopilot.apply(runId, planId, start);
+        await this.scaffoldFlow(runId);
+        return applied;
       }
       case 'canvas.autopilot.recovery.apply': {
         const { runId, recoveryId } = parse(channel);
@@ -1686,6 +1847,7 @@ export class DesktopService {
           queue: this.autopilot.queue(),
           terminals: this.canvasTerminalsOf(runId),
           recoveries: this.nexusAutopilot.recoveries(runId),
+          flow: this.flow.state(runId),
         });
       }
       case 'usage.today': {
@@ -1727,6 +1889,21 @@ export class DesktopService {
         const note = this.repos.saveMissionNote(missionId, text, revision);
         this.push({ kind: 'changed', entity: 'missionNote', id: missionId });
         return note;
+      }
+      case 'flow.commands': {
+        const run = this.repos.runs.require(parse(channel), 'Execução');
+        const workspace = this.repos.workspaces.require(run.workspaceId, 'Projeto');
+        return this.flow.commands(workspace.path);
+      }
+      case 'flow.approve': {
+        const { runId, blockId } = parse(channel);
+        this.repos.runs.require(runId, 'Execução');
+        return this.flow.approveWaiting(runId, blockId);
+      }
+      case 'flow.trigger': {
+        const { runId, blockId } = parse(channel);
+        this.repos.runs.require(runId, 'Execução');
+        return this.flow.trigger(runId, blockId);
       }
       case 'canvas.layout.save': {
         const { runId, layout } = parse(channel);
@@ -1896,6 +2073,37 @@ export class DesktopService {
   ): Promise<CanvasTerminal> {
     const run = this.repos.runs.require(value.runId, 'Execução');
     const workspace = this.repos.workspaces.require(run.workspaceId, 'Projeto');
+    const size = value.cols && value.rows ? { cols: value.cols, rows: value.rows } : undefined;
+    if (value.blockId) {
+      // A Terminal block: the project folder, with a shell or Claude Code. Claude Code runs
+      // under the user's own sign-in, and only the user types into it.
+      if (value.kind === 'chat')
+        throw new HiveError('VALIDATION', 'Conversas com agentes abrem na janela do agente.');
+      if (value.kind === 'claude' && !(await commandExists('claude')))
+        throw new HiveError(
+          'VALIDATION',
+          'O Claude Code não está instalado. Instale com "npm install -g @anthropic-ai/claude-code", rode "claude" uma vez para entrar e abra de novo.',
+        );
+      const session = await this.terminals.start(
+        workspace.id,
+        workspace.path,
+        value.kind === 'claude' ? 'claude' : '',
+        '.',
+        size,
+      );
+      const entry = {
+        runId: run.id,
+        workerId: null,
+        blockId: value.blockId,
+        kind: value.kind,
+        taskId: null,
+      };
+      this.canvasTerminals.set(session.id, entry);
+      return { session, ...entry };
+    }
+    if (!value.workerId) throw new HiveError('VALIDATION', 'Escolha o agente do terminal.');
+    if (value.kind === 'claude')
+      throw new HiveError('VALIDATION', 'O Claude Code abre num bloco Terminal.');
     const worker = this.repos.workers.require(value.workerId, 'Agente');
     if (value.kind === 'chat' && (!worker.providerId || !worker.modelId))
       throw new HiveError('VALIDATION', `${worker.name} ainda não tem provedor e modelo.`);
@@ -1915,16 +2123,17 @@ export class DesktopService {
       inWorktree?.worktreePath ?? workspace.path,
       value.kind === 'chat' ? 'agents' : '',
       '.',
-      value.cols && value.rows ? { cols: value.cols, rows: value.rows } : undefined,
+      size,
     );
     const entry = {
       runId: run.id,
       workerId: worker.id,
+      blockId: null,
       kind: value.kind,
       taskId: inWorktree?.id ?? null,
     };
     this.canvasTerminals.set(session.id, entry);
-    return { session, workerId: entry.workerId, kind: entry.kind, taskId: entry.taskId };
+    return { session, ...entry };
   }
 
   private canvasTerminalsOf(runId: string): CanvasTerminal[] {
@@ -1936,7 +2145,13 @@ export class DesktopService {
         continue;
       }
       if (entry.runId === runId)
-        result.push({ session, workerId: entry.workerId, kind: entry.kind, taskId: entry.taskId });
+        result.push({
+          session,
+          workerId: entry.workerId,
+          blockId: entry.blockId,
+          kind: entry.kind,
+          taskId: entry.taskId,
+        });
     }
     return result;
   }
@@ -2065,11 +2280,26 @@ export class DesktopService {
   private missionList(workspaceId: string | null) {
     if (!workspaceId) return [];
     const pinned = new Set(this.pinnedMissionIds());
-    return this.repos.missions.list('workspace_id = ?', workspaceId).map((mission) => ({
-      ...mission,
-      lastRunStatus: this.repos.runs.list('mission_id = ?', mission.id)[0]?.status ?? null,
-      pinned: pinned.has(mission.id),
-    }));
+    const workers = new Map(this.repos.workers.list().map((worker) => [worker.id, worker]));
+    const kinds = new Map(
+      this.repos.providers.list().map((provider) => [provider.id, provider.kind]),
+    );
+    return this.repos.missions.list('workspace_id = ?', workspaceId).map((mission) => {
+      const run = this.repos.runs.list('mission_id = ?', mission.id)[0];
+      // Which providers do the work: those of the agents on the tasks, most-used first.
+      const counts = new Map<ProviderKind, number>();
+      for (const task of run ? this.repos.tasks.list('run_id = ?', run.id) : []) {
+        const providerId = task.workerId ? workers.get(task.workerId)?.providerId : null;
+        const kind = providerId ? kinds.get(providerId) : undefined;
+        if (kind) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+      }
+      return {
+        ...mission,
+        lastRunStatus: run?.status ?? null,
+        pinned: pinned.has(mission.id),
+        providerKinds: [...counts].sort((a, b) => b[1] - a[1]).map(([kind]) => kind),
+      };
+    });
   }
 
   /** Pinned missions are kept as ids in settings; ids of deleted missions are ignored. */
@@ -2107,4 +2337,16 @@ function switchData(change: RouteSwitch): Record<string, unknown> {
     reason: change.reason,
     restored: change.restored,
   };
+}
+
+/** Whether a command is on the PATH (`where` on Windows, `which` elsewhere). */
+function commandExists(name: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(
+      process.platform === 'win32' ? 'where' : 'which',
+      [name],
+      { timeout: 5_000, windowsHide: true },
+      (error) => resolve(!error),
+    );
+  });
 }

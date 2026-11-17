@@ -60,6 +60,7 @@ export function canvasSnapshot(
     queue: string[];
     terminals: CanvasTerminal[];
     recoveries?: CanvasSnapshot['recoveries'];
+    flow?: CanvasSnapshot['flow'];
   },
 ): CanvasSnapshot {
   const { run, tasks } = detail;
@@ -92,6 +93,7 @@ export function canvasSnapshot(
     planning: state.planning || run.status === 'planning',
     queuePosition: position < 0 ? null : position,
     terminals: state.terminals,
+    flow: state.flow ?? {},
     at: nowIso(),
   };
 }

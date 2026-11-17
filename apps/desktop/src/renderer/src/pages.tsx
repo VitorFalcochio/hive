@@ -18,6 +18,7 @@ import { beeColors, providerPresets, type ProviderConfig } from '@hive/core';
 import { hasAccess, useHive, type MissionMode } from './context';
 import { HoneyJar } from './honey';
 import { Mascot } from './mascot';
+import { ProviderLogo, providerColor } from './provider-logo';
 import { Dot, Empty, PageHeader, Select, runTone, statusLabels, type SelectOption } from './ui';
 
 const greetingFor = (hour: number) =>
@@ -435,7 +436,14 @@ export function ProvidersPage() {
                 : 'idle';
             return (
               <div className="row static" key={provider.id}>
-                <Dot tone={testing === provider.id ? 'busy' : tone} />
+                <span
+                  className="provider-tile"
+                  style={{ '--brand': providerColor(provider.kind) } as CSSProperties}
+                  title={providerPresets[provider.kind].label}
+                >
+                  <ProviderLogo kind={provider.kind} size={20} />
+                  <Dot tone={testing === provider.id ? 'busy' : tone} />
+                </span>
                 <div className="row-main">
                   <span className="row-title">{provider.name}</span>
                   <small>
@@ -492,8 +500,8 @@ export function ProvidersPage() {
               </button>
             }
           >
-            Nenhum provedor ainda. NVIDIA, OpenAI, Groq, DeepSeek, OpenRouter, sua assinatura do
-            ChatGPT ou um servidor local.
+            Nenhum provedor ainda. Sua assinatura do ChatGPT, NVIDIA, Groq, DeepSeek, OpenRouter ou
+            um servidor local.
           </Empty>
         </section>
       )}

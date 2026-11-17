@@ -8,6 +8,9 @@ export type Note = CanvasLayout['notes'][number];
 export type Frame = CanvasLayout['frames'][number];
 export type Meter = CanvasLayout['meters'][number];
 export type ProviderBlock = CanvasLayout['providers'][number];
+export type TerminalBlock = CanvasLayout['terminals'][number];
+export type FlowBlock = CanvasLayout['flow'][number];
+export type FlowLink = CanvasLayout['links'][number];
 
 /** Changes are written this long after the last one, and right away when the window closes. */
 const SAVE_MS = 400;
@@ -36,6 +39,11 @@ export interface LayoutApi {
   updateFrame: (id: string, patch: Partial<Frame>) => void;
   addMeter: (meter: Meter) => void;
   addProviderBlock: (block: ProviderBlock) => void;
+  addTerminalBlock: (block: TerminalBlock) => void;
+  addFlowBlock: (block: FlowBlock) => void;
+  updateFlowBlock: (id: string, patch: Partial<FlowBlock>) => void;
+  addLink: (link: Omit<FlowLink, 'id'>) => void;
+  removeLinks: (ids: string[]) => void;
   updateProviderBlock: (id: string, patch: Partial<ProviderBlock>) => void;
   /** Removes notes, frames and meters (and their sizes); other ids are ignored. */
   remove: (ids: string[]) => void;
@@ -158,8 +166,16 @@ export function useLayout(runId: string): LayoutApi {
           const providers = current.providers.map((block) =>
             positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
           );
+          const terminals = current.terminals.map((block) =>
+            positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
+          );
+          const flow = current.flow.map((block) =>
+            positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
+          );
           const own = new Set(
-            [...notes, ...frames, ...meters, ...providers].map((item) => item.id),
+            [...notes, ...frames, ...meters, ...providers, ...terminals, ...flow].map(
+              (item) => item.id,
+            ),
           );
           const pinned = { ...current.pinned[mode] };
           for (const [id, point] of Object.entries(positions))
@@ -170,6 +186,8 @@ export function useLayout(runId: string): LayoutApi {
             frames,
             meters,
             providers,
+            terminals,
+            flow,
             pinned: { ...current.pinned, [mode]: pinned },
           };
         }),
@@ -230,6 +248,29 @@ export function useLayout(runId: string): LayoutApi {
         change((current) => ({ ...current, meters: [...current.meters, meter] })),
       addProviderBlock: (block) =>
         change((current) => ({ ...current, providers: [...current.providers, block] })),
+      addTerminalBlock: (block) =>
+        change((current) => ({ ...current, terminals: [...current.terminals, block] })),
+      addFlowBlock: (block) =>
+        change((current) => ({ ...current, flow: [...current.flow, block] })),
+      updateFlowBlock: (id, patch) =>
+        change((current) => ({
+          ...current,
+          flow: current.flow.map((block) => (block.id === id ? { ...block, ...patch } : block)),
+        })),
+      addLink: (link) =>
+        change((current) =>
+          current.links.some(
+            (item) =>
+              item.source === link.source && item.target === link.target && item.port === link.port,
+          )
+            ? current
+            : { ...current, links: [...current.links, { ...link, id: localId('link') }] },
+        ),
+      removeLinks: (ids) =>
+        change((current) => ({
+          ...current,
+          links: current.links.filter((link) => !ids.includes(link.id)),
+        })),
       updateProviderBlock: (id, patch) =>
         change((current) => ({
           ...current,
@@ -244,7 +285,9 @@ export function useLayout(runId: string): LayoutApi {
             !current.notes.some((n) => gone.has(n.id)) &&
             !current.frames.some((f) => gone.has(f.id)) &&
             !current.meters.some((m) => gone.has(m.id)) &&
-            !current.providers.some((p) => gone.has(p.id))
+            !current.providers.some((p) => gone.has(p.id)) &&
+            !current.terminals.some((t) => gone.has(t.id)) &&
+            !current.flow.some((f) => gone.has(f.id))
           )
             return current;
           const sizes = { ...current.sizes };
@@ -256,6 +299,10 @@ export function useLayout(runId: string): LayoutApi {
             frames: current.frames.filter((frame) => !gone.has(frame.id)),
             meters: current.meters.filter((meter) => !gone.has(meter.id)),
             providers: current.providers.filter((block) => !gone.has(block.id)),
+            terminals: current.terminals.filter((block) => !gone.has(block.id)),
+            flow: current.flow.filter((block) => !gone.has(block.id)),
+            // A line goes with either end.
+            links: current.links.filter((link) => !gone.has(link.source) && !gone.has(link.target)),
           };
         }),
     }),
@@ -266,5 +313,6 @@ export function useLayout(runId: string): LayoutApi {
 const round = (point: Point): Point => ({ x: Math.round(point.x), y: Math.round(point.y) });
 
 /** A short id for notes, frames and meters; they live only in the layout. */
-export const localId = (prefix: 'note' | 'frame' | 'tokens' | 'provider') =>
-  `${prefix}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+export const localId = (
+  prefix: 'note' | 'frame' | 'tokens' | 'provider' | 'terminal' | 'flow' | 'link',
+) => `${prefix}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;

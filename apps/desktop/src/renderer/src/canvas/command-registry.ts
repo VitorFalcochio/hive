@@ -1,6 +1,6 @@
 import type { CanvasQueenRequest, CanvasSnapshot } from '@hive/core';
 
-export type CommandCategory = 'Criar' | 'Cortex' | 'Workspace' | 'Execução' | 'Queen AI';
+export type CommandCategory = 'Criar' | 'Fluxo' | 'Cortex' | 'Workspace' | 'Execução' | 'Queen AI';
 export type CommandIcon =
   | 'agent'
   | 'task'
@@ -17,7 +17,13 @@ export type CommandIcon =
   | 'pin'
   | 'cortex'
   | 'tokens'
-  | 'provider';
+  | 'provider'
+  | 'terminal'
+  | 'claude'
+  | 'schedule'
+  | 'check'
+  | 'approval'
+  | 'notify';
 export type PaletteOperation =
   | 'new-mission'
   | 'new-agent'
@@ -41,6 +47,12 @@ export type PaletteOperation =
   | 'new-cortex'
   | 'new-tokens'
   | 'new-provider'
+  | 'new-terminal'
+  | 'new-claude'
+  | 'new-schedule'
+  | 'new-check'
+  | 'new-approval'
+  | 'new-notify'
   | 'blocks';
 export interface CommandContext {
   snapshot: CanvasSnapshot | null;
@@ -74,6 +86,7 @@ const normalize = (value: string) =>
     .toLocaleLowerCase('pt-BR');
 export const commandCategories: CommandCategory[] = [
   'Criar',
+  'Fluxo',
   'Cortex',
   'Workspace',
   'Execução',
@@ -245,6 +258,60 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
     'tokens',
     'new-tokens',
     ['criar', 'bloco', 'tokens', 'uso', 'consumo', 'orçamento', 'limite', 'monitoramento'],
+  );
+  command(
+    'create.schedule',
+    'Agendado',
+    'Bloco de fluxo: inicia a missão num horário e dias da semana. Ligue até a Queen.',
+    'Fluxo',
+    'schedule',
+    'new-schedule',
+    ['criar', 'bloco', 'fluxo', 'agendar', 'agendado', 'horário', 'cron', 'gatilho', 'trigger'],
+  );
+  command(
+    'create.check',
+    'Verificação',
+    'Bloco de fluxo: roda testes, lint ou build no que o agente entregou, com saídas passou e falhou.',
+    'Fluxo',
+    'check',
+    'new-check',
+    ['criar', 'bloco', 'fluxo', 'verificação', 'teste', 'test', 'lint', 'build', 'ci'],
+  );
+  command(
+    'create.approval',
+    'Aprovação',
+    'Bloco de fluxo: segura a entrega até você aprovar, ou aplica sozinha.',
+    'Fluxo',
+    'approval',
+    'new-approval',
+    ['criar', 'bloco', 'fluxo', 'aprovação', 'aprovar', 'aplicar', 'merge', 'revisão'],
+  );
+  command(
+    'create.notify',
+    'Notificação',
+    'Bloco de fluxo: avisa no Windows quando algo chega nele.',
+    'Fluxo',
+    'notify',
+    'new-notify',
+    ['criar', 'bloco', 'fluxo', 'notificação', 'avisar', 'alerta', 'aviso'],
+  );
+  command(
+    'create.terminal',
+    'Terminal',
+    'Bloco com um terminal de verdade na pasta do projeto.',
+    'Criar',
+    'terminal',
+    'new-terminal',
+    ['criar', 'bloco', 'terminal', 'shell', 'console', 'comando', 'powershell', 'cmd'],
+  );
+  command(
+    'create.claude',
+    'Claude Code',
+    'Bloco Terminal com o Claude Code, usando a sua conta, no mesmo projeto da equipe.',
+    'Criar',
+    'claude',
+    'new-claude',
+    ['criar', 'bloco', 'claude', 'claude code', 'anthropic', 'terminal', 'ia'],
   );
   command(
     'blocks.open',

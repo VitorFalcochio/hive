@@ -31,6 +31,7 @@ import { applyCandidate, discardCandidates, isCandidate, summarizeCandidate } fr
 import { useShift } from './shift';
 import { HoneyJar } from './honey';
 import { AgentBee, SoldierBee } from './mascot';
+import { ProviderBadge } from './provider-logo';
 import { Markdown } from './markdown';
 
 export const taskLabels: Record<TaskStatus, string> = {
@@ -383,9 +384,10 @@ function TaskCard({
   soldiers: SoldierRole[];
   onChange: () => Promise<void>;
 }) {
-  const { workers, openModal } = useHive();
+  const { workers, providers, openModal } = useHive();
   const action = useTask();
   const worker = workers.find((item) => item.id === task.workerId);
+  const provider = providers.find((item) => item.id === worker?.providerId);
   const live = task.status === 'running' || task.status === 'waiting_approval';
   const out = live ? soldiers : [];
   const call = (work: () => Promise<unknown>) =>
@@ -443,6 +445,16 @@ function TaskCard({
           </span>
         )}
         {worker?.name ?? 'Agente automático'}
+        {provider && (
+          <span className={live ? 'task-provider live' : 'task-provider'}>
+            <ProviderBadge
+              kind={provider.kind}
+              live={live}
+              title={`${provider.name}${live ? ' · executando' : ''}`}
+            />
+            {provider.name}
+          </span>
+        )}
         {worker && out.length > 0 && (
           <span
             className="task-squad"

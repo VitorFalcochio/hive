@@ -1,12 +1,43 @@
-import { BrainCircuit, Frame, Gauge, GripVertical, Plug, StickyNote, X } from 'lucide-react';
+import type { ComponentType } from 'react';
+import {
+  Bell,
+  BrainCircuit,
+  CalendarClock,
+  FlaskConical,
+  Stamp,
+  Frame,
+  Gauge,
+  GripVertical,
+  Plug,
+  SquareTerminal,
+  StickyNote,
+  X,
+} from 'lucide-react';
+import { ClaudeLogo } from '../../provider-logo';
 
 /** Blocks the user can drag onto the canvas; the drop decides where they go. */
-export type BlockKind = 'note' | 'frame' | 'cortex' | 'tokens' | 'provider';
+export type BlockKind =
+  | 'note'
+  | 'frame'
+  | 'cortex'
+  | 'tokens'
+  | 'provider'
+  | 'terminal'
+  | 'claude'
+  | 'schedule'
+  | 'check'
+  | 'approval'
+  | 'notify';
 export const BLOCK_MIME = 'application/x-hive-block';
 
 const categories: {
   title: string;
-  blocks: { kind: BlockKind; title: string; description: string; icon: typeof StickyNote }[];
+  blocks: {
+    kind: BlockKind;
+    title: string;
+    description: string;
+    icon: ComponentType<{ size?: number }>;
+  }[];
 }[] = [
   {
     title: 'Anotações',
@@ -21,6 +52,35 @@ const categories: {
     ],
   },
   {
+    title: 'Fluxo',
+    blocks: [
+      {
+        kind: 'schedule',
+        title: 'Agendado',
+        description: 'Inicia a missão num horário. Ligue até a Queen.',
+        icon: CalendarClock,
+      },
+      {
+        kind: 'check',
+        title: 'Verificação',
+        description: 'Roda testes, lint ou build no que o agente entregou: passou ou falhou.',
+        icon: FlaskConical,
+      },
+      {
+        kind: 'approval',
+        title: 'Aprovação',
+        description: 'Segura a entrega até você aprovar, ou aplica sozinha.',
+        icon: Stamp,
+      },
+      {
+        kind: 'notify',
+        title: 'Notificação',
+        description: 'Avisa no Windows quando algo chega aqui.',
+        icon: Bell,
+      },
+    ],
+  },
+  {
     title: 'Provedores',
     blocks: [
       {
@@ -28,6 +88,23 @@ const categories: {
         title: 'Provedor',
         description: 'Escolha ou conecte um provedor e ligue-o a um agente.',
         icon: Plug,
+      },
+    ],
+  },
+  {
+    title: 'Terminais',
+    blocks: [
+      {
+        kind: 'terminal',
+        title: 'Terminal',
+        description: 'Um terminal de verdade na pasta do projeto.',
+        icon: SquareTerminal,
+      },
+      {
+        kind: 'claude',
+        title: 'Claude Code',
+        description: 'O Claude Code com a sua conta, trabalhando no mesmo projeto.',
+        icon: ClaudeLogo,
       },
     ],
   },

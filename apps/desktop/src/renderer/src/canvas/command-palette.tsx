@@ -15,7 +15,14 @@ import {
   Terminal,
   Users,
   ZoomIn,
+  SquareTerminal,
+  Bell,
+  CalendarClock,
+  FlaskConical,
+  Stamp,
 } from 'lucide-react';
+import type { ComponentType } from 'react';
+import { ClaudeLogo } from '../provider-logo';
 import {
   CommandRegistry,
   ownsKeyboard,
@@ -25,7 +32,7 @@ import {
   type CommandIcon,
 } from './command-registry';
 
-const icons: Record<CommandIcon, typeof Search> = {
+const icons: Record<CommandIcon, ComponentType<{ size?: number }>> = {
   agent: Users,
   task: CheckSquare,
   note: StickyNote,
@@ -42,6 +49,12 @@ const icons: Record<CommandIcon, typeof Search> = {
   cortex: BrainCircuit,
   tokens: Gauge,
   provider: Plug,
+  terminal: SquareTerminal,
+  claude: ClaudeLogo,
+  schedule: CalendarClock,
+  check: FlaskConical,
+  approval: Stamp,
+  notify: Bell,
 };
 
 export function CommandPalette({

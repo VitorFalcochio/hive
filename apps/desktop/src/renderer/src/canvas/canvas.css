@@ -3283,19 +3283,32 @@ button.nc-cortex-open:hover {
   padding: 0 12px 0 14px;
   border-bottom: 1px solid rgb(245 181 68 / 14%);
 }
+/* The provider's own mark, on a dark tile lit in its brand colour. */
 .nc-provider-icon {
+  --brand: #f5b544;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
-  border-radius: 9px;
-  background: linear-gradient(145deg, rgb(245 181 68 / 26%), rgb(245 181 68 / 6%));
-  border: 1px solid rgb(245 181 68 / 35%);
-  box-shadow: 0 0 18px rgb(245 181 68 / 18%);
+  border: 1px solid color-mix(in srgb, var(--brand) 38%, transparent);
+  border-radius: 10px;
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, var(--brand) 22%, transparent),
+      transparent 70%
+    ),
+    #0b0b0c;
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--brand) 20%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 6%);
 }
-.nc-provider-icon svg {
+.nc-provider-icon svg.honey-comb {
   image-rendering: pixelated;
+}
+.nc-provider-icon svg.provider-logo {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--brand) 45%, transparent));
 }
 .nc-provider-title {
   display: grid;
@@ -3311,6 +3324,105 @@ button.nc-cortex-open:hover {
 .nc-provider-title span {
   font-size: 11px;
   color: var(--muted-foreground);
+}
+/* Folded provider: a square tile with the brand mark, a status dot and how many agents use it. */
+.nc-node.nc-provider-chip {
+  --brand: #f5b544;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+  border-color: color-mix(in srgb, var(--brand) 40%, transparent);
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, var(--brand) 20%, transparent),
+      transparent 70%
+    ),
+    #0b0b0c;
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--brand) 16%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 6%);
+  animation: none;
+}
+.nc-node.nc-provider-chip:hover {
+  border-color: color-mix(in srgb, var(--brand) 70%, transparent);
+}
+.nc-node.nc-provider-chip.selected {
+  border-color: color-mix(in srgb, var(--brand) 85%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent),
+    0 0 28px color-mix(in srgb, var(--brand) 22%, transparent);
+}
+.nc-provider-chip-button {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.nc-provider-chip-button:hover {
+  background: rgb(255 255 255 / 3%);
+}
+.nc-provider-chip-button svg {
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand) 45%, transparent));
+  transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+.nc-provider-chip-button:hover svg {
+  transform: scale(1.08);
+}
+.nc-provider-chip-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #0b0b0c;
+  border-radius: 50%;
+  background: var(--success);
+  pointer-events: none;
+}
+.nc-provider-chip-dot.tone-failed {
+  background: var(--danger);
+}
+.nc-provider-chip-dot.tone-pending {
+  background: var(--subtle-foreground);
+}
+.nc-provider-chip-count {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent);
+  border-radius: 999px;
+  background: #141414;
+  color: var(--foreground);
+  font: 600 10.5px/18px var(--font-mono);
+  text-align: center;
+  pointer-events: none;
+}
+.nc-provider-fold {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.nc-provider-fold:hover {
+  border-color: var(--border-strong);
+  background: rgb(255 255 255 / 6%);
+  color: var(--foreground);
 }
 .nc-provider-pill {
   flex-shrink: 0;
@@ -3477,4 +3589,456 @@ button.nc-cortex-open:hover {
 .nc-edge.kind-provider.highlight .react-flow__edge-path {
   stroke-opacity: 1;
   stroke-width: 2.5;
+}
+
+/* Terminal block: a real terminal on the canvas, dragged by its title bar. The Claude Code one
+   wears Claude's colour. */
+.nc-node.nc-term-block {
+  --term: #8a8f98;
+  display: flex;
+  flex-direction: column;
+  border-color: color-mix(in srgb, var(--term) 30%, transparent);
+  background: #0b0c0d;
+  box-shadow:
+    0 18px 48px rgb(0 0 0 / 45%),
+    inset 0 1px 0 rgb(255 255 255 / 5%);
+  animation: none;
+}
+.nc-node.nc-term-block.kind-claude {
+  --term: #d97757;
+}
+.nc-node.nc-term-block.running {
+  border-color: color-mix(in srgb, var(--term) 50%, transparent);
+}
+.nc-node.nc-term-block.selected {
+  border-color: color-mix(in srgb, var(--term) 80%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--term) 14%, transparent),
+    0 18px 48px rgb(0 0 0 / 45%);
+}
+.nc-term-block-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(
+      120% 140% at 0% 0%,
+      color-mix(in srgb, var(--term) 12%, transparent),
+      transparent 60%
+    ),
+    #0e0f11;
+  cursor: grab;
+}
+.nc-term-block-head:active {
+  cursor: grabbing;
+}
+.nc-term-block-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--term) 35%, transparent);
+  border-radius: 8px;
+  background: #0b0b0c;
+  color: var(--term);
+}
+.nc-term-block-title {
+  display: grid;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+}
+.nc-term-block-title strong {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.nc-term-block-title span {
+  color: var(--subtle-foreground);
+  font: 10.5px var(--font-mono);
+}
+.nc-node.nc-term-block.running .nc-term-block-title span::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  vertical-align: 1px;
+}
+.nc-term-block-head button.nc-term-block-button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.nc-term-block-head button.nc-term-block-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: rgb(255 255 255 / 6%);
+  color: var(--foreground);
+}
+.nc-term-block-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  cursor: text;
+}
+.nc-term-block-body .xterm-host {
+  width: 100%;
+  height: 100%;
+}
+.nc-term-block-empty {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 20px;
+  text-align: center;
+  cursor: default;
+}
+.nc-term-block-mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border: 1px solid color-mix(in srgb, var(--term) 35%, transparent);
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, var(--term) 20%, transparent),
+      transparent 70%
+    ),
+    #0b0b0c;
+  color: var(--term);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--term) 18%, transparent);
+}
+.nc-term-block-empty p {
+  max-width: 340px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.nc-term-block-empty button {
+  height: 32px;
+}
+.nc-term-block.kind-claude .nc-term-block-empty button {
+  border-color: #d97757;
+  background: #d97757;
+  color: #1a0f0a;
+}
+.nc-term-block.kind-claude .nc-term-block-empty button:hover:not(:disabled) {
+  border-color: #e58a6c;
+  background: #e58a6c;
+}
+.nc-term-block-error {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid rgb(248 113 133 / 25%);
+  background: rgb(248 113 133 / 8%);
+  color: #f87185;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+/* The block library and palette show Claude's mark in its own colour. */
+.nc-block.kind-terminal {
+  --block: #8a8f98;
+}
+.nc-block.kind-claude {
+  --block: #d97757;
+}
+
+/* ---------------------------------------------------------------- flow blocks (n8n style) */
+.nc-node.nc-flow {
+  --flow: #8a8f98;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  border-color: color-mix(in srgb, var(--flow) 32%, transparent);
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      120% 70% at 0% 0%,
+      color-mix(in srgb, var(--flow) 10%, transparent),
+      transparent 60%
+    ),
+    #0d0e10;
+  box-shadow:
+    0 14px 36px rgb(0 0 0 / 40%),
+    inset 0 1px 0 rgb(255 255 255 / 5%);
+  animation: none;
+}
+.nc-node.nc-flow:hover {
+  border-color: color-mix(in srgb, var(--flow) 55%, transparent);
+}
+.nc-node.nc-flow.selected {
+  border-color: color-mix(in srgb, var(--flow) 85%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--flow) 16%, transparent),
+    0 14px 36px rgb(0 0 0 / 40%);
+}
+.nc-node.nc-flow.state-running {
+  animation: nc-flow-pulse 1.6s ease-in-out infinite;
+}
+@keyframes nc-flow-pulse {
+  50% {
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--flow) 18%, transparent),
+      0 0 28px color-mix(in srgb, var(--flow) 30%, transparent);
+  }
+}
+/* Ports are always visible: bigger dots in the block's colour, like n8n. */
+.nc-flow .react-flow__handle,
+.nc-flow .react-flow__handle.connectable {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #0d0e10;
+  border-radius: 50%;
+  background: var(--flow);
+  opacity: 1;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--flow) 60%, transparent);
+}
+.nc-flow .react-flow__handle.pass {
+  background: #4cd6a0;
+  box-shadow: 0 0 0 1px rgb(76 214 160 / 60%);
+}
+.nc-flow .react-flow__handle.fail {
+  background: #f87185;
+  box-shadow: 0 0 0 1px rgb(248 113 133 / 60%);
+}
+.nc-flow-port {
+  position: absolute;
+  right: 12px;
+  transform: translateY(-50%);
+  padding: 1px 6px;
+  border-radius: 999px;
+  font: 600 9.5px/1.4 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.nc-flow-port.pass {
+  background: rgb(76 214 160 / 10%);
+  color: #4cd6a0;
+}
+.nc-flow-port.fail {
+  background: rgb(248 113 133 / 10%);
+  color: #f87185;
+}
+.nc-flow-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 12px 8px;
+}
+.nc-flow-head strong {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+}
+.nc-flow-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--flow) 38%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--flow) 12%, #0b0b0c);
+  color: var(--flow);
+}
+.nc-flow-body {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 8px;
+  padding: 0 12px 10px;
+  cursor: default;
+}
+.nc-flow.kind-check .nc-flow-body {
+  padding-right: 72px;
+}
+.nc-flow-field {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: var(--subtle-foreground);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.nc-flow-field.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nc-flow-field input,
+.nc-flow-field input:hover,
+.nc-flow-field input:focus {
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  font: 12px var(--font-mono);
+  color-scheme: dark;
+}
+.nc-flow-days {
+  display: flex;
+  gap: 3px;
+}
+.nc-flow-days button {
+  flex: 1;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--subtle-foreground);
+  font: 600 10px var(--font-mono);
+}
+.nc-flow-days button.on {
+  border-color: color-mix(in srgb, var(--flow) 50%, transparent);
+  background: color-mix(in srgb, var(--flow) 14%, transparent);
+  color: var(--flow);
+}
+button.nc-flow-action {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--flow) 40%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--flow) 10%, transparent);
+  color: var(--flow);
+  font-size: 11.5px;
+}
+button.nc-flow-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--flow) 18%, transparent);
+}
+button.nc-flow-action.primary {
+  background: var(--flow);
+  color: #12100a;
+}
+.nc-flow-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.nc-flow-toggle input {
+  accent-color: var(--flow);
+}
+.nc-flow-text {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.nc-flow-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: auto;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 14px 14px;
+  background: rgb(255 255 255 / 2%);
+  color: var(--subtle-foreground);
+  font: 10.5px var(--font-mono);
+}
+.nc-flow-status .truncate {
+  flex: 1;
+  min-width: 0;
+}
+.nc-flow-status.passed,
+.nc-flow-status.done {
+  color: #4cd6a0;
+}
+.nc-flow-status.failed {
+  color: #f87185;
+}
+.nc-flow-status.waiting,
+.nc-flow-status.running {
+  color: var(--flow);
+}
+.nc-flow-when {
+  flex-shrink: 0;
+  color: var(--subtle-foreground);
+}
+.nc-flow-spinner {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.nc-flow-error {
+  margin: 0;
+  padding: 6px 12px;
+  color: #f87185;
+  font-size: 11px;
+}
+/* Lines of the flow: dashes that run along the line, green from ✓, red from ✗. */
+.nc-edge.kind-flow .react-flow__edge-path {
+  stroke: #9aa4b2;
+  stroke-width: 1.8;
+  stroke-opacity: 0.75;
+  stroke-dasharray: 6 5;
+  animation: nc-flow-dash 0.9s linear infinite;
+}
+.nc-edge.kind-flow.port-pass .react-flow__edge-path {
+  stroke: #4cd6a0;
+}
+.nc-edge.kind-flow.port-fail .react-flow__edge-path {
+  stroke: #f87185;
+}
+.nc-edge.kind-flow.live .react-flow__edge-path {
+  stroke-width: 2.6;
+  stroke-opacity: 1;
+  animation-duration: 0.4s;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+.nc-edge.kind-flow.highlight .react-flow__edge-path {
+  stroke-opacity: 1;
+  stroke-width: 2.8;
+}
+@keyframes nc-flow-dash {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+.nc-block.kind-schedule {
+  --block: #6ea8fe;
+}
+.nc-block.kind-check {
+  --block: #4cd6a0;
+}
+.nc-block.kind-approval {
+  --block: #f5b544;
+}
+.nc-block.kind-notify {
+  --block: #c084fc;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nc-edge.kind-flow .react-flow__edge-path,
+  .nc-node.nc-flow.state-running,
+  .nc-flow-spinner {
+    animation: none;
+  }
 }

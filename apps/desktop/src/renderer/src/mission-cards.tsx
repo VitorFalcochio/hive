@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Check, ChevronDown, Pin } from 'lucide-react';
-import type { Run } from '@hive/core';
+import { providerPresets, type ProviderKind, type Run } from '@hive/core';
+import { ProviderBadge } from './provider-logo';
 import { runTone, statusLabels } from './ui';
 
 export interface SidebarMission {
@@ -8,6 +9,8 @@ export interface SidebarMission {
   title: string;
   lastRunStatus: Run['status'] | null;
   pinned: boolean;
+  /** Providers doing (or that did) the work, most-used first. */
+  providerKinds?: ProviderKind[];
 }
 
 type Section = 'pinned' | 'progress' | 'done';
@@ -53,13 +56,14 @@ export function MissionCards({
       onPin={onPin}
     />
   );
+  // No missions at all: no empty guide line under the project.
+  if (!missions.length) return null;
   return (
     <div className="mission-cards">
       {[...pinned, ...moving].map(row)}
       {pinned.length > 0 && moving.length > 0 && (
         <span className="mission-divider" aria-hidden="true" />
       )}
-      {!active.length && <p className="mission-empty">Nenhuma missão em andamento.</p>}
       {done.length > 0 && (
         <>
           <button
@@ -94,6 +98,8 @@ function MissionCard({
 }) {
   const status = statusLabels[mission.lastRunStatus ?? 'draft'];
   const tone = runTone(mission.lastRunStatus);
+  const kinds = mission.providerKinds ?? [];
+  const running = mission.lastRunStatus === 'running';
   return (
     <div
       className={`mission-card tone-${tone}${selected ? ' selected' : ''}${mission.pinned ? ' pinned' : ''}`}
@@ -108,6 +114,21 @@ function MissionCard({
         <span className={`mission-dot tone-${tone}`} aria-hidden="true" />
         <span className="truncate">{mission.title}</span>
         <span className="sr-only">, {status}</span>
+        {kinds.length > 0 && (
+          <span className="mission-providers">
+            {kinds.slice(0, 2).map((kind) => (
+              <ProviderBadge
+                key={kind}
+                kind={kind}
+                live={running}
+                title={`${providerPresets[kind].label}${running ? ' · executando' : ''}`}
+              />
+            ))}
+            {kinds.length > 2 && (
+              <span className="mission-providers-more">+{kinds.length - 2}</span>
+            )}
+          </span>
+        )}
       </button>
       <button
         className={mission.pinned ? 'mission-pin on' : 'mission-pin'}

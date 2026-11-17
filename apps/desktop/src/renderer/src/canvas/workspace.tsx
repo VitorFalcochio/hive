@@ -79,6 +79,18 @@ const NOTE_SIZE = { width: 240, height: 150 };
 const FRAME_SIZE = { width: 560, height: 380 };
 const METER_SIZE = { width: 280, height: 210 };
 const PROVIDER_SIZE = { width: 320, height: 216 };
+/** A provider block folded to its logo. */
+const PROVIDER_CHIP = { width: 76, height: 76 };
+const TERMINAL_SIZE = { width: 620, height: 380 };
+/** Flow blocks, by kind. */
+const FLOW_SIZE = {
+  schedule: { width: 270, height: 214 },
+  check: { width: 280, height: 196 },
+  approval: { width: 270, height: 156 },
+  notify: { width: 250, height: 126 },
+} as const;
+type FlowKind = keyof typeof FLOW_SIZE;
+const flowKinds = new Set<string>(Object.keys(FLOW_SIZE));
 /** Runs whose plan accepts tasks, dependencies and delegations by hand (see the scheduler). */
 const EDITABLE = new Set(['awaiting_plan_approval', 'running', 'review', 'failed', 'cancelled']);
 
@@ -255,6 +267,42 @@ export function Workspace({
   const stopTerminal = useCallback(async (sessionId: string) => {
     await window.hive.invoke('terminal.stop', sessionId);
   }, []);
+  // The Queen built the flow in the main process: show it.
+  useEffect(
+    () =>
+      window.hive.subscribe((push) => {
+        if (push.kind === 'changed' && push.entity === 'layout' && push.id === runId)
+          void layoutApi.reload();
+      }),
+    [runId, layoutApi],
+  );
+  const [flowCommands, setFlowCommands] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void window.hive
+      .invoke('flow.commands', runId)
+      .then((list) => alive && setFlowCommands(list))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [runId]);
+  const openBlockTerminal = useCallback(
+    async (blockId: string, kind: 'shell' | 'claude') => {
+      const opened = await window.hive.invoke('canvas.terminal.open', {
+        runId,
+        blockId,
+        kind,
+        cols: 96,
+        rows: 24,
+      });
+      setTerminals((current) => [
+        ...current.filter((t) => t.session.id !== opened.session.id),
+        opened,
+      ]);
+    },
+    [runId],
+  );
 
   /* ---------------------------------------------------------------- view */
 
@@ -320,7 +368,23 @@ export function Workspace({
       agentTab: (workerId) => tabs.current.get(workerId) ?? 'activity',
       setAgentTab: (workerId, tab) => tabs.current.set(workerId, tab),
       terminalsOf: (workerId) => terminals.filter((item) => item.workerId === workerId),
+      terminalBlocks: new Map(layout.terminals.map((block) => [block.id, block])),
+      terminalOfBlock: (blockId) => {
+        const mine = terminals.filter((item) => item.blockId === blockId);
+        return mine.find((item) => item.session.status === 'running') ?? mine.at(-1);
+      },
+      openBlockTerminal,
       openTerminal,
+      flowBlocks: new Map(layout.flow.map((block) => [block.id, block])),
+      flowState: snapshot.flow ?? {},
+      updateFlowBlock: layoutApi.updateFlowBlock,
+      flowCommands,
+      approveFlow: async (blockId) => {
+        await window.hive.invoke('flow.approve', { runId, blockId });
+      },
+      triggerFlow: async (blockId) => {
+        await window.hive.invoke('flow.trigger', { runId, blockId });
+      },
       stopTerminal,
       subscribeTerminal,
       providerBlocks: new Map(layout.providers.map((block) => [block.id, block])),
@@ -348,9 +412,14 @@ export function Workspace({
     layout.notes,
     layout.frames,
     layout.providers,
+    layout.terminals,
+    layout.flow,
+    flowCommands,
+    runId,
     layoutApi,
     flow,
     openTerminal,
+    openBlockTerminal,
     stopTerminal,
     subscribeTerminal,
   ]);
@@ -420,7 +489,7 @@ export function Workspace({
       });
     }
     for (const block of layout.providers) {
-      const size = PROVIDER_SIZE;
+      const size = block.expanded || !block.providerId ? PROVIDER_SIZE : PROVIDER_CHIP;
       placed.push({
         id: block.id,
         type: 'provider',
@@ -430,6 +499,34 @@ export function Workspace({
         height: size.height,
         zIndex: 2,
         className: 'nc-flow-provider',
+      });
+    }
+    for (const block of layout.flow) {
+      const size = FLOW_SIZE[block.kind];
+      placed.push({
+        id: block.id,
+        type: 'flow',
+        position: { x: block.x, y: block.y },
+        data: { ref: block.id },
+        width: size.width,
+        height: size.height,
+        zIndex: 2,
+        className: 'nc-flow-block',
+      });
+    }
+    for (const block of layout.terminals) {
+      const size = layout.sizes[block.id] ?? TERMINAL_SIZE;
+      placed.push({
+        id: block.id,
+        type: 'terminal',
+        position: { x: block.x, y: block.y },
+        data: { ref: block.id },
+        width: size.width,
+        height: size.height,
+        zIndex: 2,
+        className: 'nc-flow-terminal',
+        // Dragged by its title bar, so the terminal inside takes the mouse.
+        dragHandle: '.nc-term-block-head',
       });
     }
     for (const meter of layout.meters) {
@@ -465,6 +562,8 @@ export function Workspace({
     layout.notes,
     layout.meters,
     layout.providers,
+    layout.terminals,
+    layout.flow,
     layout.sizes,
     pinnedHere,
     grouping,
@@ -557,7 +656,33 @@ export function Workspace({
         : [],
     );
   }, [graph.nodes, layout.providers, view.workers, selectedNode]);
-  const allEdges = useMemo(() => [...edges, ...providerEdges], [edges, providerEdges]);
+  /** Lines of the flow: animated, green from ✓, red from ✗. */
+  const flowEdges = useMemo(() => {
+    const present = new Set(nodes.map((node) => node.id));
+    const kinds = new Map(layout.flow.map((block) => [block.id, block.kind]));
+    return layout.links
+      .filter((link) => present.has(link.source) && present.has(link.target))
+      .map((link): Edge => {
+        const fromKind = kinds.get(link.source);
+        const state = snapshot.flow?.[link.source]?.status;
+        return {
+          id: link.id,
+          source: link.source,
+          target: link.target,
+          sourceHandle: fromKind ? (fromKind === 'check' ? link.port : 'out') : null,
+          type: 'smoothstep',
+          animated: true,
+          className: `nc-edge kind-flow port-${link.port}${state === 'running' ? ' live' : ''}${
+            selection?.kind === 'edge' && selection.id === link.id ? ' highlight' : ''
+          }`,
+          zIndex: 1,
+        };
+      });
+  }, [nodes, layout.flow, layout.links, snapshot.flow, selection]);
+  const allEdges = useMemo(
+    () => [...edges, ...providerEdges, ...flowEdges],
+    [edges, providerEdges, flowEdges],
+  );
 
   /* ---------------------------------------------------------------- selection */
 
@@ -671,6 +796,23 @@ export function Workspace({
     (connection: FlowConnection | Edge) => {
       const [from, fromRef] = splitId(connection.source);
       const [to, toRef] = splitId(connection.target);
+      if (from === 'flow' || to === 'flow') {
+        if (connection.source === connection.target) return false;
+        const source = layout.flow.find((block) => block.id === connection.source);
+        const target = layout.flow.find((block) => block.id === connection.target);
+        // Schedule starts an agent (the Queen); a failed check goes back to an agent.
+        if (source && to === 'agent')
+          return (
+            view.workers.has(toRef) &&
+            (source.kind === 'schedule' ||
+              (source.kind === 'check' && connection.sourceHandle === 'fail'))
+          );
+        if (source && target) return source.kind !== 'notify' && target.kind !== 'schedule';
+        // From an agent: what runs when it finishes a task (or the Queen, the mission).
+        if (from === 'agent' && target)
+          return view.workers.has(fromRef) && target.kind !== 'schedule';
+        return false;
+      }
       if (from === 'provider')
         return (
           to === 'agent' &&
@@ -682,12 +824,25 @@ export function Workspace({
       if (from === 'task') return true;
       return from === 'agent' && view.workers.get(fromRef)?.role !== 'queen';
     },
-    [view.workers, layout.providers],
+    [view.workers, layout.providers, layout.flow],
   );
   const onConnect = useCallback(
     (connection: FlowConnection) => {
       const [from, fromRef] = splitId(connection.source);
       const [toType, toRef] = splitId(connection.target);
+      if (from === 'flow' || toType === 'flow') {
+        const port =
+          connection.sourceHandle === 'pass' || connection.sourceHandle === 'fail'
+            ? connection.sourceHandle
+            : 'out';
+        layoutApi.addLink({ source: connection.source, target: connection.target, port });
+        say(
+          port === 'fail' && toType === 'agent'
+            ? 'Quando a verificação falhar, a tarefa volta ao agente com o erro.'
+            : 'Conectado ao fluxo.',
+        );
+        return;
+      }
       if (from === 'provider') {
         const providerId = layout.providers.find(
           (block) => block.id === connection.source,
@@ -752,7 +907,7 @@ export function Workspace({
         );
       }
     },
-    [view.tasks, view.workers, act, cortexBlocks, layout.providers, say],
+    [view.tasks, view.workers, act, cortexBlocks, layout.providers, layoutApi, say],
   );
 
   /* ---------------------------------------------------------------- canvas items */
@@ -813,15 +968,45 @@ export function Workspace({
     },
     [layoutApi, select],
   );
+  const addTerminalBlock = useCallback(
+    (at: { x: number; y: number }, kind: 'shell' | 'claude') => {
+      const id = localId('terminal');
+      layoutApi.addTerminalBlock({ id, x: Math.round(at.x), y: Math.round(at.y), kind });
+      select({ kind: 'node', id });
+      // It starts right away; if it cannot (Claude Code not installed), the block says why.
+      void openBlockTerminal(id, kind).catch((caught: unknown) =>
+        say(caught instanceof Error ? caught.message : String(caught), 'error'),
+      );
+    },
+    [layoutApi, select, openBlockTerminal, say],
+  );
+  const addFlowBlock = useCallback(
+    (at: { x: number; y: number }, kind: FlowKind) => {
+      const id = localId('flow');
+      layoutApi.addFlowBlock({
+        id,
+        x: Math.round(at.x),
+        y: Math.round(at.y),
+        kind,
+        ...(kind === 'schedule' ? { time: '09:00' } : {}),
+        ...(kind === 'check' ? { command: flowCommands[0], retries: 1 } : {}),
+      });
+      select({ kind: 'node', id });
+    },
+    [layoutApi, select, flowCommands],
+  );
   const placeBlock = useCallback(
     (kind: BlockKind, at: { x: number; y: number }) => {
-      if (kind === 'note') addNote(at);
+      if (flowKinds.has(kind)) addFlowBlock(at, kind as FlowKind);
+      else if (kind === 'note') addNote(at);
       else if (kind === 'frame') addFrame(at);
       else if (kind === 'tokens') addMeter(at);
       else if (kind === 'provider') addProviderBlock(at);
+      else if (kind === 'terminal') addTerminalBlock(at, 'shell');
+      else if (kind === 'claude') addTerminalBlock(at, 'claude');
       else addCortex(at);
     },
-    [addNote, addFrame, addMeter, addProviderBlock, addCortex],
+    [addNote, addFrame, addMeter, addProviderBlock, addTerminalBlock, addFlowBlock, addCortex],
   );
 
   /** A frame around the selected nodes (Ctrl+G). */
@@ -856,11 +1041,15 @@ export function Workspace({
           (node.type === 'note' ||
             node.type === 'frame' ||
             node.type === 'tokens' ||
-            node.type === 'provider'),
+            node.type === 'provider' ||
+            node.type === 'terminal' ||
+            node.type === 'flow'),
       )
       .map((node) => node.id);
     if (ids.length) layoutApi.remove(ids);
-  }, [nodes, layoutApi]);
+    if (selection?.kind === 'edge' && layout.links.some((link) => link.id === selection.id))
+      layoutApi.removeLinks([selection.id]);
+  }, [nodes, layoutApi, selection, layout.links]);
   const lockSelected = useCallback(() => {
     const picked = nodes.filter(
       (node) => node.selected && node.type !== 'note' && node.type !== 'frame',
@@ -967,6 +1156,53 @@ export function Workspace({
       hint: 'P',
       run: () => layoutApi.lock(grouping, { [node.id]: node.position }, !lockedHere),
     };
+    if (node.type === 'flow') {
+      const block = layout.flow.find((item) => item.id === node.id);
+      return {
+        title: block
+          ? {
+              schedule: 'Agendado',
+              check: 'Verificação',
+              approval: 'Aprovação',
+              notify: 'Notificação',
+            }[block.kind]
+          : 'Fluxo',
+        items: [
+          {
+            label: 'Remover conexões',
+            disabled: !layout.links.some(
+              (link) => link.source === node.id || link.target === node.id,
+            ),
+            run: () =>
+              layoutApi.removeLinks(
+                layout.links
+                  .filter((link) => link.source === node.id || link.target === node.id)
+                  .map((link) => link.id),
+              ),
+          },
+          { label: 'Excluir bloco', hint: 'Del', run: () => layoutApi.remove([node.id]) },
+        ],
+      };
+    }
+    if (node.type === 'terminal') {
+      const block = layout.terminals.find((item) => item.id === node.id);
+      const running = terminals.find(
+        (item) => item.blockId === node.id && item.session.status === 'running',
+      );
+      return {
+        title: block?.kind === 'claude' ? 'Claude Code' : 'Terminal',
+        items: [
+          {
+            label: 'Excluir bloco',
+            run: () => {
+              // Its process ends with it.
+              if (running) void stopTerminal(running.session.id);
+              layoutApi.remove([node.id]);
+            },
+          },
+        ],
+      };
+    }
     if (node.type === 'tokens' || node.type === 'provider')
       return {
         title: node.type === 'tokens' ? 'Tokens' : 'Provedor',
@@ -1301,6 +1537,36 @@ export function Workspace({
     'new-provider': () => {
       const at = center();
       addProviderBlock({ x: at.x - PROVIDER_SIZE.width / 2, y: at.y - PROVIDER_SIZE.height / 2 });
+    },
+    'new-schedule': () => {
+      const at = center();
+      addFlowBlock({ x: at.x - 135, y: at.y - 107 }, 'schedule');
+    },
+    'new-check': () => {
+      const at = center();
+      addFlowBlock({ x: at.x - 140, y: at.y - 98 }, 'check');
+    },
+    'new-approval': () => {
+      const at = center();
+      addFlowBlock({ x: at.x - 135, y: at.y - 78 }, 'approval');
+    },
+    'new-notify': () => {
+      const at = center();
+      addFlowBlock({ x: at.x - 125, y: at.y - 63 }, 'notify');
+    },
+    'new-terminal': () => {
+      const at = center();
+      addTerminalBlock(
+        { x: at.x - TERMINAL_SIZE.width / 2, y: at.y - TERMINAL_SIZE.height / 2 },
+        'shell',
+      );
+    },
+    'new-claude': () => {
+      const at = center();
+      addTerminalBlock(
+        { x: at.x - TERMINAL_SIZE.width / 2, y: at.y - TERMINAL_SIZE.height / 2 },
+        'claude',
+      );
     },
     blocks: () => setBlocksOpen(true),
   };

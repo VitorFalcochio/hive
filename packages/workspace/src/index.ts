@@ -2,6 +2,8 @@ export { git, hiveCommitFlags, type GitResult } from './git';
 export {
   WorktreeManager,
   diffRefs,
+  linkDependencies,
+  unlinkDependencies,
   inspectRepository,
   isHiveBranch,
   listWorktrees,

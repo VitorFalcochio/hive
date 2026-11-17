@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useEffect, useState } from 'react';
+import { createContext, memo, useContext, useEffect, useState, type CSSProperties } from 'react';
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
 import {
   ArrowUpRight,
@@ -11,6 +11,17 @@ import {
   FileText,
   Expand,
   Gauge,
+  Minimize2,
+  Power,
+  RotateCcw,
+  SquareTerminal,
+  Bell,
+  CalendarClock,
+  Check,
+  FlaskConical,
+  Play,
+  Stamp,
+  X,
 } from 'lucide-react';
 import type {
   AgentEvent,
@@ -18,6 +29,7 @@ import type {
   CanvasSnapshot,
   CanvasTerminal,
   CanvasWorker,
+  FlowBlockState,
   Task,
   TerminalEvent,
   LiveResult,
@@ -25,9 +37,11 @@ import type {
   ProviderConfig,
   ProviderKind,
 } from '@hive/core';
-import { providerPresets } from '@hive/core';
+import { providerPresets, selectablePresets } from '@hive/core';
 import { AgentBee } from '../mascot';
-import { HoneyComb, HoneyJar } from '../honey';
+import { HoneyJar } from '../honey';
+import { ClaudeLogo, ProviderLogo, providerColor } from '../provider-logo';
+import { TerminalView } from '../terminal-view';
 import { AgentWindow, RestoreButton, type AgentTab } from './agent-window';
 import {
   UNASSIGNED,
@@ -39,8 +53,8 @@ import {
   type AgentStatus,
   type Grouping,
 } from './model';
-import type { Frame, Note, ProviderBlock } from './use-layout';
-import { Select } from '../ui';
+import type { FlowBlock, Frame, Note, ProviderBlock, TerminalBlock } from './use-layout';
+import { Select, useTask } from '../ui';
 
 /** What every node reads; nodes only carry the id of what they stand for. */
 export interface CanvasView {
@@ -77,6 +91,18 @@ export interface CanvasView {
   stopTerminal: (sessionId: string) => Promise<void>;
   subscribeTerminal: (listener: (event: TerminalEvent) => void) => () => void;
   providerBlocks: Map<string, ProviderBlock>;
+  terminalBlocks: Map<string, TerminalBlock>;
+  flowBlocks: Map<string, FlowBlock>;
+  /** What each flow block did last. */
+  flowState: Record<string, FlowBlockState>;
+  updateFlowBlock: (id: string, patch: Partial<FlowBlock>) => void;
+  /** Project commands a check block can run. */
+  flowCommands: string[];
+  approveFlow: (blockId: string) => Promise<void>;
+  triggerFlow: (blockId: string) => Promise<void>;
+  /** The terminal running (or last run) in a Terminal block. */
+  terminalOfBlock: (blockId: string) => CanvasTerminal | undefined;
+  openBlockTerminal: (blockId: string, kind: TerminalBlock['kind']) => Promise<void>;
   updateProviderBlock: (id: string, patch: Partial<ProviderBlock>) => void;
   notes: Map<string, Note>;
   frames: Map<string, Frame>;
@@ -98,7 +124,17 @@ function useView(): CanvasView {
 export type NodeData = { ref: string };
 export type CanvasNode = Node<
   NodeData,
-  'agent' | 'task' | 'lane' | 'note' | 'frame' | 'result' | 'cortex' | 'tokens' | 'provider'
+  | 'agent'
+  | 'task'
+  | 'lane'
+  | 'note'
+  | 'frame'
+  | 'result'
+  | 'cortex'
+  | 'tokens'
+  | 'provider'
+  | 'terminal'
+  | 'flow'
 >;
 
 /** Handles are where connections are drawn; the engine decides what a drawn line may do. */
@@ -321,7 +357,7 @@ export const NoteNode = memo(function NoteNode({ id, selected }: NodeProps<Canva
 });
 
 const NEW_PROVIDER = '__new__';
-const providerKinds = Object.values(providerPresets);
+const providerKinds = selectablePresets;
 
 /**
  * Adds a provider that needs no key from the canvas: ChatGPT (signed in through the browser) or a
@@ -415,12 +451,14 @@ export const ProviderNode = memo(function ProviderNode({ id, selected }: NodePro
         .join(' · ')
     : 'Fonte de modelos para os agentes';
   const latency = current?.lastTest?.latencyMs;
+  // The mark of the provider in use, or of the one being added; none yet keeps the honeycomb.
+  const logoKind = current?.kind ?? (adding ? kind : null);
   const submit = () => {
     setBusy(true);
     setError('');
     void connectProvider(kind)
       .then(async (provider) => {
-        view.updateProviderBlock(id, { providerId: provider.id });
+        view.updateProviderBlock(id, { providerId: provider.id, expanded: true });
         setAdding(false);
         await reload();
       })
@@ -430,6 +468,36 @@ export const ProviderNode = memo(function ProviderNode({ id, selected }: NodePro
       })
       .finally(() => setBusy(false));
   };
+  const brand = { '--brand': providerColor(logoKind) } as CSSProperties;
+  // Folded, a block with a provider is just its logo; a click opens the rest.
+  if (providerId && !block.expanded && !adding)
+    return (
+      <div
+        className={`nc-node nc-provider-chip tone-${tone}${selected ? ' selected' : ''}`}
+        style={brand}
+      >
+        <Handle
+          type="source"
+          position={Position.Right}
+          title="Arraste até um agente para ele usar este provedor"
+        />
+        <button
+          type="button"
+          className="nc-provider-chip-button"
+          aria-label={`${current?.name ?? 'Provedor'} · ${status}. Clique para expandir`}
+          title={`${current?.name ?? 'Provedor'} · ${status} — clique para expandir`}
+          onClick={() => view.updateProviderBlock(id, { expanded: true })}
+        >
+          <ProviderLogo kind={logoKind} size={34} />
+        </button>
+        <span className={`nc-provider-chip-dot tone-${tone}`} aria-hidden />
+        {users.length > 0 && (
+          <span className="nc-provider-chip-count" title={`${users.length} agentes conectados`}>
+            {users.length}
+          </span>
+        )}
+      </div>
+    );
   return (
     <div className={`nc-node nc-provider tone-${tone}${selected ? ' selected' : ''}`}>
       <Handle
@@ -439,8 +507,12 @@ export const ProviderNode = memo(function ProviderNode({ id, selected }: NodePro
         title={providerId ? 'Arraste até um agente para ele usar este provedor' : undefined}
       />
       <header className="nc-provider-head">
-        <span className="nc-provider-icon" aria-hidden>
-          <HoneyComb size={22} />
+        <span
+          className="nc-provider-icon"
+          style={brand}
+          title={logoKind ? providerPresets[logoKind].label : undefined}
+        >
+          <ProviderLogo kind={logoKind} size={22} />
         </span>
         <div className="nc-provider-title">
           <strong className="truncate">{current?.name ?? 'Provedor'}</strong>
@@ -450,6 +522,17 @@ export const ProviderNode = memo(function ProviderNode({ id, selected }: NodePro
         </div>
         <PinMark id={id} />
         <span className={`nc-provider-pill tone-${tone}`}>{status}</span>
+        {providerId && !adding && (
+          <button
+            type="button"
+            className="nc-provider-fold nodrag"
+            aria-label="Recolher para o logo"
+            title="Recolher para o logo"
+            onClick={() => view.updateProviderBlock(id, { expanded: false })}
+          >
+            <Minimize2 size={13} />
+          </button>
+        )}
       </header>
 
       {adding ? (
@@ -577,7 +660,7 @@ export const ProviderNode = memo(function ProviderNode({ id, selected }: NodePro
               ]}
               onChange={(value) => {
                 if (value === NEW_PROVIDER) setAdding(true);
-                else view.updateProviderBlock(id, { providerId: value || null });
+                else view.updateProviderBlock(id, { providerId: value || null, expanded: true });
               }}
               menuMinWidth={260}
             />
@@ -899,6 +982,333 @@ export const CortexNode = memo(function CortexNode({ id, data, selected }: NodeP
   );
 });
 
+const terminalBlockCopy = {
+  shell: {
+    title: 'Terminal',
+    empty: 'Um terminal de verdade na pasta do projeto, ao lado da equipe.',
+    action: 'Abrir terminal',
+  },
+  claude: {
+    title: 'Claude Code',
+    empty:
+      'Abre o Claude Code com a sua conta na pasta do projeto. Você conversa com ele aqui, enquanto as abelhas trabalham no mesmo código.',
+    action: 'Iniciar Claude Code',
+  },
+} as const;
+
+/**
+ * A terminal of its own on the canvas, in the project folder: a shell, or Claude Code, which the
+ * user drives with their own sign-in. The session lives in the main process while Hive runs;
+ * after a restart the block offers to open it again.
+ */
+export const TerminalBlockNode = memo(function TerminalBlockNode({
+  id,
+  selected,
+}: NodeProps<CanvasNode>) {
+  const view = useView();
+  const action = useTask();
+  const block = view.terminalBlocks.get(id);
+  if (!block) return null;
+  const copy = terminalBlockCopy[block.kind];
+  const claude = block.kind === 'claude';
+  const terminal = view.terminalOfBlock(id);
+  const running = terminal?.session.status === 'running';
+  const open = () => void action.run(() => view.openBlockTerminal(id, block.kind));
+  const status = !terminal
+    ? 'pasta do projeto'
+    : running
+      ? 'ativo · pasta do projeto'
+      : `encerrado${terminal.session.exitCode !== null ? ` (${terminal.session.exitCode})` : ''}`;
+  return (
+    <>
+      <NodeResizer
+        isVisible={selected}
+        minWidth={360}
+        minHeight={220}
+        lineClassName="nc-resize-line"
+        handleClassName="nc-resize-handle"
+        onResizeEnd={(_, size) => view.setSize(id, { width: size.width, height: size.height })}
+      />
+      <div
+        className={`nc-node nc-term-block kind-${block.kind}${running ? ' running' : ''}${selected ? ' selected' : ''}`}
+      >
+        <header className="nc-term-block-head">
+          <span className="nc-term-block-icon" aria-hidden>
+            {claude ? <ClaudeLogo size={16} /> : <SquareTerminal size={15} />}
+          </span>
+          <div className="nc-term-block-title">
+            <strong>{copy.title}</strong>
+            <span className="truncate">{status}</span>
+          </div>
+          <PinMark id={id} />
+          {terminal &&
+            (running ? (
+              <button
+                type="button"
+                className="nc-term-block-button nodrag"
+                title="Encerrar"
+                aria-label="Encerrar terminal"
+                disabled={action.running}
+                onClick={() => void action.run(() => view.stopTerminal(terminal.session.id))}
+              >
+                <Power size={13} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="nc-term-block-button nodrag"
+                title="Abrir de novo"
+                aria-label="Abrir de novo"
+                disabled={action.running}
+                onClick={open}
+              >
+                <RotateCcw size={13} />
+              </button>
+            ))}
+        </header>
+        <div className="nc-term-block-body nodrag nowheel">
+          {terminal ? (
+            <TerminalView
+              key={terminal.session.id}
+              session={terminal.session}
+              clearSignal={0}
+              subscribe={view.subscribeTerminal}
+              autoFocus={false}
+            />
+          ) : (
+            <div className="nc-term-block-empty">
+              <span className="nc-term-block-mark" aria-hidden>
+                {claude ? <ClaudeLogo size={30} /> : <SquareTerminal size={26} />}
+              </span>
+              <p>{copy.empty}</p>
+              <button type="button" disabled={action.running} onClick={open}>
+                {action.running ? 'Abrindo…' : copy.action}
+              </button>
+            </div>
+          )}
+        </div>
+        {action.error && <p className="nc-term-block-error">{action.error}</p>}
+      </div>
+    </>
+  );
+});
+
+const flowCopy = {
+  schedule: { title: 'Agendado', icon: CalendarClock, color: '#6ea8fe' },
+  check: { title: 'Verificação', icon: FlaskConical, color: '#4cd6a0' },
+  approval: { title: 'Aprovação', icon: Stamp, color: '#f5b544' },
+  notify: { title: 'Notificação', icon: Bell, color: '#c084fc' },
+} as const;
+const weekDays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+function ago(at: string): string {
+  const seconds = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000));
+  if (seconds < 60) return 'agora';
+  if (seconds < 3600) return `há ${Math.round(seconds / 60)} min`;
+  return `há ${Math.round(seconds / 3600)} h`;
+}
+
+/**
+ * A flow block, like an n8n node, that acts on the real run: a schedule starts it, a check runs
+ * a project command on each finished task (✓ and ✗ outputs), an approval holds the work until
+ * you apply it, and a notification tells you in Windows.
+ */
+export const FlowNode = memo(function FlowNode({ id, selected }: NodeProps<CanvasNode>) {
+  const view = useView();
+  const action = useTask();
+  const block = view.flowBlocks.get(id);
+  const [command, setCommand] = useState(block?.command ?? '');
+  useEffect(() => setCommand(block?.command ?? ''), [block?.command]);
+  if (!block) return null;
+  const copy = flowCopy[block.kind];
+  const Icon = copy.icon;
+  const state = view.flowState[id];
+  const update = (patch: Partial<FlowBlock>) => view.updateFlowBlock(id, patch);
+  const days = block.days ?? [];
+  return (
+    <div
+      className={`nc-node nc-flow kind-${block.kind}${state ? ` state-${state.status}` : ''}${selected ? ' selected' : ''}`}
+      style={{ '--flow': copy.color } as CSSProperties}
+    >
+      {block.kind !== 'schedule' && (
+        <Handle type="target" position={Position.Left} className="nc-flow-in" />
+      )}
+      {block.kind === 'check' ? (
+        <>
+          <Handle
+            id="pass"
+            type="source"
+            position={Position.Right}
+            className="nc-flow-out pass"
+            style={{ top: '38%' }}
+            title="Passou"
+          />
+          <Handle
+            id="fail"
+            type="source"
+            position={Position.Right}
+            className="nc-flow-out fail"
+            style={{ top: '72%' }}
+            title="Falhou: ligue de volta ao agente para ele corrigir"
+          />
+          <span className="nc-flow-port pass" style={{ top: '38%' }}>
+            passou
+          </span>
+          <span className="nc-flow-port fail" style={{ top: '72%' }}>
+            falhou
+          </span>
+        </>
+      ) : block.kind !== 'notify' ? (
+        <Handle id="out" type="source" position={Position.Right} className="nc-flow-out" />
+      ) : null}
+
+      <header className="nc-flow-head">
+        <span className="nc-flow-icon" aria-hidden>
+          <Icon size={15} />
+        </span>
+        <strong>{copy.title}</strong>
+        <PinMark id={id} />
+      </header>
+
+      <div className="nc-flow-body nodrag">
+        {block.kind === 'schedule' && (
+          <>
+            <label className="nc-flow-field">
+              <span>Horário</span>
+              <input
+                type="time"
+                value={block.time ?? ''}
+                onChange={(event) => update({ time: event.target.value || undefined })}
+              />
+            </label>
+            <div className="nc-flow-days" role="group" aria-label="Dias da semana">
+              {weekDays.map((label, day) => (
+                <button
+                  key={day}
+                  type="button"
+                  aria-pressed={!days.length || days.includes(day)}
+                  className={!days.length || days.includes(day) ? 'on' : undefined}
+                  onClick={() => {
+                    const all = days.length ? days : [0, 1, 2, 3, 4, 5, 6];
+                    const next = all.includes(day)
+                      ? all.filter((item) => item !== day)
+                      : [...all, day].sort();
+                    update({ days: next.length === 7 ? undefined : next });
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="nc-flow-action"
+              disabled={action.running}
+              onClick={() => void action.run(() => view.triggerFlow(id))}
+            >
+              <Play size={12} /> Rodar agora
+            </button>
+          </>
+        )}
+        {block.kind === 'check' && (
+          <>
+            <label className="nc-flow-field">
+              <span>Comando</span>
+              <input
+                list={`cmds-${id}`}
+                value={command}
+                placeholder={view.flowCommands[0] ?? 'npm test'}
+                spellCheck={false}
+                onChange={(event) => setCommand(event.target.value)}
+                onBlur={() => update({ command: command.trim() || undefined })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') (event.target as HTMLInputElement).blur();
+                }}
+              />
+              <datalist id={`cmds-${id}`}>
+                {view.flowCommands.map((item) => (
+                  <option key={item} value={item} />
+                ))}
+              </datalist>
+            </label>
+            <label className="nc-flow-field row">
+              <span>Correções automáticas</span>
+              <Select
+                size="sm"
+                className="nodrag"
+                ariaLabel="Correções automáticas"
+                value={String(block.retries ?? 1)}
+                options={[0, 1, 2, 3].map((value) => ({
+                  value: String(value),
+                  label: String(value),
+                }))}
+                onChange={(value) => update({ retries: Number(value) })}
+                menuMinWidth={80}
+              />
+            </label>
+          </>
+        )}
+        {block.kind === 'approval' && (
+          <>
+            <label className="nc-flow-toggle">
+              <input
+                type="checkbox"
+                checked={!!block.auto}
+                onChange={(event) => update({ auto: event.target.checked })}
+              />
+              <span>Aplicar sozinho quando chegar aqui</span>
+            </label>
+            {state?.status === 'waiting' && (
+              <button
+                type="button"
+                className="nc-flow-action primary"
+                disabled={action.running}
+                onClick={() => void action.run(() => view.approveFlow(id))}
+              >
+                <Check size={12} /> Aprovar e aplicar
+              </button>
+            )}
+          </>
+        )}
+        {block.kind === 'notify' && (
+          <p className="nc-flow-text">Avisa no Windows quando algo chega aqui.</p>
+        )}
+      </div>
+
+      <footer className={`nc-flow-status ${state?.status ?? 'idle'}`}>
+        {state ? (
+          <>
+            {state.status === 'passed' || state.status === 'done' ? (
+              <Check size={12} />
+            ) : state.status === 'failed' ? (
+              <X size={12} />
+            ) : (
+              <span className="nc-flow-spinner" aria-hidden />
+            )}
+            <span className="truncate" title={state.detail}>
+              {state.detail}
+            </span>
+            <span className="nc-flow-when">
+              {state.durationMs !== null
+                ? `${(state.durationMs / 1000).toFixed(1).replace('.', ',')} s`
+                : ago(state.at)}
+            </span>
+          </>
+        ) : (
+          <span className="truncate">
+            {block.kind === 'schedule'
+              ? block.time
+                ? `Próximo: ${block.time}`
+                : 'Escolha o horário'
+              : 'Esperando o fluxo'}
+          </span>
+        )}
+      </footer>
+      {action.error && <p className="nc-flow-error">{action.error}</p>}
+    </div>
+  );
+});
+
 export const nodeTypes = {
   cortex: CortexNode,
   result: LiveResultNode,
@@ -909,4 +1319,6 @@ export const nodeTypes = {
   frame: FrameNode,
   tokens: TokensNode,
   provider: ProviderNode,
+  terminal: TerminalBlockNode,
+  flow: FlowNode,
 };

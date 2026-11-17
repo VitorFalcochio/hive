@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -115,5 +115,37 @@ describe('repositório e worktrees', { timeout: 30_000 }, () => {
     // Git may check files out with CRLF (core.autocrlf); only the content matters here.
     const content = await readFile(path.join(second, 'app.txt'), 'utf8');
     expect(content.replace(/\r\n/g, '\n')).toBe('versão b\n');
+  });
+});
+
+describe('dependências instaladas nas worktrees', { timeout: 30_000 }, () => {
+  it('a worktree usa a node_modules do projeto, e apagá-la não apaga a do projeto', async () => {
+    const { root, manager } = await repository();
+    await writeFile(path.join(root, '.gitignore'), 'node_modules\n');
+    await git(root, ['add', '-A']);
+    await git(root, [...identity, 'commit', '-q', '-m', 'ignora dependências']);
+    await mkdir(path.join(root, 'node_modules', 'lib'), { recursive: true });
+    await writeFile(path.join(root, 'node_modules', 'lib', 'index.js'), 'module.exports = 1;\n');
+
+    const worktree = await manager.create('t1', taskBranchName('run_abc', 't1', 1), 'HEAD');
+    expect(
+      await readFile(path.join(worktree, 'node_modules', 'lib', 'index.js'), 'utf8'),
+    ).toContain('module.exports');
+    // Ignored, so the link never ends up in the task's commit.
+    expect(await manager.commitAll(worktree, 'nada')).toBeNull();
+
+    await manager.remove(worktree, null);
+    expect(await readFile(path.join(root, 'node_modules', 'lib', 'index.js'), 'utf8')).toContain(
+      'module.exports',
+    );
+  });
+
+  it('não liga a node_modules quando o git não a ignora', async () => {
+    const { root, manager } = await repository();
+    await mkdir(path.join(root, 'node_modules'), { recursive: true });
+    await writeFile(path.join(root, 'node_modules', 'x.js'), '1\n');
+    const worktree = await manager.create('t2', taskBranchName('run_abc', 't2', 1), 'HEAD');
+    await expect(readFile(path.join(worktree, 'node_modules', 'x.js'), 'utf8')).rejects.toThrow();
+    await manager.remove(worktree, null);
   });
 });

@@ -44,6 +44,7 @@ import {
   type Mission,
   type ModelInfo,
   type ProviderConfig,
+  type ProviderKind,
   type Run,
   type Settings,
   type SkillDetail,
@@ -353,6 +354,8 @@ export interface CanvasSnapshot {
   queuePosition: number | null;
   /** Adaptive replans of this run that still need a decision, newest first. */
   recoveries: NexusAutopilotRecovery[];
+  /** What each flow block did last, by block id. */
+  flow?: Record<string, FlowBlockState>;
   /** When the snapshot was read, for the "updated" hint and elapsed timers. */
   at: string;
 }
@@ -367,16 +370,27 @@ export interface CanvasWorker {
   modelId: string | null;
 }
 
-/** A terminal the canvas opened beside an agent: a plain shell, or a conversation with it. */
+/**
+ * A terminal the canvas opened: beside an agent (a plain shell, or a conversation with it), or in
+ * a Terminal block of its own (a shell, or Claude Code), in the project folder.
+ */
 export interface CanvasTerminal {
   session: TerminalSession;
-  workerId: string;
-  kind: 'shell' | 'chat';
+  /** The agent it was opened beside; null in a Terminal block. */
+  workerId: string | null;
+  /** The Terminal block it lives in; null beside an agent. */
+  blockId: string | null;
+  kind: 'shell' | 'chat' | 'claude';
   /** Worktree of the task it was opened in; null for the project folder. */
   taskId: string | null;
 }
 
+/** What a Terminal block on the canvas runs. */
+export type TerminalBlockKind = 'shell' | 'claude';
+
 const coordinate = z.number().min(-1_000_000).max(1_000_000);
+export const flowBlockKindSchema = z.enum(['schedule', 'check', 'approval', 'notify']);
+export type FlowBlockKind = z.infer<typeof flowBlockKindSchema>;
 const extent = z.number().min(40).max(5_000);
 const layoutKey = z.string().min(1).max(160);
 
@@ -431,12 +445,81 @@ export const canvasLayoutSchema = z.object({
         x: coordinate,
         y: coordinate,
         providerId: z.string().min(1).max(100).nullable(),
+        /** Shown in full; otherwise a block with a provider is just its logo. */
+        expanded: z.boolean().optional(),
       }),
     )
     .max(20)
     .default([]),
+  /**
+   * Terminal blocks: a real terminal on the canvas, in the project folder: a shell, or Claude
+   * Code run by the user. Its size lives in `sizes`; its session, while it runs, in the main
+   * process.
+   */
+  terminals: z
+    .array(
+      z.object({
+        id: layoutKey,
+        x: coordinate,
+        y: coordinate,
+        kind: z.enum(['shell', 'claude']),
+      }),
+    )
+    .max(12)
+    .default([]),
+  /**
+   * Flow blocks, like n8n nodes, that act on the real run: a schedule that starts it, a check
+   * that runs a project command on a finished task, an approval gate before applying, and an OS
+   * notification. The flow engine in the main process reads them with `links`.
+   */
+  flow: z
+    .array(
+      z.object({
+        id: layoutKey,
+        x: coordinate,
+        y: coordinate,
+        kind: flowBlockKindSchema,
+        /** Schedule: "HH:MM", local time. */
+        time: z
+          .string()
+          .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+          .optional(),
+        /** Schedule: days of the week (0 = Sunday); none means every day. */
+        days: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+        /** Check: the project command to run, such as "npm test". */
+        command: z.string().trim().max(300).optional(),
+        /** Check: how many times a failure goes back to the agent before it stops. */
+        retries: z.number().int().min(0).max(3).optional(),
+        /** Approval: apply on its own when everything before it passed. */
+        auto: z.boolean().optional(),
+      }),
+    )
+    .max(30)
+    .default([]),
+  /** Lines drawn between flow blocks and agents; `port` is the output they leave from. */
+  links: z
+    .array(
+      z.object({
+        id: layoutKey,
+        source: layoutKey,
+        target: layoutKey,
+        port: z.enum(['out', 'pass', 'fail']).default('out'),
+      }),
+    )
+    .max(120)
+    .default([]),
 });
 export type CanvasLayout = z.infer<typeof canvasLayoutSchema>;
+export type FlowBlock = CanvasLayout['flow'][number];
+export type FlowLink = CanvasLayout['links'][number];
+
+/** What a flow block did last, for its badge on the canvas. */
+export interface FlowBlockState {
+  status: 'running' | 'passed' | 'failed' | 'waiting' | 'done';
+  detail: string;
+  at: string;
+  durationMs: number | null;
+}
 
 export const emptyCanvasLayout: CanvasLayout = {
   version: 1,
@@ -448,6 +531,9 @@ export const emptyCanvasLayout: CanvasLayout = {
   frames: [],
   meters: [],
   providers: [],
+  terminals: [],
+  flow: [],
+  links: [],
 };
 
 /** One step of an agent's model chain, in the order calls try them. */
@@ -574,9 +660,14 @@ export const ipcContract = {
   'skill.deleteLocal': channel<void>()(z.string().min(1).max(64)),
   'skill.restore': channel<SkillSummary>()(z.string().min(1).max(64)),
 
-  'mission.list': channel<(Mission & { lastRunStatus: Run['status'] | null; pinned: boolean })[]>()(
-    z.object({ workspaceId: id }),
-  ),
+  'mission.list': channel<
+    (Mission & {
+      lastRunStatus: Run['status'] | null;
+      pinned: boolean;
+      /** Providers of the agents on the latest run's tasks, most-used first. */
+      providerKinds: ProviderKind[];
+    })[]
+  >()(z.object({ workspaceId: id })),
   'mission.pin': channel<void>()(z.object({ id, pinned: z.boolean() })),
   'mission.create': channel<MissionDetail & { runId: string }>()(
     z.object({ title: z.string().min(1).max(140), objective: z.string().min(1).max(10_000) }),
@@ -756,6 +847,12 @@ export const ipcContract = {
     }),
   ),
   'canvas.layout.save': channel<void>()(z.object({ runId: id, layout: canvasLayoutSchema })),
+  /** Commands the project offers for a check block (package scripts and the like). */
+  'flow.commands': channel<string[]>()(id),
+  /** Apply the tasks waiting at an approval block. */
+  'flow.approve': channel<void>()(z.object({ runId: id, blockId: layoutKey })),
+  /** Fire a schedule block now, as if its time had come. */
+  'flow.trigger': channel<void>()(z.object({ runId: id, blockId: layoutKey })),
   /** Tokens spent today, live (running tasks included), against the daily budget. */
   'usage.today': channel<TokenMeter>()(none),
   /** Projects a mission can be created in, from the canvas. */
@@ -789,14 +886,17 @@ export const ipcContract = {
     z.object({ workerId: id, providerId: id, modelId: z.string().min(1).max(200) }),
   ),
   /**
-   * A real terminal beside an agent: a shell in the worktree of its live task (or the project),
-   * or a conversation with it (the `agents` command, opened on that agent).
+   * A real terminal beside an agent (`workerId`): a shell in the worktree of its live task (or
+   * the project), or a conversation with it (the `agents` command, opened on that agent). Or one
+   * in a Terminal block (`blockId`), in the project folder: a shell, or Claude Code (`claude`),
+   * which the user drives with their own Claude Code sign-in.
    */
   'canvas.terminal.open': channel<CanvasTerminal>()(
     z.object({
       runId: id,
-      workerId: id,
-      kind: z.enum(['shell', 'chat']),
+      workerId: id.optional(),
+      blockId: layoutKey.optional(),
+      kind: z.enum(['shell', 'chat', 'claude']),
       cols: z.number().int().min(2).max(500).optional(),
       rows: z.number().int().min(2).max(300).optional(),
     }),
@@ -881,6 +981,9 @@ export const canvasChannels: ReadonlySet<IpcChannel> = new Set<IpcChannel>([
   'canvas.notes.get',
   'canvas.notes.save',
   'canvas.layout.save',
+  'flow.commands',
+  'flow.approve',
+  'flow.trigger',
   'usage.today',
   // The Provider block: add a ChatGPT provider (the sign-in happens in the browser) and point an
   // agent at a provider. API keys are never typed here: the block sends you to the main window.
@@ -977,7 +1080,9 @@ export type HivePush =
         | 'chat'
         | 'result'
         | 'missionNote'
-        | 'cortex';
+        | 'cortex'
+        /** The main process changed a run's canvas layout (the Queen built its flow). */
+        | 'layout';
       id: string | null;
     };
 

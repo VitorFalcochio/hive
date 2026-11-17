@@ -13,6 +13,11 @@ import {
 export interface ProviderPreset {
   kind: ProviderKind;
   label: string;
+  /**
+   * No longer offered when adding a provider; providers already set up with it keep working.
+   * OpenAI's API is left out because ChatGPT (sign-in with the user's plan) covers its models.
+   */
+  hidden?: boolean;
   defaultBaseUrl: string;
   docsUrl: string;
   /** Where to create an API key. */
@@ -143,10 +148,11 @@ export const providerPresets: Record<ProviderKind, ProviderPreset> = {
     keyUrl: 'https://platform.openai.com/api-keys',
     keyHint: 'sk-…',
     free: { available: false, summary: 'Pago.' },
+    hidden: true,
   },
   chatgpt: {
     kind: 'chatgpt',
-    label: 'ChatGPT (sua assinatura)',
+    label: 'ChatGPT',
     defaultBaseUrl: 'https://api.openai.com/v1',
     docsUrl: 'https://developers.openai.com/siwc/token-sharing-open-source',
     // Where the user sees and limits what Hive spends of the plan ("Manage usage").
@@ -615,3 +621,8 @@ export function recommendedModelCandidates(
   for (const id of rank(catalogIds)) if (!picked.includes(id)) picked.push(id);
   return picked;
 }
+
+/** The providers offered when adding one, in display order. */
+export const selectablePresets: ProviderPreset[] = Object.values(providerPresets).filter(
+  (preset) => !preset.hidden,
+);

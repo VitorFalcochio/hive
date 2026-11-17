@@ -4203,12 +4203,6 @@ pre.command {
   margin: 4px 8px;
   background: var(--border);
 }
-.mission-empty {
-  margin: 0;
-  padding: 6px 8px;
-  color: var(--subtle-foreground);
-  font-size: 11.5px;
-}
 button.mission-done-toggle {
   justify-content: flex-start;
   gap: 8px;
@@ -6232,4 +6226,284 @@ button.home-chip:hover:not(:disabled) {
 .content.cover-mode .page-actions button.secondary {
   background: rgb(10 9 8 / 72%);
   backdrop-filter: blur(6px);
+}
+
+/* Provider marks beside missions and tasks; they glow in the brand colour while working. */
+.provider-badge {
+  --brand: #f5b544;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
+  border-radius: 50%;
+  background: #0b0b0c;
+}
+.provider-badge svg.honey-comb {
+  image-rendering: pixelated;
+}
+.provider-badge.live {
+  border-color: color-mix(in srgb, var(--brand) 80%, transparent);
+  animation: provider-live 1.8s ease-in-out infinite;
+}
+@keyframes provider-live {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 45%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--brand) 0%, transparent),
+      0 0 10px color-mix(in srgb, var(--brand) 55%, transparent);
+  }
+}
+.mission-providers {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.mission-providers .provider-badge + .provider-badge {
+  margin-left: -5px;
+}
+.mission-providers-more {
+  margin-left: 3px;
+  color: var(--subtle-foreground);
+  font: 10px var(--font-mono);
+}
+.task-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 4px;
+  padding: 1px 8px 1px 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+.task-provider.live {
+  border-color: rgb(255 255 255 / 12%);
+  color: var(--foreground);
+}
+@media (prefers-reduced-motion: reduce) {
+  .provider-badge.live {
+    animation: none;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--brand) 50%, transparent);
+  }
+}
+
+/* Sidebar rows: the title gives way so the provider marks are never cut. */
+.mission-card-main .truncate {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mission-providers {
+  padding: 0 2px;
+}
+.mission-card-main {
+  overflow: hidden;
+}
+
+/* Providers page: each provider's mark on a tile, its status dot on the corner. */
+.provider-tile {
+  --brand: #f5b544;
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
+  border-radius: 10px;
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, var(--brand) 18%, transparent),
+      transparent 70%
+    ),
+    #0b0b0c;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+.provider-tile svg.honey-comb {
+  image-rendering: pixelated;
+}
+.provider-tile .dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  right: -3px;
+  bottom: -3px;
+  margin: 0;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+/* The sidebar tree never grows wider than the sidebar: grid items may shrink below their
+   content, so long mission titles truncate instead of pushing the provider marks out. */
+.tree {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-x: hidden;
+}
+.tree-group,
+.tree-missions,
+.mission-cards,
+.mission-done-list,
+.mission-card {
+  min-width: 0;
+}
+.mission-cards,
+.mission-done-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Add provider: a grid of provider cards with their logos, then the chosen one's details. */
+.modal.provider-modal {
+  width: min(640px, 100%);
+  max-height: 86vh;
+}
+.provider-pick-group + .provider-pick-group {
+  margin-top: 14px;
+}
+.provider-pick-label {
+  margin: 0 0 8px;
+  color: var(--subtle-foreground);
+  font: 500 10.5px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.provider-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.provider-pick-grid button.provider-pick {
+  --brand: #f5b544;
+  position: relative;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 2%);
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  white-space: normal;
+}
+.provider-pick-grid button.provider-pick:hover {
+  border-color: color-mix(in srgb, var(--brand) 40%, transparent);
+  background: color-mix(in srgb, var(--brand) 5%, transparent);
+}
+.provider-pick-grid button.provider-pick.selected {
+  border-color: color-mix(in srgb, var(--brand) 75%, transparent);
+  background: color-mix(in srgb, var(--brand) 9%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent);
+}
+.provider-pick-logo {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--brand, #f5b544) 30%, transparent);
+  border-radius: 8px;
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      color-mix(in srgb, var(--brand, #f5b544) 18%, transparent),
+      transparent 70%
+    ),
+    #0b0b0c;
+}
+.provider-pick-logo.large {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+.provider-pick-logo svg.honey-comb {
+  image-rendering: pixelated;
+}
+.provider-pick-name {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.provider-pick-check {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #0b0b0c;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.provider-detail {
+  --brand: #f5b544;
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 16px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--brand) 25%, transparent);
+  border-radius: 12px;
+  background:
+    radial-gradient(
+      120% 80% at 0% 0%,
+      color-mix(in srgb, var(--brand) 8%, transparent),
+      transparent 60%
+    ),
+    rgb(255 255 255 / 2%);
+}
+.provider-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.provider-detail-head > div {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.provider-detail-head strong {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.provider-detail-head button.ghost {
+  flex-shrink: 0;
+  margin: 0;
+}
+.provider-detail p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.provider-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font: 500 10px/1.5 var(--font-mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.provider-tag.free {
+  border-color: rgb(76 214 160 / 35%);
+  background: rgb(76 214 160 / 8%);
+  color: var(--success);
+}
+@media (max-width: 560px) {
+  .provider-pick-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
