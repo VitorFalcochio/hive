@@ -3033,3 +3033,356 @@ button.nc-cortex-open:hover {
 .nc-recovery-actions .danger {
   color: var(--danger);
 }
+
+/* ---------------------------------------------------------------- Tokens block */
+.nc-tokens {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+  --meter: #5ccfe6;
+}
+.nc-tokens.tone-mid {
+  --meter: #f5b544;
+}
+.nc-tokens.tone-high {
+  --meter: #f87185;
+}
+.nc-tokens.selected {
+  border-color: rgb(255 255 255 / 50%);
+}
+.nc-tokens header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.nc-tokens-scope {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.nc-tokens-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.nc-tokens-percent {
+  color: var(--meter);
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.nc-tokens-count {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.nc-tokens-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+  overflow: hidden;
+}
+.nc-tokens-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--meter);
+  transition: width 400ms ease;
+}
+.nc-tokens-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+.nc-tokens-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  font-size: 12px;
+}
+.nc-tokens-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.nc-tokens-list li span:last-child {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- Provider block */
+/* Same build as the Cortex block, in honey: a wax-gold edge and a faint honeycomb behind the
+   header. */
+.nc-provider {
+  --tone: var(--warning);
+  --honey: #f5b544;
+  display: flex;
+  flex-direction: column;
+  border-color: rgb(245 181 68 / 22%);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='42' viewBox='0 0 24 42'%3E%3Cpath d='M12 1 23 7.5v13L12 27 1 20.5v-13zM12 27v14M1 7.5 0 7M23 7.5l1-.5' fill='none' stroke='%23f5b544' stroke-opacity='.13'/%3E%3C/svg%3E")
+      0 0 / 24px 42px,
+    radial-gradient(140% 90% at 100% 0%, rgb(245 181 68 / 13%), transparent 55%),
+    var(--surface);
+}
+/* The comb only shows behind the header. */
+.nc-provider::before {
+  content: '';
+  position: absolute;
+  inset: 54px 0 0;
+  background: var(--surface);
+  pointer-events: none;
+}
+.nc-provider > :not(.react-flow__handle) {
+  position: relative;
+}
+.nc-provider.tone-pending {
+  --tone: var(--nc-pending);
+}
+.nc-provider.tone-failed {
+  --tone: var(--danger, #f87185);
+}
+.nc-provider.selected {
+  border-color: rgb(245 181 68 / 65%);
+  box-shadow:
+    inset 3px 0 0 var(--tone),
+    0 0 0 3px rgb(245 181 68 / 12%),
+    0 12px 32px rgb(0 0 0 / 35%);
+}
+/* The dot agents are wired from: visible, unlike the graph's hidden handles. */
+.nc-provider .react-flow__handle {
+  width: 12px;
+  height: 12px;
+  right: -6px;
+  border: 2px solid var(--surface);
+  border-radius: 3px;
+  background: var(--honey);
+  box-shadow:
+    0 0 0 1px rgb(245 181 68 / 45%),
+    0 0 10px rgb(245 181 68 / 40%);
+  transform: translateY(-50%) rotate(45deg);
+}
+.nc-provider .react-flow__handle:not(.connectable) {
+  background: var(--border-strong);
+  box-shadow: none;
+}
+.nc-provider-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 54px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid rgb(245 181 68 / 14%);
+}
+.nc-provider-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: linear-gradient(145deg, rgb(245 181 68 / 26%), rgb(245 181 68 / 6%));
+  border: 1px solid rgb(245 181 68 / 35%);
+  box-shadow: 0 0 18px rgb(245 181 68 / 18%);
+}
+.nc-provider-icon svg {
+  image-rendering: pixelated;
+}
+.nc-provider-title {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.nc-provider-title strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.nc-provider-title span {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.nc-provider-pill {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font: 500 10px/1.3 var(--font-mono);
+  letter-spacing: 0.03em;
+  color: var(--honey);
+  background: rgb(245 181 68 / 10%);
+  border: 1px solid rgb(245 181 68 / 28%);
+}
+.nc-provider-pill.tone-failed {
+  color: #f87185;
+  background: rgb(248 113 133 / 10%);
+  border-color: rgb(248 113 133 / 30%);
+}
+.nc-provider-pill.tone-pending {
+  color: var(--muted-foreground);
+  background: rgb(255 255 255 / 4%);
+  border-color: var(--border);
+}
+.nc-provider-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  padding: 12px 0 10px;
+}
+.nc-provider-metrics > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 14px;
+}
+.nc-provider-metrics > div + div {
+  border-left: 1px solid var(--border);
+}
+.nc-provider-metrics dd {
+  margin: 0;
+  font: 600 20px/1.1 var(--font-mono);
+  letter-spacing: -0.02em;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.nc-provider-metrics dt {
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+}
+.nc-provider-bees {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  margin: 0 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.nc-provider-bee {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid var(--border);
+}
+.nc-provider-bee.more {
+  font: 500 10px var(--font-mono);
+  color: var(--muted-foreground);
+}
+.nc-provider-who {
+  min-width: 0;
+  margin-left: 6px;
+  font-size: 11.5px;
+}
+.nc-provider-who.muted {
+  margin-left: 0;
+  color: var(--muted-foreground);
+}
+.nc-provider-foot {
+  margin-top: auto;
+  padding: 0 12px 12px;
+}
+.nc-provider-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 3%);
+  color: var(--foreground);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.nc-provider-select:hover {
+  border-color: rgb(245 181 68 / 45%);
+}
+.nc-provider-select:focus-visible {
+  outline: none;
+  border-color: rgb(245 181 68 / 70%);
+  box-shadow: 0 0 0 3px rgb(245 181 68 / 15%);
+}
+.nc-provider-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.nc-provider-field {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.nc-provider-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+.nc-provider-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.nc-provider-button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.nc-provider-button.primary {
+  border: 1px solid rgb(245 181 68 / 60%);
+  background: linear-gradient(180deg, #f7c15f, #e9a12e);
+  color: #1b1408;
+}
+.nc-provider-button.primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.nc-provider-button.ghost {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.nc-provider-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.nc-provider-error {
+  margin: 0 12px 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: #f87185;
+  background: rgb(248 113 133 / 8%);
+  border: 1px solid rgb(248 113 133 / 25%);
+}
+.nc-edge.kind-provider .react-flow__edge-path {
+  stroke: #f5b544;
+  stroke-opacity: 0.7;
+  stroke-dasharray: 5 4;
+}
+.nc-edge.kind-provider.highlight .react-flow__edge-path {
+  stroke-opacity: 1;
+  stroke-width: 2.5;
+}

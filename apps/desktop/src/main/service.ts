@@ -1,4 +1,5 @@
 import { app, dialog, safeStorage, shell } from 'electron';
+import { randomUUID } from 'node:crypto';
 import { mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -27,11 +28,17 @@ import {
 } from '@hive/core';
 import { HiveDatabase, Repositories, SCHEMA_VERSION } from '@hive/persistence';
 import {
+  ChatGPTPlanClient,
+  ChatGPTSession,
   GatedClient,
   OpenAICompatibleClient,
   ProviderGate,
+  revokeChatGPT,
+  signInWithChatGPT,
   workerCompatibilityIssues,
   type ChatClient,
+  type ChatGPTCredentials,
+  type ChatGPTRegistration,
 } from '@hive/providers';
 import { newId, nowIso, maskSecret, secretRedactor, HiveError, errorMessage } from '@hive/shared';
 import {
@@ -116,6 +123,7 @@ export class DesktopService {
   openCanvas?: () => void;
   /** Set by the app shell: brings the main window forward with a run open. */
   showRun?: (runId: string) => void;
+  addProvider?: () => void;
   /** Set by the app shell: app updates (absent in tests). */
   updater?: Updater;
   /** Set by the app shell: quits and opens Hive again (applies a staged restore). */
@@ -127,6 +135,8 @@ export class DesktopService {
   private readonly planning = new Set<string>();
   /** One per provider, shared by everything that calls it. */
   private readonly gates = new Map<string, ProviderGate>();
+  /** Signed-in ChatGPT accounts by provider; one per provider so refreshes never race. */
+  private readonly chatgptSessions = new Map<string, ChatGPTSession>();
   private shiftTimer: ReturnType<typeof setTimeout> | undefined;
   // Each open project keeps its own watcher and preview server, so switching tabs loses nothing.
   private readonly fileServices = new Map<string, FileService>();
@@ -757,26 +767,114 @@ export class DesktopService {
     return new GatedClient(this.client(providerId), gate);
   }
 
-  private client(providerId: string) {
+  private client(providerId: string): OpenAICompatibleClient | ChatGPTPlanClient {
     const provider = this.repos.providers.require(providerId, 'Provedor');
     if (!provider.enabled) throw new HiveError('PROVIDER', 'O provedor está desativado.');
-    const secret = this.repos.getSecret(providerId);
-    let apiKey: string | null;
-    try {
-      apiKey = secret ? safeStorage.decryptString(Buffer.from(secret.ciphertext)) : null;
-    } catch {
-      // Keys are encrypted with the Windows account; a backup from another one cannot read them.
-      throw new HiveError(
-        'PROVIDER',
-        `Não foi possível ler a chave de API de “${provider.name}”. Isso acontece com backups vindos de outro computador ou usuário do Windows. Cadastre a chave novamente em Provedores.`,
+    if (provider.kind === 'chatgpt')
+      return new ChatGPTPlanClient(
+        providerId,
+        this.chatgptSession(providerId),
+        fetch,
+        provider.baseUrl,
       );
-    }
     return new OpenAICompatibleClient({
       providerId,
       kind: provider.kind,
       baseUrl: provider.baseUrl,
-      apiKey,
+      apiKey: this.decryptSecret(providerId),
     });
+  }
+
+  private decryptSecret(providerId: string): string | null {
+    const secret = this.repos.getSecret(providerId);
+    try {
+      return secret ? safeStorage.decryptString(Buffer.from(secret.ciphertext)) : null;
+    } catch {
+      // Keys are encrypted with the Windows account; a backup from another one cannot read them.
+      const provider = this.repos.providers.require(providerId, 'Provedor');
+      throw new HiveError(
+        'PROVIDER',
+        `Não foi possível ler a credencial de “${provider.name}”. Isso acontece com backups vindos de outro computador ou usuário do Windows. Cadastre-a novamente em Provedores.`,
+      );
+    }
+  }
+
+  /* ------------------------------------------------------------ Sign in with ChatGPT */
+
+  /** Stable, opaque id of this Hive install, required by the ChatGPT registration. */
+  private chatgptHostId(): string {
+    let hostId = this.repos.getValue('chatgpt.hostId');
+    if (!hostId) {
+      hostId = `urn:uuid:${randomUUID()}`;
+      this.repos.setValue('chatgpt.hostId', hostId);
+    }
+    return hostId;
+  }
+
+  /** The account registration kept across sign-outs, so signing in again reuses it. */
+  private chatgptRegistration(providerId: string): ChatGPTRegistration | null {
+    const raw = this.repos.getValue(`chatgpt.registration.${providerId}`);
+    try {
+      return raw ? (JSON.parse(raw) as ChatGPTRegistration) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private chatgptCredentials(providerId: string): ChatGPTCredentials | null {
+    const raw = this.decryptSecret(providerId);
+    try {
+      return raw ? (JSON.parse(raw) as ChatGPTCredentials) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private chatgptSession(providerId: string): ChatGPTSession {
+    const cached = this.chatgptSessions.get(providerId);
+    if (cached) return cached;
+    const credentials = this.chatgptCredentials(providerId);
+    if (!credentials)
+      throw new HiveError('PROVIDER_AUTH', 'Entre com a sua conta do ChatGPT em Provedores.');
+    const session = new ChatGPTSession(credentials, (next) => this.storeChatGPT(providerId, next));
+    this.chatgptSessions.set(providerId, session);
+    return session;
+  }
+
+  /** Saves a token set (encrypted, like an API key), or forgets it when the session ended. */
+  private storeChatGPT(providerId: string, credentials: ChatGPTCredentials | null) {
+    const provider = this.repos.providers.get(providerId);
+    if (!provider) return;
+    if (!credentials) {
+      this.chatgptSessions.delete(providerId);
+      this.repos.deleteSecret(providerId);
+      this.repos.providers.put({
+        ...provider,
+        hasCredential: false,
+        credentialHint: null,
+        lastTest: null,
+      });
+      this.changed('provider', providerId);
+      return;
+    }
+    const hint = credentials.email ? `ChatGPT · ${credentials.email}` : 'ChatGPT';
+    this.repos.putSecret(providerId, safeStorage.encryptString(JSON.stringify(credentials)), hint);
+    if (!provider.hasCredential || provider.credentialHint !== hint) {
+      this.repos.providers.put({ ...provider, hasCredential: true, credentialHint: hint });
+      this.changed('provider', providerId);
+    }
+  }
+
+  /** Ends a ChatGPT session; false when OpenAI could not confirm the revocation. */
+  private async signOutChatGPT(providerId: string): Promise<boolean> {
+    let credentials: ChatGPTCredentials | null = null;
+    try {
+      credentials = this.chatgptCredentials(providerId);
+    } catch {
+      // unreadable: nothing to revoke from here
+    }
+    this.chatgptSessions.delete(providerId);
+    return credentials ? revokeChatGPT(credentials) : true;
   }
 
   private runDetail(id: string): RunDetail {
@@ -1026,6 +1124,10 @@ export class DesktopService {
       }
       case 'provider.delete': {
         const id = parse(channel);
+        if (this.repos.providers.get(id)?.kind === 'chatgpt') {
+          await this.signOutChatGPT(id);
+          this.repos.setValue(`chatgpt.registration.${id}`, null);
+        }
         this.repos.providers.delete(id);
         this.repos.deleteSecret(id);
         this.repos.deleteModels(id);
@@ -1042,6 +1144,8 @@ export class DesktopService {
             'O armazenamento seguro do sistema não está disponível.',
           );
         const provider = this.repos.providers.require(providerId, 'Provedor');
+        if (provider.kind === 'chatgpt')
+          throw new HiveError('VALIDATION', 'O ChatGPT não usa chave: entre com a sua conta.');
         secretRedactor.register(key);
         const hint = maskSecret(key);
         this.repos.putSecret(providerId, safeStorage.encryptString(key), hint);
@@ -1057,11 +1161,54 @@ export class DesktopService {
       case 'provider.clearKey': {
         const id = parse(channel);
         const provider = this.repos.providers.require(id, 'Provedor');
+        const revoked = provider.kind === 'chatgpt' ? await this.signOutChatGPT(id) : true;
         this.repos.deleteSecret(id);
         const result = this.repos.providers.put({
           ...provider,
           hasCredential: false,
           credentialHint: null,
+          lastTest: revoked
+            ? null
+            : {
+                ok: false,
+                message:
+                  'Saída não confirmada pela OpenAI. Para garantir, desconecte o Hive nas configurações do ChatGPT.',
+                at: nowIso(),
+                latencyMs: null,
+              },
+        });
+        this.changed('provider', id);
+        return result;
+      }
+      case 'provider.chatgptSignIn': {
+        const id = parse(channel);
+        const provider = this.repos.providers.require(id, 'Provedor');
+        if (provider.kind !== 'chatgpt')
+          throw new HiveError(
+            'VALIDATION',
+            'Este provedor usa chave de API, não login do ChatGPT.',
+          );
+        if (!safeStorage.isEncryptionAvailable())
+          throw new HiveError(
+            'SECRET_STORE',
+            'O armazenamento seguro do sistema não está disponível.',
+          );
+        const credentials = await signInWithChatGPT({
+          hostId: this.chatgptHostId(),
+          appName: 'Hive',
+          registration: this.chatgptRegistration(id),
+          openBrowser: (url) => shell.openExternal(url),
+        });
+        const registration: ChatGPTRegistration = {
+          clientId: credentials.clientId,
+          sub: credentials.sub,
+          email: credentials.email,
+        };
+        this.repos.setValue(`chatgpt.registration.${id}`, JSON.stringify(registration));
+        this.chatgptSessions.delete(id);
+        this.storeChatGPT(id, credentials);
+        const result = this.repos.providers.put({
+          ...this.repos.providers.require(id, 'Provedor'),
           lastTest: null,
         });
         this.changed('provider', id);
@@ -1481,6 +1628,8 @@ export class DesktopService {
         if (!this.openCanvas)
           throw new HiveError('VALIDATION', 'O Nexus não está disponível agora.');
         return this.openCanvas();
+      case 'window.addProvider':
+        return this.addProvider?.();
       case 'window.showRun': {
         const runId = parse(channel);
         this.repos.runs.require(runId, 'Execução');
@@ -1538,6 +1687,27 @@ export class DesktopService {
           terminals: this.canvasTerminalsOf(runId),
           recoveries: this.nexusAutopilot.recoveries(runId),
         });
+      }
+      case 'usage.today': {
+        const since = startOfToday();
+        const rows = this.repos.liveUsageSince(since);
+        const byWorker = rows
+          .map((row) => ({
+            workerId: row.workerId,
+            name: row.workerId
+              ? (this.repos.workers.get(row.workerId)?.name ?? 'Agente removido')
+              : 'Outros',
+            tokens: row.promptTokens + row.completionTokens,
+          }))
+          .filter((row) => row.tokens > 0)
+          .sort((a, b) => b.tokens - a.tokens);
+        return {
+          promptTokens: rows.reduce((sum, row) => sum + row.promptTokens, 0),
+          completionTokens: rows.reduce((sum, row) => sum + row.completionTokens, 0),
+          budget: this.repos.getSettings().dailyTokenBudget,
+          byWorker,
+          since,
+        };
       }
       case 'canvas.layout.get': {
         const runId = parse(channel);

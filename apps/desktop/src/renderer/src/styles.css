@@ -5409,3 +5409,153 @@ pre.command {
   color: #93c5fd;
   border-color: rgb(147 197 253 / 35%);
 }
+
+/* Settings: categories on the left, the chosen one (or search results) on the right. */
+.settings-layout {
+  grid-template-columns: 232px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.settings-nav {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 2px;
+}
+/* `label` and `button` carry global form styles (column layout, centred content, fixed height);
+   the nav undoes them so every item lines up on the left. */
+.settings-search {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  margin: 0 0 10px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted-foreground);
+}
+.settings-search:focus-within {
+  border-color: var(--ring);
+}
+.settings-search svg {
+  flex-shrink: 0;
+}
+.settings-search input,
+.settings-search input:hover,
+.settings-search input:focus {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 13px;
+}
+.settings-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  height: auto;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  letter-spacing: normal;
+  white-space: normal;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-nav-item svg {
+  flex-shrink: 0;
+}
+.settings-nav-item:hover:not(.selected) {
+  background: var(--hover);
+  color: var(--foreground);
+}
+.settings-nav-item.selected {
+  border-color: var(--border);
+  background: var(--selected);
+  color: var(--foreground);
+}
+.settings-nav-item.selected svg {
+  color: var(--warning);
+}
+.settings-nav-item span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.settings-nav-item strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-nav-item small {
+  overflow: hidden;
+  color: var(--subtle-foreground);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-nav-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--warning);
+}
+.settings-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.settings-content-head {
+  display: grid;
+  gap: 2px;
+  padding: 2px 0 4px;
+}
+.settings-content-head strong {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.settings-content-head small {
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+}
+.settings-block {
+  display: grid;
+  gap: 6px;
+}
+.settings-block-path {
+  color: var(--subtle-foreground);
+  font: 500 10.5px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+@media (max-width: 820px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-nav {
+    position: static;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .settings-search {
+    grid-column: 1 / -1;
+  }
+  .settings-nav-item small {
+    display: none;
+  }
+}

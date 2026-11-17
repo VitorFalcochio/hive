@@ -22,6 +22,11 @@ export interface ProviderPreset {
   free: { available: boolean; summary: string };
   /** Calls work without an API key (a local server, or a gateway with keyless free models). */
   keyOptional?: boolean;
+  /**
+   * Signs in with an account instead of taking an API key. `chatgpt` is OpenAI's "Sign in with
+   * ChatGPT": calls spend the user's ChatGPT plan, not an API balance.
+   */
+  signIn?: 'chatgpt';
 }
 
 /**
@@ -138,6 +143,21 @@ export const providerPresets: Record<ProviderKind, ProviderPreset> = {
     keyUrl: 'https://platform.openai.com/api-keys',
     keyHint: 'sk-…',
     free: { available: false, summary: 'Pago.' },
+  },
+  chatgpt: {
+    kind: 'chatgpt',
+    label: 'ChatGPT (sua assinatura)',
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    docsUrl: 'https://developers.openai.com/siwc/token-sharing-open-source',
+    // Where the user sees and limits what Hive spends of the plan ("Manage usage").
+    keyUrl: 'https://chatgpt.com/settings/usage',
+    keyHint: 'Sem chave: entre com a conta do ChatGPT',
+    free: {
+      available: false,
+      summary:
+        'Usa a cota do seu plano ChatGPT (Go, Plus ou Pro): sem chave de API e sem cobrança extra. Os pedidos dividem o limite do plano com o Codex; dá para pôr um teto só para o Hive nas configurações de uso do ChatGPT.',
+    },
+    signIn: 'chatgpt',
   },
   'openai-compatible': {
     kind: 'openai-compatible',
@@ -478,6 +498,12 @@ const genericPreferences: Record<ModelTier, string[]> = {
   ],
 };
 const modelPreferences: Partial<Record<ProviderKind, Record<ModelTier, string[]>>> = {
+  // The plan's catalog changes with the account; prefixes pick the newest family it offers.
+  chatgpt: {
+    planner: ['gpt-6', 'gpt-5.5', 'gpt-5'],
+    coder: ['codex', 'gpt-6', 'gpt-5.5', 'gpt-5'],
+    reviewer: ['gpt-6', 'gpt-5.5', 'gpt-5-mini', 'gpt-5'],
+  },
   groq: {
     planner: ['openai/gpt-oss-120b', 'moonshotai/kimi-k2', 'qwen/qwen3-32b', 'llama-3.3-70b'],
     coder: ['moonshotai/kimi-k2', 'openai/gpt-oss-120b', 'qwen/qwen3-32b', 'llama-3.3-70b'],

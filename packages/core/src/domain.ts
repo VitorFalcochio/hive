@@ -24,6 +24,7 @@ export const providerKindSchema = z.enum([
   'cerebras',
   'mistral',
   'kilo',
+  'chatgpt',
   'openai-compatible',
 ]);
 export type ProviderKind = z.infer<typeof providerKindSchema>;

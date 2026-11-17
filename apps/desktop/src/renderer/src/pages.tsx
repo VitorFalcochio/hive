@@ -184,7 +184,11 @@ export function ProvidersPage() {
                 </div>
                 <span className="badge">
                   {provider.credentialHint ??
-                    (providerPresets[provider.kind].keyOptional ? 'sem chave' : 'falta chave')}
+                    (providerPresets[provider.kind].signIn
+                      ? 'falta entrar'
+                      : providerPresets[provider.kind].keyOptional
+                        ? 'sem chave'
+                        : 'falta chave')}
                 </span>
                 <div className="row-actions">
                   <button
@@ -197,10 +201,13 @@ export function ProvidersPage() {
                   </button>
                   <button
                     className="ghost"
-                    title="Trocar chave"
+                    title={
+                      providerPresets[provider.kind].signIn ? 'Conta do ChatGPT' : 'Trocar chave'
+                    }
                     onClick={() => openModal({ kind: 'key', provider })}
                   >
-                    <KeyRound size={14} /> Chave
+                    <KeyRound size={14} />{' '}
+                    {providerPresets[provider.kind].signIn ? 'Conta' : 'Chave'}
                   </button>
                   <button
                     className="icon-button"
@@ -224,7 +231,8 @@ export function ProvidersPage() {
               </button>
             }
           >
-            Nenhum provedor ainda. NVIDIA, OpenAI, Groq, DeepSeek, OpenRouter ou um servidor local.
+            Nenhum provedor ainda. NVIDIA, OpenAI, Groq, DeepSeek, OpenRouter, sua assinatura do
+            ChatGPT ou um servidor local.
           </Empty>
         </section>
       )}

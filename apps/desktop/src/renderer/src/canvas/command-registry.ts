@@ -15,7 +15,9 @@ export type CommandIcon =
   | 'play'
   | 'queen'
   | 'pin'
-  | 'cortex';
+  | 'cortex'
+  | 'tokens'
+  | 'provider';
 export type PaletteOperation =
   | 'new-mission'
   | 'new-agent'
@@ -37,6 +39,8 @@ export type PaletteOperation =
   | 'pin'
   | 'group-selection'
   | 'new-cortex'
+  | 'new-tokens'
+  | 'new-provider'
   | 'blocks';
 export interface CommandContext {
   snapshot: CanvasSnapshot | null;
@@ -225,13 +229,31 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
     ['criar', 'memória', 'memory', 'bloco', 'cérebro', 'conhecimento', 'decisões'],
   );
   command(
+    'create.provider',
+    'Provedor',
+    'Bloco de provedor: escolha ou conecte um e ligue a um agente (a Queen, por exemplo).',
+    'Criar',
+    'provider',
+    'new-provider',
+    ['criar', 'bloco', 'provedor', 'modelo', 'chatgpt', 'openai', 'groq', 'api', 'chave', 'queen'],
+  );
+  command(
+    'create.tokens',
+    'Tokens',
+    'Bloco com o uso de tokens de hoje em % do orçamento diário, ao vivo.',
+    'Criar',
+    'tokens',
+    'new-tokens',
+    ['criar', 'bloco', 'tokens', 'uso', 'consumo', 'orçamento', 'limite', 'monitoramento'],
+  );
+  command(
     'blocks.open',
     'Abrir menu de blocos',
-    'Arrastar notas, grupos e Cortex para o canvas.',
+    'Arrastar notas, grupos, provedores, tokens e Cortex para o canvas.',
     'Criar',
     'note',
     'blocks',
-    ['blocos', 'adicionar', 'arrastar', 'cortex'],
+    ['blocos', 'adicionar', 'arrastar', 'cortex', 'tokens', 'provedor'],
   );
   command(
     'view.center',

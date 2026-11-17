@@ -1,7 +1,7 @@
-import { BrainCircuit, Frame, StickyNote, X } from 'lucide-react';
+import { BrainCircuit, Frame, Gauge, Plug, StickyNote, X } from 'lucide-react';
 
 /** Blocks the user can drag onto the canvas; the drop decides where they go. */
-export type BlockKind = 'note' | 'frame' | 'cortex';
+export type BlockKind = 'note' | 'frame' | 'cortex' | 'tokens' | 'provider';
 export const BLOCK_MIME = 'application/x-hive-block';
 
 const categories: {
@@ -17,6 +17,28 @@ const categories: {
         title: 'Grupo',
         description: 'Quadro que agrupa e move junto.',
         icon: Frame,
+      },
+    ],
+  },
+  {
+    title: 'Provedores',
+    blocks: [
+      {
+        kind: 'provider',
+        title: 'Provedor',
+        description: 'Escolha ou conecte um provedor e ligue-o a um agente.',
+        icon: Plug,
+      },
+    ],
+  },
+  {
+    title: 'Monitoramento',
+    blocks: [
+      {
+        kind: 'tokens',
+        title: 'Tokens',
+        description: 'Uso de hoje em % do orçamento diário, ao vivo.',
+        icon: Gauge,
       },
     ],
   },

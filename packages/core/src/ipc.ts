@@ -415,6 +415,26 @@ export const canvasLayoutSchema = z.object({
   frames: z
     .array(z.object({ id: layoutKey, title: z.string().max(80), x: coordinate, y: coordinate }))
     .max(50),
+  /** Token meters: today's usage against the daily budget. Layouts saved before them have none. */
+  meters: z
+    .array(z.object({ id: layoutKey, x: coordinate, y: coordinate }))
+    .max(10)
+    .default([]),
+  /**
+   * Provider blocks. A line from one to an agent makes the agent use that provider; the lines
+   * drawn are the agents that use it now, so the canvas never shows a stale link.
+   */
+  providers: z
+    .array(
+      z.object({
+        id: layoutKey,
+        x: coordinate,
+        y: coordinate,
+        providerId: z.string().min(1).max(100).nullable(),
+      }),
+    )
+    .max(20)
+    .default([]),
 });
 export type CanvasLayout = z.infer<typeof canvasLayoutSchema>;
 
@@ -426,6 +446,8 @@ export const emptyCanvasLayout: CanvasLayout = {
   agents: [],
   notes: [],
   frames: [],
+  meters: [],
+  providers: [],
 };
 
 /** One step of an agent's model chain, in the order calls try them. */
@@ -508,6 +530,11 @@ export const ipcContract = {
     z.object({ providerId: id, key: z.string().min(1).max(500) }),
   ),
   'provider.clearKey': channel<ProviderConfig>()(id),
+  /**
+   * Opens the browser for "Sign in with ChatGPT" and waits for the user to finish there. On
+   * success the provider holds the account's tokens, like a key.
+   */
+  'provider.chatgptSignIn': channel<ProviderConfig>()(id),
   'provider.test': channel<ConnectionTest>()(id),
   /** Starts an MCP server once and lists its tools, without saving it. */
   'mcp.test': channel<McpProbe>()(mcpServerSchema),
@@ -676,6 +703,8 @@ export const ipcContract = {
   'window.openCanvas': channel<void>()(none),
   /** Brings the main window to the front with this run open, switching project if needed. */
   'window.showRun': channel<void>()(id),
+  /** Brings the main window up on Provedores with the add form open (asked from the Nexus). */
+  'window.addProvider': channel<void>()(none),
   'canvas.runs': channel<CanvasRunSummary[]>()(none),
   'canvas.queen.propose': channel<CanvasQueenProposal>()(canvasQueenRequestSchema),
   'canvas.queen.apply': channel<CanvasQueenApplied>()(z.object({ runId: id, proposalId: id })),
@@ -727,6 +756,8 @@ export const ipcContract = {
     }),
   ),
   'canvas.layout.save': channel<void>()(z.object({ runId: id, layout: canvasLayoutSchema })),
+  /** Tokens spent today, live (running tasks included), against the daily budget. */
+  'usage.today': channel<TokenMeter>()(none),
   /** Projects a mission can be created in, from the canvas. */
   'canvas.workspaces': channel<{ id: string; name: string }[]>()(none),
   'canvas.mission.create': channel<{ missionId: string; runId: string }>()(
@@ -850,6 +881,14 @@ export const canvasChannels: ReadonlySet<IpcChannel> = new Set<IpcChannel>([
   'canvas.notes.get',
   'canvas.notes.save',
   'canvas.layout.save',
+  'usage.today',
+  // The Provider block: add a ChatGPT provider (the sign-in happens in the browser) and point an
+  // agent at a provider. API keys are never typed here: the block sends you to the main window.
+  'provider.save',
+  'provider.chatgptSignIn',
+  'provider.test',
+  'worker.autoConfigure',
+  'window.addProvider',
   'canvas.workspaces',
   'canvas.mission.create',
   'canvas.task.create',
@@ -892,6 +931,18 @@ export const canvasChannels: ReadonlySet<IpcChannel> = new Set<IpcChannel>([
   'window.showRun',
 ]);
 
+/** What the Tokens block shows: today's spend, by agent, against the daily budget. */
+export interface TokenMeter {
+  promptTokens: number;
+  completionTokens: number;
+  /** Settings' daily token budget; 0 when none is set. */
+  budget: number;
+  /** Biggest spenders first. */
+  byWorker: { workerId: string | null; name: string; tokens: number }[];
+  /** Since when the day counts (local midnight, ISO). */
+  since: string;
+}
+
 /** Push notifications from the main process to the renderer. */
 /** Result of picking a folder: opened, or a plain folder that must be initialized first. */
 export type WorkspacePick =
@@ -906,6 +957,8 @@ export type HivePush =
   | { kind: 'terminal'; event: TerminalEvent }
   /** Sent to the main window only: open this run (asked for from the Nexus). */
   | { kind: 'navigate'; runId: string }
+  /** Sent to the main window only: open the add-provider form (asked for from the Nexus). */
+  | { kind: 'navigate'; page: 'add-provider' }
   /** Sent to the main window only: where the app update stands. */
   | { kind: 'update'; state: UpdateState }
   | {

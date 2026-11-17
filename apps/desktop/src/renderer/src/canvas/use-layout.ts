@@ -6,6 +6,8 @@ type Point = { x: number; y: number };
 type Size = { width: number; height: number };
 export type Note = CanvasLayout['notes'][number];
 export type Frame = CanvasLayout['frames'][number];
+export type Meter = CanvasLayout['meters'][number];
+export type ProviderBlock = CanvasLayout['providers'][number];
 
 /** Changes are written this long after the last one, and right away when the window closes. */
 const SAVE_MS = 400;
@@ -32,7 +34,10 @@ export interface LayoutApi {
   updateNote: (id: string, patch: Partial<Note>) => void;
   addFrame: (frame: Frame) => void;
   updateFrame: (id: string, patch: Partial<Frame>) => void;
-  /** Removes notes and frames (and their sizes); other ids are ignored. */
+  addMeter: (meter: Meter) => void;
+  addProviderBlock: (block: ProviderBlock) => void;
+  updateProviderBlock: (id: string, patch: Partial<ProviderBlock>) => void;
+  /** Removes notes, frames and meters (and their sizes); other ids are ignored. */
   remove: (ids: string[]) => void;
 }
 
@@ -147,11 +152,26 @@ export function useLayout(runId: string): LayoutApi {
           const frames = current.frames.map((frame) =>
             positions[frame.id] ? { ...frame, ...round(positions[frame.id]!) } : frame,
           );
-          const own = new Set([...notes, ...frames].map((item) => item.id));
+          const meters = current.meters.map((meter) =>
+            positions[meter.id] ? { ...meter, ...round(positions[meter.id]!) } : meter,
+          );
+          const providers = current.providers.map((block) =>
+            positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
+          );
+          const own = new Set(
+            [...notes, ...frames, ...meters, ...providers].map((item) => item.id),
+          );
           const pinned = { ...current.pinned[mode] };
           for (const [id, point] of Object.entries(positions))
             if (!own.has(id)) pinned[id] = { ...round(point), locked: pinned[id]?.locked };
-          return { ...current, notes, frames, pinned: { ...current.pinned, [mode]: pinned } };
+          return {
+            ...current,
+            notes,
+            frames,
+            meters,
+            providers,
+            pinned: { ...current.pinned, [mode]: pinned },
+          };
         }),
       lock: (mode, positions, locked) =>
         change((current) => {
@@ -206,12 +226,25 @@ export function useLayout(runId: string): LayoutApi {
           ...current,
           frames: current.frames.map((frame) => (frame.id === id ? { ...frame, ...patch } : frame)),
         })),
+      addMeter: (meter) =>
+        change((current) => ({ ...current, meters: [...current.meters, meter] })),
+      addProviderBlock: (block) =>
+        change((current) => ({ ...current, providers: [...current.providers, block] })),
+      updateProviderBlock: (id, patch) =>
+        change((current) => ({
+          ...current,
+          providers: current.providers.map((block) =>
+            block.id === id ? { ...block, ...patch } : block,
+          ),
+        })),
       remove: (ids) =>
         change((current) => {
           const gone = new Set(ids);
           if (
             !current.notes.some((n) => gone.has(n.id)) &&
-            !current.frames.some((f) => gone.has(f.id))
+            !current.frames.some((f) => gone.has(f.id)) &&
+            !current.meters.some((m) => gone.has(m.id)) &&
+            !current.providers.some((p) => gone.has(p.id))
           )
             return current;
           const sizes = { ...current.sizes };
@@ -221,6 +254,8 @@ export function useLayout(runId: string): LayoutApi {
             sizes,
             notes: current.notes.filter((note) => !gone.has(note.id)),
             frames: current.frames.filter((frame) => !gone.has(frame.id)),
+            meters: current.meters.filter((meter) => !gone.has(meter.id)),
+            providers: current.providers.filter((block) => !gone.has(block.id)),
           };
         }),
     }),
@@ -230,6 +265,6 @@ export function useLayout(runId: string): LayoutApi {
 
 const round = (point: Point): Point => ({ x: Math.round(point.x), y: Math.round(point.y) });
 
-/** A short id for notes and frames; they live only in the layout. */
-export const localId = (prefix: 'note' | 'frame') =>
+/** A short id for notes, frames and meters; they live only in the layout. */
+export const localId = (prefix: 'note' | 'frame' | 'tokens' | 'provider') =>
   `${prefix}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;

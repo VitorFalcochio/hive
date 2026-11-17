@@ -21,6 +21,9 @@ import { ReviewDiff } from './review-diff';
 import { ModelPicker } from './model-picker';
 import { AgentBee } from './mascot';
 
+/** OpenAI's page where the user sees and caps what Hive spends of the ChatGPT plan. */
+const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
+
 export function ModalHost({ modal }: { modal: ModalState | null }) {
   if (!modal) return null;
   switch (modal.kind) {
@@ -49,9 +52,14 @@ function FormError({ error }: { error: string }) {
   ) : null;
 }
 
-/** Saves the key (if any), tests the connection and loads the model catalog. */
+/**
+ * Saves the key (if any) — or, for ChatGPT, runs the browser sign-in — then tests the connection
+ * and loads the model catalog.
+ */
 async function connect(provider: ProviderConfig, key: string) {
-  if (key) await window.hive.invoke('provider.setKey', { providerId: provider.id, key });
+  if (providerPresets[provider.kind].signIn === 'chatgpt')
+    await window.hive.invoke('provider.chatgptSignIn', provider.id);
+  else if (key) await window.hive.invoke('provider.setKey', { providerId: provider.id, key });
   const test = await window.hive.invoke('provider.test', provider.id);
   if (!test.ok) throw new Error(`Não foi possível conectar: ${test.message}`);
   return window.hive.invoke('provider.models', { providerId: provider.id, refresh: true });
@@ -82,6 +90,7 @@ function ProviderModal() {
   );
   const task = useTask();
   const keyOptional = !!preset.keyOptional;
+  const signIn = preset.signIn === 'chatgpt';
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -111,9 +120,23 @@ function ProviderModal() {
           <Check size={18} />
           <div>
             <strong>{connected.provider.name}</strong>
-            <p>{connected.models} modelos disponíveis. A chave fica criptografada no Windows.</p>
+            <p>
+              {connected.models} modelos disponíveis.{' '}
+              {providerPresets[connected.provider.kind].signIn
+                ? 'Usando o plano do ChatGPT: os pedidos dos agentes contam no limite do seu plano, sem cobrança à parte. O acesso fica criptografado no Windows.'
+                : 'A chave fica criptografada no Windows.'}
+            </p>
           </div>
         </div>
+        {providerPresets[connected.provider.kind].signIn && (
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => void window.hive.invoke('app.openExternal', CHATGPT_USAGE_URL)}
+          >
+            <ExternalLink size={13} /> Gerenciar uso
+          </button>
+        )}
         <p className="modal-description">
           Próximo passo: escolher e testar automaticamente um modelo para cada um dos{' '}
           {workers.length} agentes.
@@ -161,23 +184,30 @@ function ProviderModal() {
               className="ghost"
               onClick={() => void window.hive.invoke('app.openExternal', preset.keyUrl)}
             >
-              <ExternalLink size={13} /> Criar chave
+              <ExternalLink size={13} /> {signIn ? 'Gerenciar uso' : 'Criar chave'}
             </button>
           )}
         </div>
-        <label>
-          Chave de API{keyOptional && <span className="optional"> · opcional</span>}
-          <input
-            type="password"
-            autoFocus
-            autoComplete="off"
-            required={!keyOptional}
-            maxLength={500}
-            value={key}
-            placeholder={preset.keyHint}
-            onChange={(event) => setKey(event.target.value)}
-          />
-        </label>
+        {signIn ? (
+          <p className="modal-description">
+            O navegador abre na página da OpenAI. Entre com a sua conta e autorize o Hive a usar o
+            seu plano; depois volte para cá.
+          </p>
+        ) : (
+          <label>
+            Chave de API{keyOptional && <span className="optional"> · opcional</span>}
+            <input
+              type="password"
+              autoFocus
+              autoComplete="off"
+              required={!keyOptional}
+              maxLength={500}
+              value={key}
+              placeholder={preset.keyHint}
+              onChange={(event) => setKey(event.target.value)}
+            />
+          </label>
+        )}
         <details className="advanced">
           <summary>Nome e URL</summary>
           <label>
@@ -205,7 +235,13 @@ function ProviderModal() {
             Cancelar
           </button>
           <button disabled={task.running}>
-            {task.running ? 'Conectando…' : 'Adicionar e testar'}
+            {task.running
+              ? signIn
+                ? 'Aguardando o navegador…'
+                : 'Conectando…'
+              : signIn
+                ? 'Continuar com o ChatGPT'
+                : 'Adicionar e testar'}
           </button>
         </div>
       </form>
@@ -217,6 +253,8 @@ function KeyModal({ provider }: { provider: ProviderConfig }) {
   const { closeModal, refresh, notify } = useHive();
   const [key, setKey] = useState('');
   const task = useTask();
+  if (providerPresets[provider.kind].signIn === 'chatgpt')
+    return <ChatGPTAccountModal provider={provider} />;
   return (
     <Modal
       title={`Chave de ${provider.name}`}
@@ -258,6 +296,72 @@ function KeyModal({ provider }: { provider: ProviderConfig }) {
           <button disabled={task.running}>{task.running ? 'Testando…' : 'Salvar e testar'}</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** Sign in, switch accounts or sign out of a ChatGPT provider. */
+function ChatGPTAccountModal({ provider }: { provider: ProviderConfig }) {
+  const { closeModal, refresh, notify } = useHive();
+  const task = useTask();
+  const signedIn = provider.hasCredential;
+  return (
+    <Modal
+      title={`Conta de ${provider.name}`}
+      description={
+        signedIn
+          ? `Conectado como ${provider.credentialHint?.replace(/^ChatGPT · /, '') ?? 'sua conta'}. Os pedidos usam o seu plano do ChatGPT.`
+          : 'Entre com a sua conta do ChatGPT para os agentes usarem o seu plano.'
+      }
+      onClose={closeModal}
+    >
+      <FormError error={task.error} />
+      <div className="modal-actions">
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => void window.hive.invoke('app.openExternal', CHATGPT_USAGE_URL)}
+        >
+          <ExternalLink size={13} /> Gerenciar uso
+        </button>
+        {signedIn && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={task.running}
+            onClick={() =>
+              void task.run(async () => {
+                try {
+                  await window.hive.invoke('provider.clearKey', provider.id);
+                  notify(`Saiu de ${provider.name}.`);
+                  closeModal();
+                } finally {
+                  await refresh();
+                }
+              })
+            }
+          >
+            Sair
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={task.running}
+          onClick={() =>
+            void task.run(async () => {
+              try {
+                const models = await connect(provider, '');
+                notify(`${provider.name} conectado · ${models.length} modelos.`);
+                closeModal();
+              } finally {
+                await refresh();
+              }
+            })
+          }
+        >
+          {task.running ? 'Aguardando o navegador…' : 'Continuar com o ChatGPT'}
+        </button>
+      </div>
     </Modal>
   );
 }

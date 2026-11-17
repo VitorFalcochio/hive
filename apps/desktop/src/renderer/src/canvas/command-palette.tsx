@@ -2,6 +2,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 're
 import {
   Bot,
   BrainCircuit,
+  Gauge,
+  Plug,
   CheckSquare,
   FileText,
   Folder,
@@ -38,6 +40,8 @@ const icons: Record<CommandIcon, typeof Search> = {
   queen: Bot,
   pin: MapPin,
   cortex: BrainCircuit,
+  tokens: Gauge,
+  provider: Plug,
 };
 
 export function CommandPalette({

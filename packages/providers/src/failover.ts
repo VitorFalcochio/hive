@@ -97,6 +97,13 @@ export function failoverCause(
         providerMs: retryAfterMs ?? 20 * SECOND,
       };
     }
+    // The ChatGPT plan limit covers every model of the account, not just this one.
+    if (status === 402 && text.includes('plano chatgpt'))
+      return {
+        reason: 'limite do plano ChatGPT',
+        restMs: COOLDOWN.payment,
+        providerMs: COOLDOWN.payment,
+      };
     if (status === 402)
       return { reason: 'sem créditos (402)', restMs: COOLDOWN.payment, providerMs: 0 };
     if (status === 404)

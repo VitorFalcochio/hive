@@ -381,6 +381,26 @@ export class Repositories {
     });
   }
 
+  /**
+   * Tokens of every model call since `since` (an ISO time), by agent, read from the call events:
+   * unlike `usageSince` it counts tasks still running, so a meter moves while agents work.
+   */
+  liveUsageSince(since: string): {
+    workerId: string | null;
+    promptTokens: number;
+    completionTokens: number;
+  }[] {
+    return this.db.all<{ workerId: string | null; promptTokens: number; completionTokens: number }>(
+      `SELECT worker_id AS workerId,
+              COALESCE(SUM(json_extract(data, '$.usage.promptTokens')), 0) AS promptTokens,
+              COALESCE(SUM(json_extract(data, '$.usage.completionTokens')), 0) AS completionTokens
+         FROM events
+        WHERE type = 'model.response' AND ts >= ? AND data IS NOT NULL
+        GROUP BY worker_id`,
+      since,
+    );
+  }
+
   /** Tokens of the tasks, in every project, that finished at or after `since` (an ISO time). */
   usageSince(since: string): { promptTokens: number; completionTokens: number } {
     let promptTokens = 0;

@@ -10,6 +10,7 @@ import {
   ShieldQuestion,
   FileText,
   Expand,
+  Gauge,
 } from 'lucide-react';
 import type {
   AgentEvent,
@@ -20,9 +21,13 @@ import type {
   Task,
   TerminalEvent,
   LiveResult,
+  TokenMeter,
+  ProviderConfig,
+  ProviderKind,
 } from '@hive/core';
+import { providerPresets } from '@hive/core';
 import { AgentBee } from '../mascot';
-import { HoneyJar } from '../honey';
+import { HoneyComb, HoneyJar } from '../honey';
 import { AgentWindow, RestoreButton, type AgentTab } from './agent-window';
 import {
   UNASSIGNED,
@@ -34,7 +39,7 @@ import {
   type AgentStatus,
   type Grouping,
 } from './model';
-import type { Frame, Note } from './use-layout';
+import type { Frame, Note, ProviderBlock } from './use-layout';
 
 /** What every node reads; nodes only carry the id of what they stand for. */
 export interface CanvasView {
@@ -70,6 +75,8 @@ export interface CanvasView {
   openTerminal: (workerId: string, kind: 'chat' | 'shell') => Promise<void>;
   stopTerminal: (sessionId: string) => Promise<void>;
   subscribeTerminal: (listener: (event: TerminalEvent) => void) => () => void;
+  providerBlocks: Map<string, ProviderBlock>;
+  updateProviderBlock: (id: string, patch: Partial<ProviderBlock>) => void;
   notes: Map<string, Note>;
   frames: Map<string, Frame>;
   updateNote: (id: string, patch: Partial<Note>) => void;
@@ -90,7 +97,7 @@ function useView(): CanvasView {
 export type NodeData = { ref: string };
 export type CanvasNode = Node<
   NodeData,
-  'agent' | 'task' | 'lane' | 'note' | 'frame' | 'result' | 'cortex'
+  'agent' | 'task' | 'lane' | 'note' | 'frame' | 'result' | 'cortex' | 'tokens' | 'provider'
 >;
 
 /** Handles are where connections are drawn; the engine decides what a drawn line may do. */
@@ -116,8 +123,9 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
   if (!worker || !status) return null;
   const queen = worker.role === 'queen';
   // A line from an agent to a task delegates it (the engine checks it has not started); to a
-  // Cortex it gives access. The Queen only connects to a Cortex, for planning context.
-  const handles = <Handles source target={false} />;
+  // Cortex it gives access. The Queen only connects to a Cortex, for planning context. A line
+  // from a Provider block into an agent switches its provider.
+  const handles = <Handles source target />;
   const windowed = view.grouping === 'workspace' && !queen && !view.minimized.has(worker.id);
   if (windowed)
     return (
@@ -306,6 +314,373 @@ export const NoteNode = memo(function NoteNode({ id, selected }: NodeProps<Canva
           onChange={(event) => setDraft(event.target.value)}
           onBlur={() => draft !== note.text && view.updateNote(id, { text: draft })}
         />
+      </div>
+    </>
+  );
+});
+
+const NEW_PROVIDER = '__new__';
+const providerKinds = Object.values(providerPresets);
+
+/**
+ * Adds a provider that needs no key from the canvas: ChatGPT (signed in through the browser) or a
+ * local server. Keys are never typed in the Nexus; those providers are added in the main window.
+ */
+async function connectProvider(kind: ProviderKind): Promise<ProviderConfig> {
+  const preset = providerPresets[kind];
+  const provider = await window.hive.invoke('provider.save', {
+    kind,
+    name: preset.label,
+    baseUrl: preset.defaultBaseUrl,
+    enabled: true,
+  });
+  if (preset.signIn === 'chatgpt') await window.hive.invoke('provider.chatgptSignIn', provider.id);
+  const test = await window.hive.invoke('provider.test', provider.id);
+  if (!test.ok) throw new Error(`Não foi possível conectar: ${test.message}`);
+  await window.hive.invoke('provider.models', { providerId: provider.id, refresh: true });
+  return provider;
+}
+
+/**
+ * A provider on the canvas. Pick one (or add one right here), then draw a line from the dot on
+ * its right to an agent: the agent switches to it with a model picked and tested for its role.
+ */
+export const ProviderNode = memo(function ProviderNode({ id, selected }: NodeProps<CanvasNode>) {
+  const view = useView();
+  const block = view.providerBlocks.get(id);
+  const [providers, setProviders] = useState<ProviderConfig[] | null>(null);
+  const [models, setModels] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [kind, setKind] = useState<ProviderKind>('chatgpt');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const reload = () =>
+    window.hive
+      .invoke('provider.list')
+      .then(setProviders)
+      .catch((caught: unknown) =>
+        setError(caught instanceof Error ? caught.message : String(caught)),
+      );
+  useEffect(() => {
+    void reload();
+    const onFocus = () => void reload();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+  const providerId = block?.providerId ?? null;
+  useEffect(() => {
+    setModels(null);
+    if (!providerId) return;
+    let alive = true;
+    void window.hive
+      .invoke('provider.models', { providerId, refresh: false })
+      .then((list) => alive && setModels(list.length))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [providerId]);
+  if (!block) return null;
+  const current = providers?.find((provider) => provider.id === providerId) ?? null;
+  const users = [...view.workers.values()].filter(
+    (worker) => providerId && worker.providerId === providerId,
+  );
+  const shown = users.slice(0, 6);
+  const preset = providerPresets[kind];
+  const needsKey = !preset.signIn && !preset.keyOptional;
+  const reachable =
+    !!current && (current.hasCredential || !!providerPresets[current.kind].keyOptional);
+  const tone = !current
+    ? 'pending'
+    : !reachable || current.lastTest?.ok === false
+      ? 'failed'
+      : 'running';
+  const status = !current
+    ? 'Escolha'
+    : !reachable
+      ? 'Sem acesso'
+      : current.lastTest?.ok === false
+        ? 'Falhou'
+        : 'Conectado';
+  const account = current?.credentialHint?.replace(/^ChatGPT · /, '') ?? null;
+  const subtitle = current
+    ? [
+        providerPresets[current.kind].signIn
+          ? 'Plano ChatGPT'
+          : providerPresets[current.kind].label,
+        account,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : 'Fonte de modelos para os agentes';
+  const latency = current?.lastTest?.latencyMs;
+  const submit = () => {
+    setBusy(true);
+    setError('');
+    void connectProvider(kind)
+      .then(async (provider) => {
+        view.updateProviderBlock(id, { providerId: provider.id });
+        setAdding(false);
+        await reload();
+      })
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : String(caught));
+        void reload();
+      })
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className={`nc-node nc-provider tone-${tone}${selected ? ' selected' : ''}`}>
+      <Handle
+        type="source"
+        position={Position.Right}
+        isConnectable={!!providerId}
+        title={providerId ? 'Arraste até um agente para ele usar este provedor' : undefined}
+      />
+      <header className="nc-provider-head">
+        <span className="nc-provider-icon" aria-hidden>
+          <HoneyComb size={22} />
+        </span>
+        <div className="nc-provider-title">
+          <strong className="truncate">{current?.name ?? 'Provedor'}</strong>
+          <span className="truncate" title={subtitle}>
+            {subtitle}
+          </span>
+        </div>
+        <PinMark id={id} />
+        <span className={`nc-provider-pill tone-${tone}`}>{status}</span>
+      </header>
+
+      {adding ? (
+        <div className="nc-provider-body nodrag">
+          <label className="nc-provider-field">
+            <span>Novo provedor</span>
+            <select
+              className="nc-provider-select"
+              value={kind}
+              onChange={(event) => setKind(event.target.value as ProviderKind)}
+            >
+              {providerKinds.map((item) => (
+                <option key={item.kind} value={item.kind}>
+                  {item.label}
+                  {item.free.available ? ' · grátis' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="nc-provider-note">
+            {needsKey
+              ? 'Usa chave de API. Por segurança, chaves só são digitadas na janela principal do Hive.'
+              : preset.free.summary}
+          </p>
+          <div className="nc-provider-actions">
+            <button
+              type="button"
+              className="nc-provider-button ghost"
+              disabled={busy}
+              onClick={() => setAdding(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="nc-provider-button primary"
+              disabled={busy}
+              onClick={() => {
+                if (!needsKey) return submit();
+                // Back here, the new provider shows up in the list to pick.
+                setAdding(false);
+                void window.hive.invoke('window.addProvider');
+              }}
+            >
+              {busy
+                ? preset.signIn
+                  ? 'Aguardando o navegador…'
+                  : 'Conectando…'
+                : preset.signIn
+                  ? 'Continuar com o ChatGPT'
+                  : needsKey
+                    ? 'Abrir Provedores'
+                    : 'Adicionar e testar'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <dl className="nc-provider-metrics">
+            <div title="Agentes que usam este provedor agora">
+              <dd>{current ? users.length : '—'}</dd>
+              <dt>agentes</dt>
+            </div>
+            <div title="Modelos no catálogo do provedor">
+              <dd>{current ? (models ?? '…') : '—'}</dd>
+              <dt>modelos</dt>
+            </div>
+            <div title="Tempo de resposta do último teste de conexão">
+              <dd>
+                {typeof latency === 'number'
+                  ? latency < 1000
+                    ? `${latency}ms`
+                    : `${(latency / 1000).toFixed(1).replace('.', ',')}s`
+                  : '—'}
+              </dd>
+              <dt>latência</dt>
+            </div>
+          </dl>
+          <div className="nc-provider-bees">
+            {shown.length ? (
+              <>
+                {shown.map((worker) => (
+                  <span key={worker.id} className="nc-provider-bee" title={worker.name}>
+                    <AgentBee worker={worker} size={16} mood="still" />
+                  </span>
+                ))}
+                {users.length > shown.length && (
+                  <span
+                    className="nc-provider-bee more"
+                    title={users
+                      .slice(shown.length)
+                      .map((worker) => worker.name)
+                      .join(', ')}
+                  >
+                    +{users.length - shown.length}
+                  </span>
+                )}
+                <span className="nc-provider-who truncate">
+                  {users.length === 1 ? users[0]!.name : `${users.length} agentes conectados`}
+                </span>
+              </>
+            ) : (
+              <span className="nc-provider-who muted">
+                {current
+                  ? 'Arraste do ponto à direita até um agente'
+                  : 'Escolha um provedor para ligá-lo a um agente'}
+              </span>
+            )}
+          </div>
+          <footer className="nc-provider-foot nodrag">
+            <select
+              className="nc-provider-select"
+              aria-label="Provedor"
+              value={providerId ?? ''}
+              onChange={(event) => {
+                if (event.target.value === NEW_PROVIDER) setAdding(true);
+                else view.updateProviderBlock(id, { providerId: event.target.value || null });
+              }}
+            >
+              <option value="">{providers ? 'Escolha um provedor…' : 'Carregando…'}</option>
+              {providers?.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </option>
+              ))}
+              <option value={NEW_PROVIDER}>+ Conectar novo provedor…</option>
+            </select>
+          </footer>
+        </>
+      )}
+      {error && (
+        <p className="nc-provider-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+});
+
+const METER_POLL_MS = 3_000;
+const tokenFormat = new Intl.NumberFormat('pt-BR', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+
+/**
+ * Today's tokens against the daily budget, 0–100 %, refreshed every few seconds while agents
+ * work. Without a budget it still counts, and says where to set one.
+ */
+export const TokensNode = memo(function TokensNode({ id, selected }: NodeProps<CanvasNode>) {
+  const view = useView();
+  const [meter, setMeter] = useState<TokenMeter | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      void window.hive
+        .invoke('usage.today')
+        .then((value) => {
+          if (!alive) return;
+          setMeter(value);
+          setError('');
+        })
+        .catch((caught: unknown) => {
+          if (alive) setError(caught instanceof Error ? caught.message : String(caught));
+        });
+    load();
+    const timer = setInterval(load, METER_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+  const used = meter ? meter.promptTokens + meter.completionTokens : 0;
+  const percent = meter?.budget ? Math.min(100, Math.round((used / meter.budget) * 100)) : null;
+  const tone = percent === null ? 'idle' : percent >= 90 ? 'high' : percent >= 70 ? 'mid' : 'low';
+  return (
+    <>
+      <NodeResizer
+        isVisible={selected}
+        minWidth={220}
+        minHeight={150}
+        lineClassName="nc-resize-line"
+        handleClassName="nc-resize-handle"
+        onResizeEnd={(_, size) => view.setSize(id, { width: size.width, height: size.height })}
+      />
+      <div className={`nc-tokens tone-${tone}${selected ? ' selected' : ''}`}>
+        <header>
+          <Gauge size={14} /> <strong>Tokens</strong>
+          <span className="nc-tokens-scope">hoje</span>
+        </header>
+        {error ? (
+          <p className="nc-tokens-note">{error}</p>
+        ) : !meter ? (
+          <p className="nc-tokens-note">Carregando…</p>
+        ) : (
+          <>
+            <div className="nc-tokens-figure">
+              <span className="nc-tokens-percent">{percent === null ? '—' : `${percent}%`}</span>
+              <span className="nc-tokens-count">
+                {tokenFormat.format(used)}
+                {meter.budget ? ` de ${tokenFormat.format(meter.budget)}` : ' tokens'}
+              </span>
+            </div>
+            <div
+              className="nc-tokens-bar"
+              role="meter"
+              aria-label="Uso de tokens hoje"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percent ?? 0}
+            >
+              <span style={{ width: `${percent ?? 0}%` }} />
+            </div>
+            {!meter.budget && (
+              <p className="nc-tokens-note">
+                Defina um orçamento diário em Configurações para ver a porcentagem.
+              </p>
+            )}
+            {meter.budget > 0 && used >= meter.budget && (
+              <p className="nc-tokens-note">Orçamento de hoje atingido.</p>
+            )}
+            <ul className="nc-tokens-list nowheel">
+              {meter.byWorker.slice(0, 6).map((row) => (
+                <li key={row.workerId ?? 'other'}>
+                  <span>{row.name}</span>
+                  <span>{tokenFormat.format(row.tokens)}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
     </>
   );
@@ -527,4 +902,6 @@ export const nodeTypes = {
   lane: GroupNode,
   note: NoteNode,
   frame: FrameNode,
+  tokens: TokensNode,
+  provider: ProviderNode,
 };

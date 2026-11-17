@@ -240,6 +240,10 @@ app
       showWindow();
       windows.broadcast({ kind: 'navigate', runId });
     };
+    service.addProvider = () => {
+      showWindow();
+      windows.broadcast({ kind: 'navigate', page: 'add-provider' });
+    };
     service.capturePage = async (rect) => {
       const window = mainWindow();
       if (!window) return null;

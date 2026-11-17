@@ -81,3 +81,53 @@ it('soma também as conversas com agentes no terminal', () => {
     completionTokens: 150,
   });
 });
+
+it('soma ao vivo os tokens de cada chamada de modelo, por agente, desde o horário dado', () => {
+  const db = new HiveDatabase(':memory:');
+  databases.push(db);
+  const repos = new Repositories(db);
+  const call = (
+    id: string,
+    ts: string,
+    workerId: string | null,
+    prompt: number,
+    completion: number,
+  ) =>
+    repos.appendEvent({
+      id,
+      ts,
+      workspaceId: null,
+      runId: null,
+      taskId: null,
+      workerId,
+      type: 'model.response',
+      level: 'info',
+      message: '',
+      data: { usage: { promptTokens: prompt, completionTokens: completion } },
+    });
+  call('old', '2026-10-20T23:00:00.000Z', 'w1', 9_000, 900);
+  call('a', '2026-10-21T09:00:00.000Z', 'w1', 1_000, 100);
+  call('b', '2026-10-21T09:05:00.000Z', 'w1', 500, 50);
+  call('c', '2026-10-21T09:06:00.000Z', 'w2', 200, 20);
+  // A call whose provider reported no usage counts as zero, not as an error.
+  repos.appendEvent({
+    id: 'd',
+    ts: '2026-10-21T09:07:00.000Z',
+    workspaceId: null,
+    runId: null,
+    taskId: null,
+    workerId: 'w2',
+    type: 'model.response',
+    level: 'info',
+    message: '',
+    data: { usage: null },
+  });
+
+  const rows = repos
+    .liveUsageSince('2026-10-21T03:00:00.000Z')
+    .sort((x, y) => String(x.workerId).localeCompare(String(y.workerId)));
+  expect(rows).toEqual([
+    { workerId: 'w1', promptTokens: 1_500, completionTokens: 150 },
+    { workerId: 'w2', promptTokens: 200, completionTokens: 20 },
+  ]);
+});

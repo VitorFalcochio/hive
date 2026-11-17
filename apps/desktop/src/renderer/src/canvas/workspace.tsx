@@ -77,6 +77,8 @@ export const toneColors: Record<Tone, string> = {
 
 const NOTE_SIZE = { width: 240, height: 150 };
 const FRAME_SIZE = { width: 560, height: 380 };
+const METER_SIZE = { width: 280, height: 210 };
+const PROVIDER_SIZE = { width: 320, height: 216 };
 /** Runs whose plan accepts tasks, dependencies and delegations by hand (see the scheduler). */
 const EDITABLE = new Set(['awaiting_plan_approval', 'running', 'review', 'failed', 'cancelled']);
 
@@ -321,6 +323,8 @@ export function Workspace({
       openTerminal,
       stopTerminal,
       subscribeTerminal,
+      providerBlocks: new Map(layout.providers.map((block) => [block.id, block])),
+      updateProviderBlock: layoutApi.updateProviderBlock,
       notes: new Map(layout.notes.map((note) => [note.id, note])),
       frames: new Map(layout.frames.map((frame) => [frame.id, frame])),
       updateNote: layoutApi.updateNote,
@@ -343,6 +347,7 @@ export function Workspace({
     terminals,
     layout.notes,
     layout.frames,
+    layout.providers,
     layoutApi,
     flow,
     openTerminal,
@@ -414,6 +419,32 @@ export function Workspace({
             : undefined,
       });
     }
+    for (const block of layout.providers) {
+      const size = PROVIDER_SIZE;
+      placed.push({
+        id: block.id,
+        type: 'provider',
+        position: { x: block.x, y: block.y },
+        data: { ref: block.id },
+        width: size.width,
+        height: size.height,
+        zIndex: 2,
+        className: 'nc-flow-provider',
+      });
+    }
+    for (const meter of layout.meters) {
+      const size = layout.sizes[meter.id] ?? METER_SIZE;
+      placed.push({
+        id: meter.id,
+        type: 'tokens',
+        position: { x: meter.x, y: meter.y },
+        data: { ref: meter.id },
+        width: size.width,
+        height: size.height,
+        zIndex: 2,
+        className: 'nc-flow-tokens',
+      });
+    }
     for (const note of layout.notes) {
       const size = layout.sizes[note.id] ?? NOTE_SIZE;
       placed.push({
@@ -428,7 +459,17 @@ export function Workspace({
       });
     }
     return placed;
-  }, [graph.nodes, layout.frames, layout.notes, layout.sizes, pinnedHere, grouping, minimized]);
+  }, [
+    graph.nodes,
+    layout.frames,
+    layout.notes,
+    layout.meters,
+    layout.providers,
+    layout.sizes,
+    pinnedHere,
+    grouping,
+    minimized,
+  ]);
 
   // Nodes live in state so xyflow keeps their measured size, selection and drag; they are
   // replaced only when where or how big something is changes, never in the middle of a drag.
@@ -499,6 +540,24 @@ export function Workspace({
       }),
     [graph.edges, selectedNode, selection],
   );
+  const providerEdges = useMemo(() => {
+    const agents = graph.nodes.filter((node) => node.type === 'agent');
+    return layout.providers.flatMap((block) =>
+      block.providerId
+        ? agents
+            .filter((node) => view.workers.get(node.ref)?.providerId === block.providerId)
+            .map((node): Edge => ({
+              id: `uses:${block.id}:${node.ref}`,
+              source: block.id,
+              target: node.id,
+              type: 'smoothstep',
+              className: `nc-edge kind-provider${selectedNode === block.id || selectedNode === node.id ? ' highlight' : ''}`,
+              zIndex: 1,
+            }))
+        : [],
+    );
+  }, [graph.nodes, layout.providers, view.workers, selectedNode]);
+  const allEdges = useMemo(() => [...edges, ...providerEdges], [edges, providerEdges]);
 
   /* ---------------------------------------------------------------- selection */
 
@@ -611,18 +670,46 @@ export function Workspace({
   const validConnection = useCallback(
     (connection: FlowConnection | Edge) => {
       const [from, fromRef] = splitId(connection.source);
-      const [to] = splitId(connection.target);
+      const [to, toRef] = splitId(connection.target);
+      if (from === 'provider')
+        return (
+          to === 'agent' &&
+          view.workers.has(toRef) &&
+          !!layout.providers.find((block) => block.id === connection.source)?.providerId
+        );
       if (to === 'cortex') return from === 'agent' && view.workers.has(fromRef);
       if (to !== 'task' || connection.source === connection.target) return false;
       if (from === 'task') return true;
       return from === 'agent' && view.workers.get(fromRef)?.role !== 'queen';
     },
-    [view.workers],
+    [view.workers, layout.providers],
   );
   const onConnect = useCallback(
     (connection: FlowConnection) => {
       const [from, fromRef] = splitId(connection.source);
       const [toType, toRef] = splitId(connection.target);
+      if (from === 'provider') {
+        const providerId = layout.providers.find(
+          (block) => block.id === connection.source,
+        )?.providerId;
+        const worker = view.workers.get(toRef);
+        if (!providerId || !worker || toType !== 'agent') return;
+        if (worker.providerId === providerId) return say(`${worker.name} já usa este provedor.`);
+        say(`Escolhendo e testando um modelo para ${worker.name}…`);
+        void act(async () => {
+          const setup = await window.hive.invoke('worker.autoConfigure', {
+            workerId: worker.id,
+            providerId,
+          });
+          const modelId = setup.assignments[0]?.modelId;
+          if (!modelId)
+            throw new Error(
+              `Nenhum modelo deste provedor respondeu para ${worker.name}. ${setup.unavailable[0]?.message ?? ''}`.trim(),
+            );
+          say(`${worker.name} agora usa ${modelId}.`);
+        });
+        return;
+      }
       if (toType === 'cortex') {
         const worker = view.workers.get(fromRef);
         const block = cortexBlocks.get(toRef);
@@ -665,7 +752,7 @@ export function Workspace({
         );
       }
     },
-    [view.tasks, view.workers, act, cortexBlocks],
+    [view.tasks, view.workers, act, cortexBlocks, layout.providers, say],
   );
 
   /* ---------------------------------------------------------------- canvas items */
@@ -705,13 +792,36 @@ export function Workspace({
       }, 'Cortex criado. Arraste de um agente até ele para dar acesso à memória.'),
     [act, runId, layoutApi, grouping, cortexState],
   );
+  const addMeter = useCallback(
+    (at: { x: number; y: number }) => {
+      const id = localId('tokens');
+      layoutApi.addMeter({ id, x: Math.round(at.x), y: Math.round(at.y) });
+      select({ kind: 'node', id });
+    },
+    [layoutApi, select],
+  );
+  const addProviderBlock = useCallback(
+    (at: { x: number; y: number }) => {
+      const id = localId('provider');
+      layoutApi.addProviderBlock({
+        id,
+        x: Math.round(at.x),
+        y: Math.round(at.y),
+        providerId: null,
+      });
+      select({ kind: 'node', id });
+    },
+    [layoutApi, select],
+  );
   const placeBlock = useCallback(
     (kind: BlockKind, at: { x: number; y: number }) => {
       if (kind === 'note') addNote(at);
       else if (kind === 'frame') addFrame(at);
+      else if (kind === 'tokens') addMeter(at);
+      else if (kind === 'provider') addProviderBlock(at);
       else addCortex(at);
     },
-    [addNote, addFrame, addCortex],
+    [addNote, addFrame, addMeter, addProviderBlock, addCortex],
   );
 
   /** A frame around the selected nodes (Ctrl+G). */
@@ -740,7 +850,14 @@ export function Workspace({
   }, [nodes, flow, addFrame, say]);
   const removeSelected = useCallback(() => {
     const ids = nodes
-      .filter((node) => node.selected && (node.type === 'note' || node.type === 'frame'))
+      .filter(
+        (node) =>
+          node.selected &&
+          (node.type === 'note' ||
+            node.type === 'frame' ||
+            node.type === 'tokens' ||
+            node.type === 'provider'),
+      )
       .map((node) => node.id);
     if (ids.length) layoutApi.remove(ids);
   }, [nodes, layoutApi]);
@@ -850,6 +967,11 @@ export function Workspace({
       hint: 'P',
       run: () => layoutApi.lock(grouping, { [node.id]: node.position }, !lockedHere),
     };
+    if (node.type === 'tokens' || node.type === 'provider')
+      return {
+        title: node.type === 'tokens' ? 'Tokens' : 'Provedor',
+        items: [{ label: 'Excluir bloco', run: () => layoutApi.remove([node.id]) }],
+      };
     if (node.type === 'note') {
       const note = layout.notes.find((item) => item.id === node.id);
       return {
@@ -1172,6 +1294,14 @@ export function Workspace({
       const at = center();
       addCortex({ x: at.x - SIZE.cortex.width / 2, y: at.y - SIZE.cortex.height / 2 });
     },
+    'new-tokens': () => {
+      const at = center();
+      addMeter({ x: at.x - METER_SIZE.width / 2, y: at.y - METER_SIZE.height / 2 });
+    },
+    'new-provider': () => {
+      const at = center();
+      addProviderBlock({ x: at.x - PROVIDER_SIZE.width / 2, y: at.y - PROVIDER_SIZE.height / 2 });
+    },
     blocks: () => setBlocksOpen(true),
   };
   const commandContext: CommandContext = {
@@ -1347,7 +1477,7 @@ export function Workspace({
           <div className="nc-flow" aria-label="Workspace da missão">
             <ReactFlow<CanvasNode>
               nodes={nodes}
-              edges={edges}
+              edges={allEdges}
               nodeTypes={nodeTypes}
               onNodesChange={onNodesChange}
               onNodeClick={(_, node) => select({ kind: 'node', id: node.id })}

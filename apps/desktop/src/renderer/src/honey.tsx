@@ -53,6 +53,60 @@ export function HoneyJar({ size = 14, label }: { size?: number; label?: string }
   );
 }
 
+/**
+ * A piece of honeycomb in pixel art: wax walls, two cells full of honey (with a glint) and three
+ * still empty. Same palette as the bottle; `w` is wax, `e` an empty cell.
+ */
+const COMB = [
+  '........weeeew..',
+  '...wwwwweeeeeew.',
+  '..whhhdweeeeeew.',
+  '.whllhhdweeeew..',
+  '.whlhhhdwwwww...',
+  '..wddddwwhhhdw..',
+  '...wwwwwhllhhdw.',
+  '..weeeewhlhhhdw.',
+  '.weeeeeewddddw..',
+  '.weeeeeewwwww...',
+  '..weeeewweeeew..',
+  '...wwwwweeeeeew.',
+  '.......weeeeeew.',
+  '........weeeew..',
+  '.........wwww...',
+];
+
+const combColors: Record<string, string> = {
+  ...colors,
+  w: '#9a6332', // wax
+  e: '#4a3316', // empty cell
+};
+
+export function HoneyComb({ size = 16, label }: { size?: number; label?: string }) {
+  const width = COMB[0]!.length;
+  const height = COMB.length;
+  return (
+    <svg
+      className="honey-comb"
+      width={(size * width) / height}
+      height={size}
+      viewBox={`0 0 ${width} ${height}`}
+      shapeRendering="crispEdges"
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+    >
+      {label && <title>{label}</title>}
+      {COMB.flatMap((row, y) =>
+        [...row].map((pixel, x) =>
+          combColors[pixel] ? (
+            <rect key={`${x}:${y}`} x={x} y={y} width={1} height={1} fill={combColors[pixel]} />
+          ) : null,
+        ),
+      )}
+    </svg>
+  );
+}
+
 const full = new Intl.NumberFormat('pt-BR');
 
 /** Honey given today, in the status bar. Counted, never capped. */

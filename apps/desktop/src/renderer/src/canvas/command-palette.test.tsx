@@ -186,3 +186,27 @@ it('oferece o Nexus Autopilot na paleta existente e chama o fluxo dedicado', asy
   await result?.command.execute(context);
   expect(autopilot).toHaveBeenCalledOnce();
 });
+
+it('oferece os blocos Tokens e Provedor no Ctrl+Espaço', () => {
+  const registry = new CommandRegistry<CommandContext>();
+  registerCanvasCommands(registry);
+  const perform = vi.fn();
+  const context: CommandContext = {
+    snapshot: null,
+    ready: true,
+    selectedNodeIds: [],
+    perform,
+    reveal: vi.fn(),
+    find: vi.fn(),
+    ask: vi.fn(),
+    autopilot: vi.fn(),
+  };
+  const [tokens] = registry.search('tokens', context);
+  const [provider] = registry.search('provedor', context);
+  expect(tokens?.command.id).toBe('create.tokens');
+  expect(provider?.command.id).toBe('create.provider');
+  void tokens!.command.execute(context);
+  void provider!.command.execute(context);
+  expect(perform).toHaveBeenCalledWith('new-tokens');
+  expect(perform).toHaveBeenCalledWith('new-provider');
+});

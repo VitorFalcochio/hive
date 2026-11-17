@@ -240,7 +240,10 @@ export function App() {
         return;
       }
       if (push.kind === 'navigate') {
-        navigateTo.current(push.runId);
+        if ('page' in push) {
+          setView('providers');
+          setModal({ kind: 'provider' });
+        } else navigateTo.current(push.runId);
         return;
       }
       // Download progress is frequent; the settings page listens for it on its own.
