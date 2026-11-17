@@ -90,7 +90,11 @@ function motionReduced(): boolean {
   );
 }
 
-export function HiveField() {
+/**
+ * `home` is the tall band behind the greeting; `cover` is a shorter one behind a page title, such
+ * as a mission's, quieter on the left where the title sits.
+ */
+export function HiveField({ variant = 'home' }: { variant?: 'home' | 'cover' }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -109,7 +113,10 @@ export function HiveField() {
       scale = Math.min(2, window.devicePixelRatio || 1);
       width = host.clientWidth;
       // A band across the top of the page, fading to black (see .home-field); below it, plain.
-      height = Math.round(Math.min(820, Math.max(560, host.clientHeight * 0.85)));
+      height =
+        variant === 'cover'
+          ? 420
+          : Math.round(Math.min(820, Math.max(560, host.clientHeight * 0.85)));
       canvas.width = Math.round(width * scale);
       canvas.height = Math.round(height * scale);
       canvas.style.width = `${width}px`;
@@ -124,8 +131,8 @@ export function HiveField() {
       const [honey, glint] = sprites as [HTMLCanvasElement, HTMLCanvasElement];
       const half = honey.width / 2;
       // Quiet behind the greeting and the prompt, brighter towards the edges.
-      const cx = width / 2;
-      const cy = Math.min(height * 0.32, 300);
+      const cx = variant === 'cover' ? Math.min(width * 0.32, 520) : width / 2;
+      const cy = variant === 'cover' ? height * 0.42 : Math.min(height * 0.32, 300);
       const reach = Math.max(420, Math.min(width, 1100) * 0.5);
       for (let r = 0, y = ROW / 2; y < height + ROW; r++, y += ROW) {
         for (let x = r % 2 ? GAP / 2 : 0; x < width + GAP; x += GAP) {
@@ -183,9 +190,9 @@ export function HiveField() {
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, []);
+  }, [variant]);
   return (
-    <div className="home-field" aria-hidden>
+    <div className={variant === 'cover' ? 'home-field cover' : 'home-field'} aria-hidden>
       <canvas ref={canvasRef} />
     </div>
   );

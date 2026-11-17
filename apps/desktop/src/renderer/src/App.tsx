@@ -621,10 +621,13 @@ export function App() {
                 ? 'content run-mode'
                 : page === 'overview'
                   ? 'content home-mode'
-                  : 'content'
+                  : page === 'mission'
+                    ? 'content cover-mode'
+                    : 'content'
           }
         >
-          {page === 'overview' && <HiveField />}
+          {page === 'overview' && <HiveField key="home" />}
+          {page === 'mission' && detail && <HiveField key="cover" variant="cover" />}
           {approvals.length > 0 &&
             !(page === 'mission' && approvals.some((a) => a.runId === detail?.run.id)) && (
               <button

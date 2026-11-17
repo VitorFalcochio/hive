@@ -4018,161 +4018,81 @@ pre.command {
   justify-content: flex-start;
 }
 
-/* Sidebar mission cards: pinned, in progress and done, with status colour and motion */
+/* Sidebar missions: one list hanging from the project on a thin guide line, like files in a
+   folder. Pinned on top, then the ones still moving; the finished ones fold into one row. */
 :root {
   --info: #6ea8fe;
 }
 .mission-cards {
   display: grid;
-  gap: 4px;
-  padding: 2px 4px 6px 32px;
-}
-.mission-section {
-  display: grid;
-  gap: 2px;
-}
-.mission-section-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 6px;
-  border: 0;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-align: left;
-  text-transform: uppercase;
-}
-.mission-section-head:hover {
-  background: var(--hover);
-  color: var(--foreground);
-}
-.mission-section-head .chevron {
-  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
-  transform: rotate(-90deg);
-}
-.mission-section-head .chevron.open {
-  transform: rotate(0deg);
-}
-.mission-section-count {
-  margin-left: auto;
-  min-width: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--selected);
-  color: var(--muted-foreground);
-  font-size: 10.5px;
-  text-align: center;
-}
-.mission-section.tone-pinned .mission-section-head .chevron,
-.mission-section.tone-pinned .mission-section-head span:first-of-type {
-  color: #f5b544;
-}
-.mission-section.tone-progress .mission-section-head span:first-of-type {
-  color: var(--info);
-}
-.mission-section.tone-done .mission-section-head span:first-of-type {
-  color: var(--success);
-}
-/* Collapsing animates the row height from 1fr to 0fr, so the body slides instead of snapping */
-.mission-section-body {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 260ms cubic-bezier(0.2, 0, 0, 1);
-}
-.mission-section-body.open {
-  grid-template-rows: 1fr;
-}
-.mission-section-inner {
-  display: grid;
-  gap: 4px;
-  min-height: 0;
-  overflow: hidden;
-  padding: 2px 0;
-}
-.mission-empty {
-  margin: 0;
-  padding: 4px 8px;
-  color: var(--subtle-foreground);
-  font-size: 11.5px;
-}
-/* A mission is a plain row: no card, monospace text in its section's colour, aligned under
-   the section title. The dot sits in the column of the section ring. */
-.mission-section.tone-pinned {
-  --section: #f5b544;
-}
-.mission-section.tone-progress {
-  --section: var(--info);
-}
-.mission-section.tone-done {
-  --section: var(--success);
+  gap: 1px;
+  margin: 2px 6px 4px 26px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
 }
 .mission-card {
   position: relative;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   border-radius: 6px;
-  animation: mission-in 320ms cubic-bezier(0.2, 0, 0, 1) both;
-  transition: background 160ms ease;
+  animation: mission-in 280ms cubic-bezier(0.2, 0, 0, 1) both;
+  transition: background 140ms ease;
 }
-.mission-card:hover,
-.mission-card.selected {
+.mission-card:hover {
   background: var(--hover);
 }
+.mission-card.selected {
+  background: rgb(245 181 68 / 8%);
+}
+/* The selected mission marks the guide line, so the eye finds it from the project. */
+.mission-card.selected::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: -9px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--warning);
+}
 .mission-card-main {
-  display: grid;
+  display: flex;
   flex: 1;
-  justify-content: stretch;
-  justify-items: start;
-  gap: 2px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
   min-width: 0;
-  height: auto;
-  padding: 5px 6px 5px 9px;
+  height: 28px;
+  padding: 0 4px 0 8px;
   border: 0;
   background: transparent;
-  color: var(--section, var(--foreground));
-  font-family: var(--font-mono);
-  font-size: 12px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
   font-weight: 500;
   text-align: left;
 }
 .mission-card-main:hover {
   background: transparent;
-  color: var(--section, var(--foreground));
+  color: var(--foreground);
 }
 .mission-card.selected .mission-card-main {
-  font-weight: 700;
+  color: var(--foreground);
+  font-weight: 600;
 }
-.mission-card-top {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  width: 100%;
-  min-width: 0;
-}
-.mission-card-top .truncate {
+.mission-card-main .truncate {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mission-card-status {
-  padding-left: 18px;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  font-weight: 400;
-}
 .mission-dot {
   flex-shrink: 0;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--subtle-foreground);
 }
 .mission-dot.tone-busy {
-  background: var(--info);
+  background: var(--warning);
   animation: mission-pulse 1.6s ease-out infinite;
 }
 .mission-dot.tone-ok {
@@ -4183,23 +4103,22 @@ pre.command {
 }
 .mission-pin {
   flex-shrink: 0;
-  align-self: center;
-  width: 24px;
-  height: 24px;
-  margin-right: 6px;
+  width: 22px;
+  height: 22px;
+  margin-right: 3px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--subtle-foreground);
   opacity: 0;
   transition:
-    opacity 160ms ease,
+    opacity 140ms ease,
     transform 200ms cubic-bezier(0.2, 0, 0, 1),
-    color 160ms ease;
+    color 140ms ease;
 }
 .mission-card:hover .mission-pin,
-.mission-card.selected .mission-pin,
-.mission-pin.on {
+.mission-pin.on,
+.mission-pin:focus-visible {
   opacity: 1;
 }
 .mission-pin:hover {
@@ -4207,7 +4126,7 @@ pre.command {
   color: var(--foreground);
 }
 .mission-pin.on {
-  color: #f5b544;
+  color: var(--warning);
 }
 .mission-pin.on svg {
   fill: currentColor;
@@ -4215,91 +4134,91 @@ pre.command {
 .mission-pin:active {
   transform: scale(0.85);
 }
+.mission-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border);
+}
+.mission-empty {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--subtle-foreground);
+  font-size: 11.5px;
+}
+button.mission-done-toggle {
+  justify-content: flex-start;
+  gap: 8px;
+  height: 26px;
+  margin-top: 2px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--subtle-foreground);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+button.mission-done-toggle:hover {
+  background: var(--hover);
+  color: var(--muted-foreground);
+}
+.mission-done-toggle svg:first-child {
+  color: var(--success);
+}
+.mission-done-count {
+  font: 10.5px var(--font-mono);
+}
+.mission-done-toggle .chevron {
+  margin-left: auto;
+  transform: rotate(-90deg);
+  transition: transform 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+.mission-done-toggle .chevron.open {
+  transform: rotate(0deg);
+}
+.mission-done-list {
+  display: grid;
+  gap: 1px;
+}
+.mission-done-list .mission-card:not(.selected) .mission-card-main {
+  color: var(--subtle-foreground);
+}
 @keyframes mission-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(4px);
   }
 }
 @keyframes mission-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgb(110 168 254 / 55%);
+    box-shadow: 0 0 0 0 rgb(245 181 68 / 55%);
   }
   70% {
-    box-shadow: 0 0 0 6px rgb(110 168 254 / 0%);
+    box-shadow: 0 0 0 5px rgb(245 181 68 / 0%);
   }
   100% {
-    box-shadow: 0 0 0 0 rgb(110 168 254 / 0%);
+    box-shadow: 0 0 0 0 rgb(245 181 68 / 0%);
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .mission-card,
-  .mission-section-body,
-  .mission-section-head .chevron,
+  .mission-done-toggle .chevron,
   .mission-dot.tone-busy,
   .mission-pin {
     animation: none;
     transition: none;
   }
 }
-
-/* Sidebar sections match the Orca look: bold title, coloured ring, count pill */
-.mission-section-head {
-  height: 28px;
-  gap: 7px;
-  padding: 0 6px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-}
-.mission-section-head .chevron {
-  margin-left: auto;
+.tree-missions .tree-item.add {
+  width: auto;
+  min-height: 28px;
+  margin: 0 6px 4px 35px;
+  padding: 0 8px;
+  gap: 8px;
   color: var(--subtle-foreground);
+  font-size: 12px;
 }
-.mission-section-title {
-  white-space: nowrap;
-}
-.mission-section-count {
-  margin-left: 0;
-  min-width: 20px;
-  height: 16px;
-  padding: 0 6px;
-  line-height: 16px;
-  font-size: 10.5px;
-  font-weight: 500;
-}
-.section-ring {
-  position: relative;
-  flex-shrink: 0;
-  width: 11px;
-  height: 11px;
-  border: 1.5px solid var(--muted-foreground);
-  border-radius: 50%;
-}
-.section-ring::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: currentColor;
-  transform: translate(-50%, -50%);
-}
-.mission-section.tone-pinned .section-ring {
-  border-color: #f5b544;
-  color: #f5b544;
-}
-.mission-section.tone-progress .section-ring {
-  border-color: var(--info);
-  color: var(--info);
-}
-.mission-section.tone-done .section-ring {
-  border-color: var(--success);
-  color: var(--success);
+.tree-missions .tree-item.add:hover {
+  color: var(--warning);
 }
 
 /* Each project row: a collapse arrow next to the folder name */
@@ -6214,4 +6133,39 @@ button.home-chip:hover:not(:disabled) {
   .mission-pick-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Mission cover: the home's honeycomb field as a shorter band behind the title, fading to black
+   before the tasks begin. */
+.content.cover-mode {
+  position: relative;
+  background: #070605;
+}
+.content.cover-mode > .page {
+  position: relative;
+  z-index: 1;
+  padding-top: 64px;
+}
+.home-field.cover canvas {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 35%, transparent 100%);
+}
+.content.cover-mode .page-header {
+  margin-bottom: 32px;
+}
+.content.cover-mode .page-header .eyebrow {
+  color: var(--warning);
+}
+.content.cover-mode .page-header h1 {
+  font-size: clamp(2rem, 3.6vw, 2.75rem);
+  font-weight: 600;
+  text-shadow: 0 2px 24px rgb(0 0 0 / 85%);
+}
+.content.cover-mode .page-header .page-description {
+  color: #c9ccd2;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 90%);
+}
+.content.cover-mode .page-actions button.secondary {
+  background: rgb(10 9 8 / 72%);
+  backdrop-filter: blur(6px);
 }
