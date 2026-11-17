@@ -181,7 +181,7 @@ it('oferece o Nexus Autopilot na paleta existente e chama o fluxo dedicado', asy
   };
   const registry = registerCanvasCommands(new CommandRegistry<CommandContext>());
   const result = registry.search('autopilot', context)[0];
-  expect(result?.command.title).toContain('Nexus Autopilot');
+  expect(result?.command.title).toContain('Workspace Autopilot');
   expect(result?.available).toBe(true);
   await result?.command.execute(context);
   expect(autopilot).toHaveBeenCalledOnce();

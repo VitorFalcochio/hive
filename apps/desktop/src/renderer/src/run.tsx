@@ -291,7 +291,7 @@ export function RunPage() {
     return (
       <section className="run-empty">
         <Mascot size={64} />
-        <h1>Rodar projeto</h1>
+        <h1>Terminal</h1>
         <p>Abra um repositório para usar terminais e visualizar o site.</p>
       </section>
     );
@@ -308,7 +308,7 @@ export function RunPage() {
 
   return (
     <section className="run-page panes-page" aria-label="Terminais">
-      <h1 className="sr-only">Rodar projeto</h1>
+      <h1 className="sr-only">Terminal</h1>
       {layout.tree ? (
         <PaneTree
           node={layout.tree}

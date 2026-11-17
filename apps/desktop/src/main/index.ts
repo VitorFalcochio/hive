@@ -296,7 +296,7 @@ app
           if (role === 'canvas' && known.startsWith('terminal.')) {
             const target = typeof valid === 'string' ? valid : (valid as { id: string }).id;
             if (!service.isCanvasTerminal(target))
-              throw new Error('Este terminal não foi aberto pelo Nexus.');
+              throw new Error('Este terminal não foi aberto pelo Workspace.');
           }
           return { ok: true, value: await service.invoke(known, valid) };
         } catch (error) {

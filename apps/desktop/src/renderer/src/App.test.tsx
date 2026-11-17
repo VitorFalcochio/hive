@@ -68,11 +68,19 @@ afterEach(cleanup);
 it('abre sem credenciais, explica a preparação e abre o cadastro de provedor em um modal', async () => {
   mount({});
   await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
-  const header = screen.getByRole('heading', { name: 'Vamos construir.' }).closest('.page-header');
+  // Without a project the home prompt and the "Nova missão" shortcut wait for one.
   expect(
-    within(header as HTMLElement)
+    screen.getByRole('heading', { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)\.$/ }),
+  ).toBeTruthy();
+  const shortcuts = screen.getByRole('navigation', { name: 'Atalhos' });
+  expect(
+    within(shortcuts)
       .getByRole('button', { name: /Nova missão/ })
       .hasAttribute('disabled'),
+  ).toBe(true);
+  expect(
+    (screen.getByRole('textbox', { name: 'O que você quer construir?' }) as HTMLTextAreaElement)
+      .disabled,
   ).toBe(true);
   expect(screen.getByText(/até você revisar/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Provedores' }));
@@ -145,7 +153,7 @@ it('cria um agente novo a partir de uma função base', async () => {
   );
 });
 
-it('abre a tela Rodar com um terminal e o preview ao lado quando um servidor sobe', async () => {
+it('abre a tela Terminal com um terminal e o preview ao lado quando um servidor sobe', async () => {
   const workspace = {
     id: 'ws1',
     name: 'meu-app',
@@ -173,8 +181,8 @@ it('abre a tela Rodar com um terminal e o preview ao lado quando um servidor sob
     'terminal.start': () => session,
   });
   await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
-  fireEvent.click(screen.getByRole('button', { name: 'Rodar' }));
-  expect(screen.getByRole('heading', { name: 'Rodar projeto' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Terminal' }));
+  expect(screen.getByRole('heading', { name: 'Terminal' })).toBeTruthy();
 
   // With no terminal yet, the page opens a shell; the server it prints opens the preview.
   await waitFor(() => expect(screen.getByText('Executando')).toBeTruthy());
@@ -187,10 +195,10 @@ it('abre a tela Rodar com um terminal e o preview ao lado quando um servidor sob
   );
 });
 
-it('o Nexus no menu abre a janela própria sem sair da tela atual', async () => {
+it('o Workspace no menu abre a janela própria sem sair da tela atual', async () => {
   const invoke = mount({ 'window.openCanvas': () => undefined });
   await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
-  fireEvent.click(screen.getByRole('button', { name: 'Nexus' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Workspace' }));
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('window.openCanvas'));
-  expect(screen.getByRole('heading', { name: 'Vamos construir.' })).toBeTruthy();
+  expect(screen.getByRole('navigation', { name: 'Atalhos' })).toBeTruthy();
 });

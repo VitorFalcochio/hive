@@ -496,7 +496,7 @@ export class NexusAutopilot {
         workerId: state.run.queenWorkerId,
         type: 'plan',
         level: 'info',
-        message: `Nexus Autopilot v${working.version}: ${Object.keys(taskIds).length} tarefa(s) aplicada(s)${cortexGranted ? `, ${cortexGranted} conexão(ões) ao Cortex` : ''}${started ? ' e execução iniciada' : ''}.`,
+        message: `Workspace Autopilot v${working.version}: ${Object.keys(taskIds).length} tarefa(s) aplicada(s)${cortexGranted ? `, ${cortexGranted} conexão(ões) ao Cortex` : ''}${started ? ' e execução iniciada' : ''}.`,
         data: { planId, version: working.version, source: 'nexus-autopilot' },
       };
       this.options.repos.appendEvent(event);

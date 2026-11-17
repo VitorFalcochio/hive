@@ -118,7 +118,7 @@ export class WindowManager {
       ...bounds,
       minWidth: CANVAS_MINIMUM.width,
       minHeight: CANVAS_MINIMUM.height,
-      title: 'Hive · Nexus',
+      title: 'Hive · Workspace',
       icon: this.options.icon,
       backgroundColor: BACKGROUND,
       ...this.titleBar(44),
@@ -157,7 +157,7 @@ export class WindowManager {
     });
     window.once('ready-to-show', () => window.show());
     void this.load(window, 'canvas').catch((error: unknown) =>
-      console.error('Não foi possível abrir o Nexus:', error),
+      console.error('Não foi possível abrir o Workspace:', error),
     );
     return window;
   }

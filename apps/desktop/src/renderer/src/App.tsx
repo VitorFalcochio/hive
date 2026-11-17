@@ -53,6 +53,7 @@ import { AgentBee } from './mascot';
 import { TokenMeter } from './token-meter';
 import { HoneyMeter } from './honey';
 import { AboutPage, OverviewPage, ProvidersPage } from './pages';
+import { HiveField } from './home-field';
 import { SkillsPage } from './skills';
 import { Dot } from './ui';
 
@@ -60,7 +61,7 @@ const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   { view: 'overview', label: 'Visão geral', icon: LayoutGrid },
   { view: 'search', label: 'Buscar', icon: Search },
   { view: 'code', label: 'Código', icon: Code2 },
-  { view: 'run', label: 'Rodar', icon: SquareTerminal },
+  { view: 'run', label: 'Terminal', icon: SquareTerminal },
   { view: 'shift', label: 'Modo Turno', icon: Timer },
   { view: 'agents', label: 'Agentes', icon: Bot },
   { view: 'providers', label: 'Provedores', icon: Plug },
@@ -94,7 +95,7 @@ const viewTitles: Record<View, string> = {
   search: 'Buscar',
   mission: 'Missão',
   code: 'Código',
-  run: 'Rodar projeto',
+  run: 'Terminal',
   shift: 'Modo Turno',
   agents: 'Agentes',
   providers: 'Provedores',
@@ -130,6 +131,8 @@ export function App() {
   const openRunId = useRef<string | null>(null);
   // Set below; the push listener reaches it to open a run asked for from the Nexus.
   const navigateTo = useRef<(runId: string) => void>(() => undefined);
+  /** The latest `activate`, so the memoised context can switch projects. */
+  const activateRef = useRef<(workspace: Workspace) => Promise<void>>(async () => undefined);
   // Where each project tab was left, so switching back returns there instead of the overview.
   const lastPlace = useRef(new Map<string, { view: View; runId: string | null }>());
   const eventListeners = useRef(new Set<(event: AgentEvent) => void>());
@@ -283,6 +286,7 @@ export function App() {
       openModal: setModal,
       closeModal: () => setModal(null),
       go: setView,
+      openWorkspace: (workspace) => activateRef.current(workspace),
       onEvent,
       onFiles,
       onTerminal,
@@ -389,6 +393,7 @@ export function App() {
       context.fail(failure);
     }
   }
+  activateRef.current = activate;
 
   /** Opens a mission; a mission of another project brings that project to the front first. */
   async function openProjectMission(workspace: Workspace, id: string) {
@@ -505,13 +510,13 @@ export function App() {
             {/* Not a page: it opens its own window, which stays open beside this one. */}
             <button
               className="nav-item"
-              aria-label="Nexus"
+              aria-label="Workspace"
               title={
-                railed || menuCompact ? 'Nexus (abre em outra janela)' : 'Abre em outra janela'
+                railed || menuCompact ? 'Workspace (abre em outra janela)' : 'Abre em outra janela'
               }
               onClick={() => void openCanvas()}
             >
-              <Network size={15} /> <span className="nav-label">Nexus</span>
+              <Network size={15} /> <span className="nav-label">Workspace</span>
             </button>
           </nav>
 
@@ -610,9 +615,16 @@ export function App() {
 
         <main
           className={
-            page === 'code' ? 'content code-mode' : page === 'run' ? 'content run-mode' : 'content'
+            page === 'code'
+              ? 'content code-mode'
+              : page === 'run'
+                ? 'content run-mode'
+                : page === 'overview'
+                  ? 'content home-mode'
+                  : 'content'
           }
         >
+          {page === 'overview' && <HiveField />}
           {approvals.length > 0 &&
             !(page === 'mission' && approvals.some((a) => a.runId === detail?.run.id)) && (
               <button

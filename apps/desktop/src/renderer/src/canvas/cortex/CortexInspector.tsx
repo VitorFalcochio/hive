@@ -27,7 +27,7 @@ import {
   type CortexProposal,
   type CortexSearchResult,
 } from '@hive/core';
-import { Modal } from '../../ui';
+import { Modal, Select } from '../../ui';
 import { roleLabel } from '../model';
 
 export type CortexTab = 'memories' | 'approvals' | 'decisions' | 'activity' | 'connections';
@@ -239,18 +239,15 @@ function DraftEditor({
       <div className="nc-cortex-row">
         <label>
           Tipo
-          <select
+          <Select
+            ariaLabel="Tipo"
             value={draft.kind}
-            onChange={(event) =>
-              onChange({ ...draft, kind: event.target.value as CortexMemoryKind })
-            }
-          >
-            {(Object.keys(cortexMemoryKindLabels) as CortexMemoryKind[]).map((kind) => (
-              <option key={kind} value={kind}>
-                {cortexMemoryKindLabels[kind]}
-              </option>
-            ))}
-          </select>
+            options={(Object.keys(cortexMemoryKindLabels) as CortexMemoryKind[]).map((kind) => ({
+              value: kind,
+              label: cortexMemoryKindLabels[kind],
+            }))}
+            onChange={(value) => onChange({ ...draft, kind: value as CortexMemoryKind })}
+          />
         </label>
         <label className="grow">
           Título
@@ -485,24 +482,31 @@ function MemoriesTab({
           placeholder="Filtrar por texto"
           onChange={(event) => setFilter(event.target.value)}
         />
-        <select
+        <Select
+          size="sm"
+          className="nc-toolbar-select"
+          ariaLabel="Tipo de memória"
           value={kind}
-          onChange={(event) => setKind(event.target.value as CortexMemoryKind | '')}
-        >
-          <option value="">Todos os tipos</option>
-          {(Object.keys(cortexMemoryKindLabels) as CortexMemoryKind[]).map((item) => (
-            <option key={item} value={item}>
-              {cortexMemoryKindLabels[item]}
-            </option>
-          ))}
-        </select>
-        <select
+          options={[
+            { value: '', label: 'Todos os tipos' },
+            ...(Object.keys(cortexMemoryKindLabels) as CortexMemoryKind[]).map((item) => ({
+              value: item,
+              label: cortexMemoryKindLabels[item],
+            })),
+          ]}
+          onChange={(value) => setKind(value as CortexMemoryKind | '')}
+        />
+        <Select
+          size="sm"
+          className="nc-toolbar-select"
+          ariaLabel="Situação"
           value={status}
-          onChange={(event) => setStatus(event.target.value as 'active' | 'all')}
-        >
-          <option value="active">Vigentes</option>
-          <option value="all">Todas (com histórico)</option>
-        </select>
+          options={[
+            { value: 'active', label: 'Vigentes' },
+            { value: 'all', label: 'Todas (com histórico)' },
+          ]}
+          onChange={(value) => setStatus(value as 'active' | 'all')}
+        />
         <button
           className="nc-small"
           onClick={() => setEditing({ memory: null, draft: blankDraft() })}
@@ -949,17 +953,17 @@ function ActivityTab({ block, version }: { block: CortexOverview; version: strin
   return (
     <section className="nc-cortex-section">
       <div className="nc-cortex-toolbar">
-        <select
+        <Select
+          size="sm"
+          className="nc-toolbar-select"
+          ariaLabel="Operação"
           value={type}
-          onChange={(event) => setType(event.target.value as CortexActivity['type'] | '')}
-        >
-          <option value="">Todas as operações</option>
-          {Object.entries(activityLabels).map(([key, label]) => (
-            <option key={key} value={key}>
-              {label}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todas as operações' },
+            ...Object.entries(activityLabels).map(([key, label]) => ({ value: key, label })),
+          ]}
+          onChange={(value) => setType(value as CortexActivity['type'] | '')}
+        />
         <span className="muted-text grow">
           Consultas, propostas, aprovações, avisos e acessos negados ficam registrados.
         </span>
@@ -1090,28 +1094,25 @@ function ConnectionsTab({
       )}
       {unconnected.length > 0 && (
         <div className="nc-cortex-toolbar">
-          <select
+          <Select
+            size="sm"
+            className="nc-toolbar-select"
+            ariaLabel="Conectar agente"
             value=""
-            aria-label="Conectar agente"
-            onChange={(event) =>
-              event.target.value &&
+            placeholder="Conectar agente…"
+            options={unconnected.map((worker) => ({
+              value: worker.id,
+              label: worker.name,
+              hint: roleLabel(worker.role),
+            }))}
+            onChange={(workerId) =>
               void act(
-                () =>
-                  window.hive.invoke('cortex.connect', {
-                    cortexId: node.id,
-                    workerId: event.target.value,
-                  }),
+                () => window.hive.invoke('cortex.connect', { cortexId: node.id, workerId }),
                 'Agente conectado com Read e Propose.',
               )
             }
-          >
-            <option value="">Conectar agente…</option>
-            {unconnected.map((worker) => (
-              <option key={worker.id} value={worker.id}>
-                {worker.name} · {roleLabel(worker.role)}
-              </option>
-            ))}
-          </select>
+            menuMinWidth={240}
+          />
         </div>
       )}
       <ul className="nc-cortex-help">
@@ -1248,14 +1249,13 @@ function EmbeddingSettings({
         <div className="nc-cortex-row">
           <label className="grow">
             Provedor
-            <select value={providerId} onChange={(event) => setProviderId(event.target.value)}>
-              <option value="">Escolha…</option>
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
+            <Select
+              ariaLabel="Provedor"
+              value={providerId}
+              placeholder="Escolha…"
+              options={providers.map((provider) => ({ value: provider.id, label: provider.name }))}
+              onChange={setProviderId}
+            />
           </label>
           <label className="grow">
             Modelo de embeddings

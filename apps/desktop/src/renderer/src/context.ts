@@ -27,13 +27,17 @@ export type View =
   | 'about';
 
 export type ModalState =
-  | { kind: 'mission' }
+  /** `objective` and `mode` come filled in when the mission starts from the home prompt. */
+  | { kind: 'mission'; objective?: string; mode?: MissionMode }
   | { kind: 'provider' }
   | { kind: 'key'; provider: ProviderConfig }
   | { kind: 'team'; providerId?: string }
   | { kind: 'model'; worker: Worker }
   | { kind: 'diff'; task: Task }
   | { kind: 'activity'; task: Task };
+
+/** How a new mission runs: the Queen's plan, queued for the shift, or agents compared. */
+export type MissionMode = 'plan' | 'queue' | 'compare';
 
 export interface HiveContext {
   summary: DashboardSummary | null;
@@ -59,6 +63,8 @@ export interface HiveContext {
   /** Output and state changes from workspace terminal processes. */
   onTerminal(listener: (event: TerminalEvent) => void): () => void;
   pickWorkspace(): Promise<void>;
+  /** Brings an open project to the front, as its tab would. */
+  openWorkspace(workspace: Workspace): Promise<void>;
 }
 
 export const Hive = createContext<HiveContext | null>(null);

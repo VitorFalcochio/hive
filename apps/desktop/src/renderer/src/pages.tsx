@@ -1,16 +1,83 @@
-import { useState } from 'react';
-import { Check, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { providerPresets, type ProviderConfig } from '@hive/core';
-import { hasAccess, useHive } from './context';
+import { useEffect, useState, type CSSProperties } from 'react';
+import {
+  ArrowRight,
+  Check,
+  Crown,
+  FolderOpen,
+  Gauge,
+  KeyRound,
+  Network,
+  Plug,
+  Plus,
+  RefreshCw,
+  SendHorizontal,
+  Trash2,
+  Users,
+} from 'lucide-react';
+import { beeColors, providerPresets, type ProviderConfig } from '@hive/core';
+import { hasAccess, useHive, type MissionMode } from './context';
+import { HoneyJar } from './honey';
 import { Mascot } from './mascot';
-import { Dot, Empty, PageHeader, runTone, statusLabels } from './ui';
+import { Dot, Empty, PageHeader, Select, runTone, statusLabels, type SelectOption } from './ui';
+
+const greetingFor = (hour: number) =>
+  hour < 5 ? 'Boa noite' : hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
+const dateFormat = new Intl.DateTimeFormat('pt-BR', {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+});
+const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const compact = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
+const sinceFormat = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
+
+/** "há 5 min", "ontem": how long since a project was last opened. */
+function since(iso: string, now: number): string {
+  const minutes = Math.round((Date.parse(iso) - now) / 60_000);
+  if (Math.abs(minutes) < 60) return sinceFormat.format(minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return sinceFormat.format(hours, 'hour');
+  return sinceFormat.format(Math.round(hours / 24), 'day');
+}
+
+const modeOptions: SelectOption[] = [
+  { value: 'plan', label: 'Plano da Queen', hint: 'a Queen divide em tarefas' },
+  { value: 'queue', label: 'Turno (fila)', hint: 'roda na fila do turno' },
+  { value: 'compare', label: 'Comparar agentes', hint: 'vários fazem, você escolhe' },
+];
+
+/** A stable colour per project, from the bee palette. */
+function projectColor(name: string): string {
+  const colors = Object.values(beeColors).map((color) => color.hex);
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return colors[hash % colors.length]!;
+}
+
+function useClock(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
 
 export function OverviewPage() {
-  const { summary, providers, workers, openModal, pickWorkspace, openMission } = useHive();
+  const { summary, providers, workers, workspaces, openModal, pickWorkspace, openMission, go } =
+    useHive();
+  const { openWorkspace } = useHive();
+  const now = useClock();
+  const [objective, setObjective] = useState('');
+  const [mode, setMode] = useState<MissionMode>('plan');
   const workspace = summary?.workspace ?? null;
   const connected = providers.filter(hasAccess);
   const queen = workers.find((worker) => worker.role === 'queen');
   const missions = summary?.recentMissions ?? [];
+  const today = summary?.today;
+  const used = today ? today.promptTokens + today.completionTokens : 0;
+  const percent = today?.budget ? Math.min(100, Math.round((used / today.budget) * 100)) : null;
+  const active = summary?.activeTasks.length ?? 0;
   const steps = [
     {
       title: 'Abra um repositório Git',
@@ -26,7 +93,7 @@ export function OverviewPage() {
       title: 'Conecte um provedor de IA',
       detail: connected.length
         ? connected.map((provider) => provider.name).join(', ')
-        : 'Cole a chave de API; testamos na hora.',
+        : 'Uma chave de API ou a sua conta do ChatGPT; testamos na hora.',
       done: connected.length > 0,
       action: (
         <button className="secondary" onClick={() => openModal({ kind: 'provider' })}>
@@ -53,7 +120,7 @@ export function OverviewPage() {
       detail: missions.length
         ? `${missions.length} missão(ões) neste projeto.`
         : 'A Queen divide o objetivo em tarefas.',
-      done: missions.some((mission) => mission.lastRunStatus === 'awaiting_plan_approval'),
+      done: missions.length > 0,
       action: (
         <button
           className="secondary"
@@ -65,50 +132,183 @@ export function OverviewPage() {
       ),
     },
   ];
+  const pending = steps.filter((step) => !step.done).length;
+  const send = () => {
+    if (!workspace || !objective.trim()) return;
+    openModal({ kind: 'mission', objective: objective.trim(), mode });
+    setObjective('');
+  };
+
   return (
-    <>
-      <PageHeader
-        eyebrow="Central de trabalho"
-        title="Vamos construir."
-        leading={<Mascot size={64} mood={summary?.activeTasks.length ? 'working' : 'idle'} />}
-        description="Conecte seu projeto, prepare a equipe e planeje sua próxima missão."
-      >
-        <button disabled={!workspace} onClick={() => openModal({ kind: 'mission' })}>
-          <Plus size={15} /> Nova missão
-        </button>
-      </PageHeader>
-      <section className="card">
-        <div className="card-heading">
-          <h2>Primeiros passos</h2>
-          <span className="muted">
-            {steps.filter((step) => step.done).length}/{steps.length}
-          </span>
-        </div>
-        <ol className="steps">
-          {steps.map((step) => (
-            <li key={step.title} className={step.done ? 'done' : ''}>
-              <span className="step-mark">{step.done && <Check size={12} strokeWidth={3} />}</span>
-              <div>
-                <strong>{step.title}</strong>
-                <small>{step.detail}</small>
-              </div>
-              {step.action}
-            </li>
-          ))}
-        </ol>
-        <p className="hint">
-          Cada tarefa roda numa cópia isolada do projeto (worktree Git). Nada muda no seu código até
-          você revisar e clicar em “Aplicar no projeto”.
+    <div className="home">
+      <header className="home-hero">
+        <Mascot size={52} mood={active ? 'working' : 'idle'} />
+        <h1>{greetingFor(now.getHours())}.</h1>
+        <p>
+          {dateFormat.format(now).replace('.', '')} · {timeFormat.format(now)}
+          {active > 0 &&
+            ` · ${active} ${active === 1 ? 'agente trabalhando' : 'agentes trabalhando'}`}
         </p>
-      </section>
-      <section className="card">
-        <div className="card-heading">
-          <h2>Missões recentes</h2>
-          <span className="muted">{workspace?.name ?? 'Sem repositório'}</span>
+      </header>
+
+      <form
+        className="home-prompt"
+        onSubmit={(event) => {
+          event.preventDefault();
+          send();
+        }}
+      >
+        <div className="home-prompt-bar" aria-hidden>
+          <i />
+          <i />
+          <i />
+          <span>hive@{workspace?.name ?? 'sem-projeto'}:~</span>
         </div>
-        {missions.length ? (
-          <div className="rows">
-            {missions.map((mission) => (
+        <div className="home-prompt-input">
+          <span aria-hidden>›</span>
+          <textarea
+            rows={2}
+            maxLength={10000}
+            value={objective}
+            disabled={!workspace}
+            aria-label="O que você quer construir?"
+            placeholder={
+              workspace ? 'O que você quer construir?' : 'Abra um projeto para começar uma missão.'
+            }
+            onChange={(event) => setObjective(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                send();
+              }
+            }}
+          />
+        </div>
+        <div className="home-prompt-foot">
+          <button
+            type="button"
+            className="home-chip"
+            title="Trocar de projeto"
+            onClick={() => void pickWorkspace()}
+          >
+            <FolderOpen size={13} />
+            <span className="truncate">{workspace?.name ?? 'Abrir projeto'}</span>
+          </button>
+          <button
+            type="button"
+            className="home-chip"
+            title="Modelos dos agentes"
+            onClick={() => go('agents')}
+          >
+            <Crown size={13} />
+            <span className="truncate">{queen?.modelId ?? 'Queen sem modelo'}</span>
+          </button>
+          <div className="home-chip-select">
+            <span className="home-chip-dot" aria-hidden />
+            <Select
+              size="sm"
+              className="home-chip-trigger"
+              ariaLabel="Modo da missão"
+              value={mode}
+              options={modeOptions}
+              onChange={(value) => setMode(value as MissionMode)}
+            />
+          </div>
+          <button
+            className="home-send"
+            aria-label="Criar missão"
+            title="Criar missão (Enter)"
+            disabled={!workspace || !objective.trim()}
+          >
+            <SendHorizontal size={15} />
+          </button>
+        </div>
+      </form>
+
+      <nav className="home-quick" aria-label="Atalhos">
+        <button type="button" disabled={!workspace} onClick={() => openModal({ kind: 'mission' })}>
+          <Plus size={14} /> Nova missão
+        </button>
+        <button type="button" onClick={() => void pickWorkspace()}>
+          <FolderOpen size={14} /> Abrir projeto
+        </button>
+        <button type="button" onClick={() => void window.hive.invoke('window.openCanvas')}>
+          <Network size={14} /> Abrir Workspace
+        </button>
+      </nav>
+
+      {pending > 0 && (
+        <section className="home-section">
+          <h2 className="home-label">
+            Primeiros passos{' '}
+            <span>
+              {steps.length - pending}/{steps.length}
+            </span>
+          </h2>
+          <div className="home-card">
+            <ol className="steps">
+              {steps.map((step) => (
+                <li key={step.title} className={step.done ? 'done' : ''}>
+                  <span className="step-mark">
+                    {step.done && <Check size={12} strokeWidth={3} />}
+                  </span>
+                  <div>
+                    <strong>{step.title}</strong>
+                    <small>{step.detail}</small>
+                  </div>
+                  {step.action}
+                </li>
+              ))}
+            </ol>
+            <p className="hint">
+              Cada tarefa roda numa cópia isolada do projeto (worktree Git). Nada muda no seu código
+              até você revisar e clicar em “Aplicar no projeto”.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {workspaces.length > 0 && (
+        <section className="home-section">
+          <h2 className="home-label">
+            Projetos <span>{workspaces.length}</span>
+          </h2>
+          <div className="home-projects">
+            {workspaces.slice(0, 6).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={item.id === workspace?.id ? 'home-project current' : 'home-project'}
+                onClick={() => void openWorkspace(item)}
+              >
+                <span
+                  className="home-project-mark"
+                  style={{ '--mark': projectColor(item.name) } as CSSProperties}
+                >
+                  {item.name.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="home-project-text">
+                  <strong className="truncate">{item.name}</strong>
+                  <small className="truncate">
+                    {item.id === workspace?.id
+                      ? 'aberto agora'
+                      : since(item.lastOpenedAt, now.getTime())}
+                  </small>
+                </span>
+                <ArrowRight size={14} className="home-project-go" />
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {missions.length > 0 && (
+        <section className="home-section">
+          <h2 className="home-label">
+            Missões recentes <span>{workspace?.name}</span>
+          </h2>
+          <div className="home-card rows">
+            {missions.slice(0, 6).map((mission) => (
               <button key={mission.id} className="row" onClick={() => void openMission(mission.id)}>
                 <Dot tone={runTone(mission.lastRunStatus)} />
                 <span className="row-title">{mission.title}</span>
@@ -116,11 +316,72 @@ export function OverviewPage() {
               </button>
             ))}
           </div>
-        ) : (
-          <Empty>Suas missões aparecerão aqui.</Empty>
-        )}
+        </section>
+      )}
+
+      <section className="home-section">
+        <h2 className="home-label">Uso e atividade</h2>
+        <div className="home-stats">
+          <article className="home-stat">
+            <header>
+              <Gauge size={14} /> Tokens hoje
+              {active > 0 && <span className="home-live">ao vivo</span>}
+            </header>
+            <strong>{percent === null ? compact.format(used) : `${percent}%`}</strong>
+            <div className="home-meter" aria-hidden>
+              <span style={{ width: `${percent ?? 0}%` }} />
+            </div>
+            <small>
+              {today?.budget
+                ? `${compact.format(used)} de ${compact.format(today.budget)} do orçamento`
+                : 'Sem orçamento diário definido'}
+            </small>
+          </article>
+          <article className="home-stat">
+            <header>
+              <Plug size={14} /> Provedores
+            </header>
+            <strong>
+              {connected.length}
+              <span>/{providers.length}</span>
+            </strong>
+            <ul className="home-providers">
+              {providers.slice(0, 3).map((provider) => (
+                <li key={provider.id}>
+                  <Dot
+                    tone={
+                      !hasAccess(provider)
+                        ? 'idle'
+                        : provider.lastTest?.ok === false
+                          ? 'error'
+                          : 'ok'
+                    }
+                  />
+                  <span className="truncate">{provider.name}</span>
+                </li>
+              ))}
+              {!providers.length && <li className="muted">Nenhum provedor ainda</li>}
+            </ul>
+          </article>
+          <article className="home-stat">
+            <header>
+              <Users size={14} /> Equipe
+            </header>
+            <strong>
+              {active}
+              <span> {active === 1 ? 'tarefa ativa' : 'tarefas ativas'}</span>
+            </strong>
+            <small>
+              {workers.length} agentes · <HoneyJar size={11} /> {summary?.honey?.today ?? 0} mel
+              hoje
+            </small>
+            <button type="button" className="home-stat-link" onClick={() => go('agents')}>
+              Ver agentes <ArrowRight size={12} />
+            </button>
+          </article>
+        </div>
       </section>
-    </>
+    </div>
   );
 }
 

@@ -6,7 +6,7 @@ import type {
   NexusAutopilotDraft,
   NexusAutopilotPlan,
 } from '@hive/core';
-import { Modal } from '../ui';
+import { Modal, Select } from '../ui';
 
 const cloneDraft = (draft: NexusAutopilotDraft): NexusAutopilotDraft =>
   JSON.parse(JSON.stringify(draft)) as NexusAutopilotDraft;
@@ -291,7 +291,7 @@ export function NexusAutopilot({
 
   return (
     <Modal
-      title="Nexus Autopilot"
+      title="Workspace Autopilot"
       description={`${snapshot.workspace?.name ?? 'Projeto'} · ${snapshot.detail.mission.title}`}
       size="xl"
       onClose={() => {
@@ -372,24 +372,25 @@ export function NexusAutopilot({
                   {plan.queen.name} · {plan.queen.modelId}
                 </small>
                 {versions.length > 1 && (
-                  <select
-                    aria-label="Versão do plano"
+                  <Select
+                    size="sm"
+                    ariaLabel="Versão do plano"
                     value={plan.id}
-                    onChange={(event) => {
-                      const selected = versions.find((item) => item.id === event.target.value);
+                    options={versions.map((item) => ({
+                      value: item.id,
+                      label: `v${item.version} · ${item.changeSummary}`,
+                      hint: stateLabel[item.state],
+                    }))}
+                    onChange={(value) => {
+                      const selected = versions.find((item) => item.id === value);
                       if (selected) {
                         setPlan(selected);
                         setDraft(null);
                         setReceipt(null);
                       }
                     }}
-                  >
-                    {versions.map((item) => (
-                      <option value={item.id} key={item.id}>
-                        v{item.version} · {stateLabel[item.state]} · {item.changeSummary}
-                      </option>
-                    ))}
-                  </select>
+                    menuMinWidth={320}
+                  />
                 )}
               </div>
               <button
@@ -560,19 +561,15 @@ export function NexusAutopilot({
                 <div className="nc-autopilot-task-row">
                   <label>
                     Agente
-                    <select
+                    <Select
+                      ariaLabel="Agente"
                       value={task.workerKey ?? ''}
-                      onChange={(event) =>
-                        editTask(task.key, { workerKey: event.target.value || null })
-                      }
-                    >
-                      <option value="">Delegação automática</option>
-                      {agentOptions.map((agent) => (
-                        <option value={agent.key} key={agent.key}>
-                          {agent.key}
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: '', label: 'Delegação automática' },
+                        ...agentOptions.map((agent) => ({ value: agent.key, label: agent.key })),
+                      ]}
+                      onChange={(value) => editTask(task.key, { workerKey: value || null })}
+                    />
                   </label>
                   <label>
                     Dependências (chaves)

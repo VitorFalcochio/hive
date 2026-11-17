@@ -336,7 +336,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
         <>
           <Section
             title="Replanejamento adaptativo"
-            description="Quando uma tarefa falha de vez durante a execução, as que dependem dela esperam e a Queen propõe outro caminho no Nexus. Nada muda sem a sua aprovação."
+            description="Quando uma tarefa falha de vez durante a execução, as que dependem dela esperam e a Queen propõe outro caminho no Workspace. Nada muda sem a sua aprovação."
           >
             <label className="settings-check">
               <input
@@ -383,7 +383,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
         <>
           <Section
             title="Orçamento de tokens"
-            description="Quanto os agentes podem gastar por dia. Aparece na barra lá embaixo e no bloco Tokens do Nexus."
+            description="Quanto os agentes podem gastar por dia. Aparece na barra lá embaixo e no bloco Tokens do Workspace."
           >
             <NumberField
               label="Orçamento diário de tokens"

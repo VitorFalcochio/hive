@@ -225,7 +225,7 @@ export class CortexService {
     this.log(
       saved,
       previous ? 'permissions' : 'connected',
-      source === 'user' ? USER : { kind: 'system', workerId: null, name: 'Nexus Autopilot' },
+      source === 'user' ? USER : { kind: 'system', workerId: null, name: 'Workspace Autopilot' },
       previous
         ? `Permissões de ${worker.name}: ${describe(permissions)}.`
         : `${worker.name} conectado (${describe(permissions)}).`,

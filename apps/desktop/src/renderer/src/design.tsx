@@ -17,6 +17,7 @@ import type { LocateCandidate } from '@hive/core';
 import { fileTab, useCode, type AiProposal } from './code/store';
 import { useHive, usableWorkers } from './context';
 import type { DesignNote } from './design-tray';
+import { Select } from './ui';
 
 // Shape of the element report sent by the inspector injected into the preview page.
 export interface DesignElement {
@@ -538,30 +539,27 @@ export function DesignEditor({
 
       <DesignGroup title="Tipografia">
         <div className="design-row">
-          <select
+          <Select
+            size="sm"
             className={changed('fontFamily') ? 'changed' : undefined}
+            ariaLabel="Fonte"
             value={values.fontFamily ?? ''}
-            onChange={(event) => set('fontFamily', event.target.value)}
-            aria-label="Fonte"
-          >
-            {families.map(([value, label]) => (
-              <option key={value} value={value} style={{ fontFamily: value }}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <select
+            options={families.map(([value, label]) => ({
+              value,
+              label,
+              style: { fontFamily: value },
+            }))}
+            onChange={(value) => set('fontFamily', value)}
+          />
+          <Select
+            size="sm"
             className={changed('fontWeight') ? 'changed' : undefined}
+            ariaLabel="Peso da fonte"
             value={values.fontWeight ?? ''}
-            onChange={(event) => set('fontWeight', event.target.value)}
-            aria-label="Peso da fonte"
-          >
-            {weights.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+            options={weights.map(([value, label]) => ({ value, label }))}
+            onChange={(value) => set('fontWeight', value)}
+            menuMinWidth={160}
+          />
         </div>
         <SizeField
           label="Tamanho"
@@ -674,35 +672,28 @@ export function DesignEditor({
             'Não achei o arquivo. Escolha abaixo, ou deixe o agente procurar.'
           )}
         </div>
-        <select
+        <Select
+          size="sm"
+          ariaLabel="Arquivo do componente"
           value={file}
-          onChange={(event) => {
+          placeholder={
+            files.length ? 'Arquivo do componente' : 'Nenhum arquivo de código encontrado'
+          }
+          options={[
+            ...(candidates ?? []).map((item) => ({
+              value: item.path,
+              label: item.path + (item.line ? `:${item.line}` : ''),
+              group: 'Prováveis',
+            })),
+            ...files.map((path) => ({ value: path, label: path, group: 'Todos os arquivos' })),
+          ]}
+          onChange={(value) => {
             picked.current = true;
-            setFile(event.target.value);
+            setFile(value);
           }}
           disabled={!files.length}
-          aria-label="Arquivo do componente"
-        >
-          <option value="">
-            {files.length ? 'Arquivo do componente' : 'Nenhum arquivo de código encontrado'}
-          </option>
-          {!!candidates?.length && (
-            <optgroup label="Prováveis">
-              {candidates.map((item) => (
-                <option key={`likely-${item.path}`} value={item.path}>
-                  {item.path + (item.line ? `:${item.line}` : '')}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          <optgroup label="Todos os arquivos">
-            {files.map((path) => (
-              <option key={path} value={path}>
-                {path}
-              </option>
-            ))}
-          </optgroup>
-        </select>
+          menuMinWidth={300}
+        />
         <textarea
           rows={2}
           value={note}

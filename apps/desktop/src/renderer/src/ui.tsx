@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+  type CSSProperties,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, X } from 'lucide-react';
 import type { RunStatus } from '@hive/core';
@@ -56,6 +65,7 @@ export function Modal({
   children,
   wide = false,
   size,
+  className,
 }: {
   title: string;
   description?: ReactNode;
@@ -63,6 +73,7 @@ export function Modal({
   children: ReactNode;
   wide?: boolean;
   size?: 'xl';
+  className?: string;
 }) {
   const titleId = useId();
   useEffect(() => {
@@ -80,7 +91,9 @@ export function Modal({
       }}
     >
       <div
-        className={size === 'xl' ? 'modal xl' : wide ? 'modal wide' : 'modal'}
+        className={[size === 'xl' ? 'modal xl' : wide ? 'modal wide' : 'modal', className]
+          .filter(Boolean)
+          .join(' ')}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -144,6 +157,8 @@ export interface SelectOption {
   tag?: { label: string; tone?: 'free' };
   /** Section heading; consecutive options with the same group share one heading. */
   group?: string;
+  /** Inline style for the option's label, e.g. a font preview. */
+  style?: CSSProperties;
 }
 
 function SelectTag({ tag }: { tag: NonNullable<SelectOption['tag']> }) {
@@ -160,18 +175,35 @@ export function Select({
   onChange,
   placeholder = 'Selecione',
   disabled = false,
+  ariaLabel,
+  className,
+  size = 'md',
+  menuMinWidth = 200,
 }: {
   value: string;
   options: SelectOption[];
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  ariaLabel?: string;
+  /** Extra classes on the trigger (e.g. `nodrag` on the canvas). */
+  className?: string;
+  /** `sm` for toolbars and chips. */
+  size?: 'sm' | 'md';
+  /** The menu is at least this wide, so narrow triggers still show whole labels. */
+  menuMinWidth?: number;
 }) {
   const listId = useId();
   const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const [position, setPosition] = useState({ top: 0, left: 0, width: 0 });
+  const [position, setPosition] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  }>({ top: 0, left: 0, width: 0, maxHeight: 420 });
   const selected = options.find((option) => option.value === value);
 
   useEffect(() => {
@@ -192,7 +224,24 @@ export function Select({
 
   function show() {
     const rect = button.current?.getBoundingClientRect();
-    if (rect) setPosition({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    if (rect) {
+      // Opens upwards when there is more room above, and stays inside the window sideways.
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      const up = below < 220 && above > below;
+      const width = Math.min(Math.max(rect.width, menuMinWidth), window.innerWidth - 16);
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      setPosition(
+        up
+          ? {
+              bottom: window.innerHeight - rect.top + 4,
+              left,
+              width,
+              maxHeight: Math.min(420, above),
+            }
+          : { top: rect.bottom + 4, left, width, maxHeight: Math.min(420, below) },
+      );
+    }
     setActive(
       Math.max(
         0,
@@ -212,8 +261,11 @@ export function Select({
       <button
         ref={button}
         type="button"
-        className="select-trigger"
+        className={['select-trigger', size === 'sm' ? 'select-sm' : '', className ?? '']
+          .filter(Boolean)
+          .join(' ')}
         role="combobox"
+        aria-label={ariaLabel}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-controls={open ? listId : undefined}
@@ -256,10 +308,16 @@ export function Select({
             id={listId}
             role="listbox"
             className="select-menu"
-            style={{ top: position.top, left: position.left, width: position.width }}
+            style={{
+              top: position.top,
+              bottom: position.bottom,
+              left: position.left,
+              width: position.width,
+              maxHeight: position.maxHeight,
+            }}
           >
             {options.map((option, index) => (
-              <Fragment key={option.value}>
+              <Fragment key={`${index}:${option.value}`}>
                 {option.group && option.group !== options[index - 1]?.group && (
                   <li role="presentation" className="select-group">
                     {option.group}
@@ -272,7 +330,9 @@ export function Select({
                   onMouseEnter={() => setActive(index)}
                   onClick={() => pick(option)}
                 >
-                  <span className="truncate">{option.label}</span>
+                  <span className="truncate" style={option.style}>
+                    {option.label}
+                  </span>
                   {option.hint && <small>{option.hint}</small>}
                   {option.tag && <SelectTag tag={option.tag} />}
                   <span className="select-check">

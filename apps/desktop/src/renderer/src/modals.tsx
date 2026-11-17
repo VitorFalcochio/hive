@@ -1,5 +1,17 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Check, CircleAlert, ExternalLink, Eye, EyeOff, Send } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  Check,
+  CircleAlert,
+  CornerDownLeft,
+  Crown,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FolderGit2,
+  Repeat,
+  Send,
+  Split,
+} from 'lucide-react';
 import {
   providerPresets,
   type ConnectionTest,
@@ -12,7 +24,7 @@ import {
   type TaskDiff,
   type Worker,
 } from '@hive/core';
-import { hasAccess, useHive, usableWorkers, type ModalState } from './context';
+import { hasAccess, useHive, usableWorkers, type MissionMode, type ModalState } from './context';
 import { buildComparisonPlan, MAX_CANDIDATES, MIN_CANDIDATES } from './comparison';
 import { Modal, Select, useTask, type SelectOption } from './ui';
 import { taskDiffTab, useCode } from './code/store';
@@ -28,7 +40,7 @@ export function ModalHost({ modal }: { modal: ModalState | null }) {
   if (!modal) return null;
   switch (modal.kind) {
     case 'mission':
-      return <MissionModal />;
+      return <MissionModal objective={modal.objective} mode={modal.mode} />;
     case 'provider':
       return <ProviderModal />;
     case 'key':
@@ -366,15 +378,46 @@ function ChatGPTAccountModal({ provider }: { provider: ProviderConfig }) {
   );
 }
 
-function MissionModal() {
+/** A title from the first line of an objective typed on the home screen. */
+function titleFrom(objective: string | undefined): string {
+  const line = objective?.trim().split('\n')[0]?.trim() ?? '';
+  return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
+}
+
+/** How a new mission runs, as the cards in the mission modal show it. */
+const missionModes: { id: MissionMode; icon: typeof Crown; title: string; text: string }[] = [
+  {
+    id: 'plan',
+    icon: Crown,
+    title: 'Plano da Queen',
+    text: 'A Queen divide o objetivo em tarefas e você acompanha cada passo.',
+  },
+  {
+    id: 'queue',
+    icon: Repeat,
+    title: 'Modo Turno',
+    text: 'Entra na fila: a Queen planeja e a equipe executa sem esperar por você.',
+  },
+  {
+    id: 'compare',
+    icon: Split,
+    title: 'Comparar agentes',
+    text: 'Vários agentes fazem a mesma tarefa e você aplica a melhor entrega.',
+  },
+];
+
+function MissionModal(initial: { objective?: string; mode?: MissionMode }) {
   const { closeModal, refresh, setDetail, go, summary, workers, providers } = useHive();
-  const [title, setTitle] = useState('');
-  const [objective, setObjective] = useState('');
-  const [compare, setCompare] = useState(false);
-  const [queue, setQueue] = useState(false);
+  const [title, setTitle] = useState(() => titleFrom(initial.objective));
+  const [objective, setObjective] = useState(initial.objective ?? '');
+  const [mode, setMode] = useState<MissionMode>(initial.mode ?? 'plan');
   const [picked, setPicked] = useState<string[]>([]);
+  const formRef = useRef<HTMLFormElement>(null);
   const task = useTask();
+  const compare = mode === 'compare';
   const candidates = usableWorkers(workers, providers).filter((worker) => worker.role !== 'queen');
+  const queen = workers.find((worker) => worker.role === 'queen');
+  const blocked = task.running || (compare && picked.length < MIN_CANDIDATES);
 
   function toggle(id: string) {
     setPicked((current) =>
@@ -387,17 +430,9 @@ function MissionModal() {
   }
 
   return (
-    <Modal
-      title="Nova missão"
-      description={
-        compare
-          ? 'Cada agente escolhido executa o objetivo numa worktree própria. Você aplica a melhor entrega.'
-          : `Em ${summary?.workspace?.name ?? 'nenhum repositório'}. A Queen transforma o objetivo em tarefas.`
-      }
-      onClose={closeModal}
-      wide
-    >
+    <Modal title="Nova missão" onClose={closeModal} wide className="mission-modal">
       <form
+        ref={formRef}
         onSubmit={(event) => {
           event.preventDefault();
           void task.run(async () => {
@@ -415,7 +450,7 @@ function MissionModal() {
             if (plan) {
               await window.hive.invoke('run.setPlan', { runId: created.runId, plan });
               await window.hive.invoke('run.start', created.runId);
-            } else if (queue) {
+            } else if (mode === 'queue') {
               await window.hive.invoke('autopilot.enqueue', created.runId);
             }
             setDetail(await window.hive.invoke('run.get', created.runId));
@@ -425,92 +460,130 @@ function MissionModal() {
           });
         }}
       >
-        <label>
-          Título
+        <div className="mission-context">
+          <span className="home-chip">
+            <FolderGit2 size={12} />
+            <span className="truncate">{summary?.workspace?.name ?? 'Nenhum projeto'}</span>
+          </span>
+          {!compare && (
+            <span className="home-chip">
+              <span className={queen?.modelId ? 'home-chip-dot' : 'home-chip-dot off'} />
+              <span className="truncate">{queen?.modelId ?? 'Queen sem modelo'}</span>
+            </span>
+          )}
+        </div>
+
+        <div className="mission-compose">
           <input
             autoFocus
             required
+            aria-label="Título"
+            className="mission-title"
             maxLength={140}
             value={title}
             placeholder="O que vamos construir?"
             onChange={(event) => setTitle(event.target.value)}
           />
-        </label>
-        <label>
-          Objetivo
-          <textarea
-            required
-            maxLength={10000}
-            rows={6}
-            value={objective}
-            placeholder="Descreva o resultado esperado e os critérios de sucesso."
-            onChange={(event) => setObjective(event.target.value)}
-          />
-        </label>
-        <fieldset className="mode-choice">
-          <legend>Como executar</legend>
-          <label className={compare ? 'option-card' : 'option-card selected'}>
-            <input type="radio" name="mode" checked={!compare} onChange={() => setCompare(false)} />
-            <span>
-              <strong>Plano da Queen</strong>
-              <small>A Queen divide o objetivo em tarefas para a equipe.</small>
-            </span>
-          </label>
-          <label className={compare ? 'option-card selected' : 'option-card'}>
-            <input type="radio" name="mode" checked={compare} onChange={() => setCompare(true)} />
-            <span>
-              <strong>Comparar agentes</strong>
-              <small>Vários agentes fazem a mesma tarefa e você escolhe a melhor.</small>
-            </span>
-          </label>
-        </fieldset>
-        {!compare && (
-          <label className={queue ? 'option-card wide selected' : 'option-card wide'}>
-            <input
-              type="checkbox"
-              checked={queue}
-              onChange={(event) => setQueue(event.target.checked)}
+          <div className="mission-objective">
+            <span aria-hidden>›</span>
+            <textarea
+              required
+              aria-label="Objetivo"
+              maxLength={10000}
+              rows={5}
+              value={objective}
+              placeholder="Descreva o resultado esperado e como saber que ficou pronto."
+              onChange={(event) => setObjective(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  if (!blocked) formRef.current?.requestSubmit();
+                }
+              }}
             />
+          </div>
+          <div className="mission-compose-foot">
             <span>
-              <strong>Colocar na fila do Modo Turno</strong>
-              <small>A Queen planeja e os agentes executam sem esperar por você.</small>
+              <kbd>Ctrl</kbd> <kbd>Enter</kbd> cria a missão
             </span>
-          </label>
-        )}
+            <span>{objective.length.toLocaleString('pt-BR')} / 10.000</span>
+          </div>
+        </div>
+
+        <div className="mission-section-label" id="mission-mode-label">
+          Como executar
+        </div>
+        <div className="mission-modes" role="radiogroup" aria-labelledby="mission-mode-label">
+          {missionModes.map(({ id, icon: Icon, title: name, text }) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={mode === id}
+              className={mode === id ? 'mission-mode selected' : 'mission-mode'}
+              onClick={() => setMode(id)}
+            >
+              <span className="mission-mode-icon">
+                <Icon size={15} />
+              </span>
+              <strong>{name}</strong>
+              <small>{text}</small>
+            </button>
+          ))}
+        </div>
+
         {compare && (
-          <fieldset className="agent-picks">
-            <legend>
-              Agentes ({picked.length} de {MAX_CANDIDATES}, mínimo {MIN_CANDIDATES})
-            </legend>
+          <div className="mission-picks">
+            <div className="mission-section-label">
+              Agentes
+              <span>
+                {picked.length} de {MAX_CANDIDATES} · mínimo {MIN_CANDIDATES}
+              </span>
+            </div>
             {candidates.length ? (
-              candidates.map((worker) => (
-                <label key={worker.id} className="choice">
-                  <input
-                    type="checkbox"
-                    checked={picked.includes(worker.id)}
-                    onChange={() => toggle(worker.id)}
-                  />
-                  {worker.name} <code>{worker.modelId}</code>
-                </label>
-              ))
+              <div className="mission-pick-grid">
+                {candidates.map((worker) => {
+                  const on = picked.includes(worker.id);
+                  return (
+                    <button
+                      key={worker.id}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={on}
+                      className={on ? 'mission-pick selected' : 'mission-pick'}
+                      onClick={() => toggle(worker.id)}
+                    >
+                      <AgentBee worker={worker} size={20} />
+                      <span>
+                        <strong>{worker.name}</strong>
+                        <code>{worker.modelId}</code>
+                      </span>
+                      <span className="mission-pick-check">{on && <Check size={12} />}</span>
+                    </button>
+                  );
+                })}
+              </div>
             ) : (
               <p className="hint">Configure agentes com provedor e modelo na aba Agentes.</p>
             )}
-          </fieldset>
+          </div>
         )}
+
         <FormError error={task.error} />
-        <div className="modal-actions">
+        <div className="modal-actions mission-actions">
           <button type="button" className="secondary" onClick={closeModal}>
             Cancelar
           </button>
-          <button disabled={task.running || (compare && picked.length < MIN_CANDIDATES)}>
+          <button className="mission-submit" disabled={blocked}>
             {task.running ? 'Criando…' : compare ? 'Criar e comparar' : 'Criar missão'}
+            {!task.running && <CornerDownLeft size={14} />}
           </button>
         </div>
       </form>
     </Modal>
   );
 }
+
 export function SetupResult({ setup }: { setup: RecommendedSetup }) {
   return (
     <ul className="setup-result">

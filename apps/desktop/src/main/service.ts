@@ -1626,7 +1626,7 @@ export class DesktopService {
       }
       case 'window.openCanvas':
         if (!this.openCanvas)
-          throw new HiveError('VALIDATION', 'O Nexus não está disponível agora.');
+          throw new HiveError('VALIDATION', 'O Workspace não está disponível agora.');
         return this.openCanvas();
       case 'window.addProvider':
         return this.addProvider?.();

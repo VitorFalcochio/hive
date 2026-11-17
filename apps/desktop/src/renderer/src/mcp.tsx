@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Pencil, Plug, Plus, Trash2 } from 'lucide-react';
 import type { McpServer } from '@hive/core';
 import { Section } from './settings';
-import { useTask } from './ui';
+import { Select, useTask } from './ui';
 
 type Template = Omit<McpServer, 'id' | 'enabled'>;
 
@@ -229,15 +229,15 @@ function McpEditor({
         </label>
         <label className="settings-field">
           <span>Conexão</span>
-          <select
+          <Select
+            ariaLabel="Conexão"
             value={server.transport}
-            onChange={(event) =>
-              onChange({ transport: event.target.value as McpServer['transport'] })
-            }
-          >
-            <option value="stdio">Programa local (stdio)</option>
-            <option value="http">Servidor remoto (HTTP)</option>
-          </select>
+            options={[
+              { value: 'stdio', label: 'Programa local (stdio)' },
+              { value: 'http', label: 'Servidor remoto (HTTP)' },
+            ]}
+            onChange={(value) => onChange({ transport: value as McpServer['transport'] })}
+          />
         </label>
       </div>
       {server.transport === 'stdio' ? (

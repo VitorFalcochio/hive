@@ -5,6 +5,7 @@ import { useHive } from './context';
 import { DesignPanel, parseDesignElement, type DesignElement, type DesignPreview } from './design';
 import { useTray } from './design-tray';
 import { DesignTray } from './design-tray-panel';
+import { Select } from './ui';
 
 function validatePreviewUrl(value: string): string {
   const url = new URL(value.trim());
@@ -158,22 +159,17 @@ export function PreviewPane({ workspace, detected }: { workspace: Workspace; det
   return (
     <div className="preview-pane">
       <div className="preview-address">
-        <select
+        <Select
+          size="sm"
           className="preview-pages"
-          aria-label="Abrir página HTML do projeto"
+          ariaLabel="Abrir página HTML do projeto"
           value=""
-          onChange={(event) => void openHtml(event.target.value)}
+          placeholder={htmlPages.length ? 'Páginas do projeto…' : 'Nenhuma página HTML'}
+          options={htmlPages.map((page) => ({ value: page, label: page }))}
+          onChange={(page) => void openHtml(page)}
           disabled={!htmlPages.length}
-        >
-          <option value="">
-            {htmlPages.length ? 'Páginas do projeto…' : 'Nenhuma página HTML'}
-          </option>
-          {htmlPages.map((page) => (
-            <option key={page} value={page}>
-              {page}
-            </option>
-          ))}
-        </select>
+          menuMinWidth={280}
+        />
         <input
           aria-label="Endereço do preview"
           value={urlInput}

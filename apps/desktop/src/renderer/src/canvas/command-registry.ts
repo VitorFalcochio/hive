@@ -423,7 +423,7 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
     });
   registry.register({
     id: 'queen.autopilot',
-    title: 'Nexus Autopilot — Criar fluxo com IA',
+    title: 'Workspace Autopilot — Criar fluxo com IA',
     description: 'Transformar um objetivo em um workflow visual, editável e executável.',
     category: 'Queen AI',
     icon: 'queen',

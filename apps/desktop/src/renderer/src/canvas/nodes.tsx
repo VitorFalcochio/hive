@@ -40,6 +40,7 @@ import {
   type Grouping,
 } from './model';
 import type { Frame, Note, ProviderBlock } from './use-layout';
+import { Select } from '../ui';
 
 /** What every node reads; nodes only carry the id of what they stand for. */
 export interface CanvasView {
@@ -455,18 +456,19 @@ export const ProviderNode = memo(function ProviderNode({ id, selected }: NodePro
         <div className="nc-provider-body nodrag">
           <label className="nc-provider-field">
             <span>Novo provedor</span>
-            <select
-              className="nc-provider-select"
+            <Select
+              size="sm"
+              className="nodrag"
+              ariaLabel="Novo provedor"
               value={kind}
-              onChange={(event) => setKind(event.target.value as ProviderKind)}
-            >
-              {providerKinds.map((item) => (
-                <option key={item.kind} value={item.kind}>
-                  {item.label}
-                  {item.free.available ? ' · grátis' : ''}
-                </option>
-              ))}
-            </select>
+              options={providerKinds.map((item) => ({
+                value: item.kind,
+                label: item.label,
+                tag: item.free.available ? { label: 'Grátis', tone: 'free' } : undefined,
+              }))}
+              onChange={(value) => setKind(value as ProviderKind)}
+              menuMinWidth={260}
+            />
           </label>
           <p className="nc-provider-note">
             {needsKey
@@ -559,23 +561,26 @@ export const ProviderNode = memo(function ProviderNode({ id, selected }: NodePro
             )}
           </div>
           <footer className="nc-provider-foot nodrag">
-            <select
-              className="nc-provider-select"
-              aria-label="Provedor"
+            <Select
+              size="sm"
+              className="nodrag"
+              ariaLabel="Provedor"
               value={providerId ?? ''}
-              onChange={(event) => {
-                if (event.target.value === NEW_PROVIDER) setAdding(true);
-                else view.updateProviderBlock(id, { providerId: event.target.value || null });
+              placeholder={providers ? 'Escolha um provedor…' : 'Carregando…'}
+              options={[
+                ...(providers ?? []).map((provider) => ({
+                  value: provider.id,
+                  label: provider.name,
+                  group: 'Conectados',
+                })),
+                { value: NEW_PROVIDER, label: '+ Conectar novo provedor…', group: 'Novo' },
+              ]}
+              onChange={(value) => {
+                if (value === NEW_PROVIDER) setAdding(true);
+                else view.updateProviderBlock(id, { providerId: value || null });
               }}
-            >
-              <option value="">{providers ? 'Escolha um provedor…' : 'Carregando…'}</option>
-              {providers?.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-              <option value={NEW_PROVIDER}>+ Conectar novo provedor…</option>
-            </select>
+              menuMinWidth={260}
+            />
           </footer>
         </>
       )}

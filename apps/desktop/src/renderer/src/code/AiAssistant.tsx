@@ -14,6 +14,7 @@ import type { CodeAssistantMode } from '@hive/core';
 import { useHive, usableWorkers } from '../context';
 import { applyAiTextEdit, editorOptions, getDoc, monaco } from './monaco';
 import { useCode, type AiProposal } from './store';
+import { Select } from '../ui';
 
 interface ChatEntry {
   id: number;
@@ -162,13 +163,18 @@ export function AiAssistant({ path, onClose }: { path: string | null; onClose: (
         <label className="ai-worker">
           <Bot size={13} />
           <span className="sr-only">Agente</span>
-          <select value={worker?.id ?? ''} onChange={(event) => setWorkerId(event.target.value)}>
-            {availableWorkers.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name} · {item.modelId}
-              </option>
-            ))}
-          </select>
+          <Select
+            size="sm"
+            ariaLabel="Agente"
+            value={worker?.id ?? ''}
+            options={availableWorkers.map((item) => ({
+              value: item.id,
+              label: item.name,
+              hint: item.modelId ?? undefined,
+            }))}
+            onChange={setWorkerId}
+            menuMinWidth={260}
+          />
         </label>
       ) : (
         <button className="ai-configure" onClick={() => go('agents')}>

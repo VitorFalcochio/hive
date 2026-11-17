@@ -289,7 +289,7 @@ function Toolbar({
         <span>hive</span>
         <span className="sep">/</span>
         <Network size={14} />
-        <span>Nexus</span>
+        <span>Workspace</span>
       </div>
       <div className="nc-picker nodrag">
         <Select
