@@ -10,7 +10,7 @@ import {
 import type { ToolDefinition } from '@hive/providers';
 import type { ResolvedSkill } from '@hive/skills';
 import { HiveError, resolveInside, toPosixRelative } from '@hive/shared';
-import { runCommand } from './process';
+import { runCommand, type BackgroundProcesses } from './process';
 import type { RuntimeEvent } from './runtime';
 import { fetchPage, isLocalUrl, parseWebUrl, type PageViewer } from './web';
 
@@ -47,6 +47,8 @@ export interface ToolContext {
   vision: boolean;
   /** Opens local pages for view_page; without it the tool is not offered. */
   viewPage?: PageViewer;
+  /** Servers and watchers started with run_command background; killed when the session ends. */
+  background?: BackgroundProcesses;
 }
 
 export interface ToolImage {
@@ -186,10 +188,16 @@ export const toolDefinitions: Record<ToolName | 'finish', ToolDefinition> = {
     function: {
       name: 'run_command',
       description:
-        'Run a shell command in the project root (for example tests or a build). The user may need to approve it. Do not use it to commit, push or modify git history.',
+        'Run a shell command in the project root (for example tests or a build). The user may need to approve it. Do not use it to commit, push or modify git history. For anything that keeps running (a dev server such as `python -m http.server 8000` or `npm run dev`, a watcher) set background: true and pass the plain command, without `start`, `&` or `nohup`: it returns after a few seconds with the first output and keeps running until your task ends.',
       parameters: {
         type: 'object',
-        properties: { command: { type: 'string' } },
+        properties: {
+          command: { type: 'string' },
+          background: {
+            type: 'boolean',
+            description: 'Keep the command running (servers, watchers). Default false.',
+          },
+        },
         required: ['command'],
       },
     },
@@ -517,6 +525,7 @@ async function commandTool(ctx: ToolContext, args: Record<string, unknown>): Pro
     message: command,
     data: { command, autoApproved },
   });
+  if (args.background === true && ctx.background) return backgroundCommand(ctx, command);
   const result = await runCommand(command, {
     cwd: ctx.root,
     timeoutMs: ctx.commandTimeoutMs,
@@ -549,6 +558,45 @@ async function commandTool(ctx: ToolContext, args: Record<string, unknown>): Pro
   return {
     output: `$ ${command}\n(${status})\n${truncate(result.output) || '(no output)'}`,
     isError: result.exitCode !== 0,
+  };
+}
+
+const BACKGROUND_WAIT_MS = 4000;
+
+async function backgroundCommand(ctx: ToolContext, command: string): Promise<ToolOutcome> {
+  const started = await ctx.background!.start(command, {
+    cwd: ctx.root,
+    waitMs: BACKGROUND_WAIT_MS,
+  });
+  const tail = started.output.slice(-4000);
+  const exitCode = started.exited ? started.exitCode : null;
+  const failed = started.exited && started.exitCode !== 0;
+  ctx.commands.push({
+    command,
+    exitCode,
+    durationMs: BACKGROUND_WAIT_MS,
+    timedOut: false,
+    outputTail: tail,
+  });
+  ctx.emit({
+    type: 'command.finished',
+    level: failed ? 'warn' : 'info',
+    message: `${command} → ${started.exited ? `exit ${started.exitCode}` : 'running in background'}`,
+    data: {
+      command,
+      exitCode,
+      timedOut: false,
+      durationMs: BACKGROUND_WAIT_MS,
+      outputTail: tail,
+      background: true,
+    },
+  });
+  const status = started.exited
+    ? `exited with code ${started.exitCode} during startup`
+    : `running in background (pid ${started.pid}); it is stopped when your task ends`;
+  return {
+    output: `$ ${command}\n(${status})\n${truncate(started.output) || '(no output yet)'}`,
+    isError: failed,
   };
 }
 

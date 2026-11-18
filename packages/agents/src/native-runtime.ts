@@ -41,6 +41,7 @@ import {
   type ToolImage,
   type ToolOutcome,
 } from './tools';
+import { BackgroundProcesses } from './process';
 import type { PageViewer } from './web';
 
 const MAX_SKILL_CHARS = 48_000;
@@ -248,6 +249,7 @@ export class NativeAgentRuntime implements AgentRuntime {
     });
 
     let mcp: McpSession | null = null;
+    const background = new BackgroundProcesses();
     try {
       const root = await realpath(input.worktreePath);
       const env: LoopEnv = { chat: input.chat, limits, signal, usage };
@@ -260,6 +262,7 @@ export class NativeAgentRuntime implements AgentRuntime {
         commands,
         emit,
         vision: true,
+        background,
         ...(this.options.viewPage ? { viewPage: this.options.viewPage } : {}),
         requestApproval: async (request) => {
           emit({
@@ -331,6 +334,7 @@ export class NativeAgentRuntime implements AgentRuntime {
       if (isAbortError(error)) return outcome('cancelled', '', 'Cancelled.');
       return outcome('failed', '', secretRedactor.redact(errorMessage(error)));
     } finally {
+      background.stopAll();
       await mcp?.close();
     }
   }
