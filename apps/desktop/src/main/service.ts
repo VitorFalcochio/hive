@@ -770,12 +770,37 @@ export class DesktopService {
   }
 
   /**
+   * After the Queen plans, the blocks every mission wants on its canvas without asking: the
+   * project's Nectar (created with the team if the project has none yet) and a Tokens card above
+   * the agent windows. A canvas that already has a Tokens card keeps its own.
+   */
+  private scaffoldBlocks(runId: string): void {
+    try {
+      const run = this.repos.runs.get(runId);
+      if (!run) return;
+      this.cortex.ensureDefault(run.workspaceId);
+      const layout = this.canvasLayout(runId);
+      if (layout.meters.length) return;
+      // Over the first agent window: the Queen's column is 220 wide, then a 76 × 1.4 gap.
+      const meter = { id: `tokens:auto-${runId}`, x: 326, y: -250 };
+      this.repos.setValue(
+        `canvasLayout:${runId}`,
+        JSON.stringify({ ...layout, meters: [...layout.meters, meter] }),
+      );
+      this.push({ kind: 'changed', entity: 'layout', id: runId });
+    } catch {
+      // Only a convenience: the plan stands without it.
+    }
+  }
+
+  /**
    * After the Queen plans, the flow around the team: each agent's work is checked with the
    * project's own command, a failure goes back to that agent with the error, what passes waits
    * for your approval, and the end of the mission is notified. Only on a canvas without flow
    * blocks, so it never overrides a flow the user built.
    */
   private async scaffoldFlow(runId: string): Promise<void> {
+    this.scaffoldBlocks(runId);
     try {
       const layout = this.canvasLayout(runId);
       const run = this.repos.runs.get(runId);

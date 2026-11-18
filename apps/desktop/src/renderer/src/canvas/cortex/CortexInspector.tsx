@@ -20,7 +20,7 @@ import {
   Unlink,
   X,
 } from 'lucide-react';
-import { PixelDrop } from './nectar-art';
+import { FULL_AT, PixelDrop } from './nectar-art';
 import {
   cortexMemoryKindLabels,
   type CanvasWorker,
@@ -40,10 +40,10 @@ import { roleLabel } from '../model';
 export type CortexTab = 'memories' | 'approvals' | 'decisions' | 'activity' | 'connections';
 
 const tabs: { id: CortexTab; label: string; icon: ComponentType<{ size?: number }> }[] = [
-  { id: 'memories', label: 'Memories', icon: PixelDrop },
-  { id: 'approvals', label: 'Approvals', icon: Inbox },
-  { id: 'decisions', label: 'Decisions', icon: GitCommitVertical },
-  { id: 'activity', label: 'Activity', icon: Activity },
+  { id: 'memories', label: 'Memórias', icon: PixelDrop },
+  { id: 'approvals', label: 'Aprovações', icon: Inbox },
+  { id: 'decisions', label: 'Decisões', icon: GitCommitVertical },
+  { id: 'activity', label: 'Atividade', icon: Activity },
   { id: 'connections', label: 'Conexões', icon: Link2 },
 ];
 
@@ -112,8 +112,9 @@ function State({
     );
   if (empty)
     return (
-      <div className="nc-cortex-state-box" role="status">
-        {empty}
+      <div className="nc-cortex-state-box empty" role="status">
+        <PixelDrop size={34} />
+        <span>{empty}</span>
       </div>
     );
   return <>{children}</>;
@@ -155,12 +156,13 @@ export function CortexInspector({
 
   return (
     <Modal
-      title={`Nectar Inspector · ${node.name}`}
+      title={node.name}
       description="Shared Intelligence do projeto: os agentes trabalham individualmente e aprendem coletivamente. Só agentes conectados acessam; o que eles propõem espera a sua aprovação."
       size="xl"
       onClose={onClose}
     >
       <div className="nc-cortex-inspector" data-keyboard-owner>
+        <NectarSummary block={block} />
         <div role="tablist" className="nc-tabs">
           {tabs.map(({ id, label, icon: Icon }) => (
             <button
@@ -202,6 +204,56 @@ export function CortexInspector({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** Cells in the honeycomb meter; the block is full at FULL_AT memories. */
+const METER_CELLS = 12;
+
+/** What the Nectar holds, at a glance: the drop, the counts and how full the comb is. */
+function NectarSummary({ block }: { block: CortexOverview }) {
+  const active = block.memories.active;
+  const pending = block.pendingApprovals;
+  const connected = block.node.connections.length;
+  const level = Math.min(active / FULL_AT, 1);
+  const filled = Math.round(level * METER_CELLS);
+  return (
+    <section className="nc-nectar-summary" aria-label="Resumo do Nectar">
+      <span className="nc-nectar-summary-icon">
+        <PixelDrop size={34} />
+      </span>
+      <div className="nc-nectar-summary-text">
+        <strong>
+          {active} {active === 1 ? 'memória' : 'memórias'} · {block.decisions}{' '}
+          {block.decisions === 1 ? 'decisão' : 'decisões'}
+        </strong>
+        <span>
+          {pending
+            ? `${pending} ${pending === 1 ? 'proposta espera' : 'propostas esperam'} a sua aprovação`
+            : 'Nada esperando aprovação'}
+          {' · '}
+          {connected
+            ? `${connected} ${connected === 1 ? 'agente conectado' : 'agentes conectados'}`
+            : 'nenhum agente conectado'}
+        </span>
+      </div>
+      <div
+        className="nc-nectar-meter"
+        role="meter"
+        aria-label="Mel acumulado"
+        aria-valuemin={0}
+        aria-valuemax={FULL_AT}
+        aria-valuenow={Math.min(active, FULL_AT)}
+        title={`${Math.round(level * 100)}% do favo: cheio com ${FULL_AT} memórias`}
+      >
+        <span className="nc-nectar-meter-cells" aria-hidden>
+          {Array.from({ length: METER_CELLS }, (_, index) => (
+            <i key={index} className={index < filled ? 'full' : undefined} />
+          ))}
+        </span>
+        <span className="nc-nectar-meter-label">{Math.round(level * 100)}% do favo</span>
+      </div>
+    </section>
   );
 }
 

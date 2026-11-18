@@ -2794,7 +2794,97 @@ button.nc-cortex-open:hover {
   min-width: min(860px, calc(100vw - 96px));
   max-height: min(740px, calc(100vh - 150px));
   overflow: hidden;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
+}
+/* What the Nectar holds, at a glance: a band of honey with a faint comb behind it. */
+.nc-nectar-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgb(245 181 68 / 24%);
+  border-radius: 12px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='42' viewBox='0 0 24 42'%3E%3Cpath d='M12 1 23 7.5v13L12 27 1 20.5v-13zM12 27v14M1 7.5 0 7M23 7.5l1-.5' fill='none' stroke='%23f5b544' stroke-opacity='.1'/%3E%3C/svg%3E")
+      0 0 / 24px 42px,
+    linear-gradient(100deg, rgb(245 181 68 / 13%), rgb(245 181 68 / 3%) 60%, transparent);
+}
+.nc-nectar-summary-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgb(245 181 68 / 24%), rgb(245 181 68 / 5%));
+  border: 1px solid rgb(245 181 68 / 36%);
+  box-shadow: 0 0 22px rgb(245 181 68 / 20%);
+}
+.nc-nectar-summary-text {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.nc-nectar-summary-text strong {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.nc-nectar-summary-text span {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+/* The comb filling up: square pixel cells, like the honey in the block. */
+.nc-nectar-meter {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.nc-nectar-meter-cells {
+  display: flex;
+  gap: 3px;
+}
+.nc-nectar-meter-cells i {
+  width: 9px;
+  height: 14px;
+  background: rgb(245 181 68 / 10%);
+  box-shadow: inset 0 0 0 1px rgb(245 181 68 / 22%);
+}
+.nc-nectar-meter-cells i.full {
+  background: linear-gradient(
+    var(--nc-honey-light) 0 3px,
+    var(--nc-cortex) 3px 10px,
+    var(--nc-honey-deep) 10px
+  );
+  box-shadow: none;
+}
+.nc-nectar-meter-label {
+  font: 500 10.5px var(--font-mono);
+  color: var(--nc-honey-light);
+  font-variant-numeric: tabular-nums;
+}
+/* Tabs in honey: the open one carries a gold underline. */
+.nc-cortex-inspector .nc-tabs {
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.nc-cortex-inspector .nc-tab {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+.nc-cortex-inspector .nc-tab.selected {
+  background: rgb(245 181 68 / 10%);
+  color: var(--nc-honey-light);
+  box-shadow: inset 0 -2px 0 var(--nc-cortex);
+}
+.nc-cortex-inspector .nc-tab.selected .nc-tab-count {
+  background: rgb(245 181 68 / 18%);
+  color: var(--nc-honey-light);
 }
 .nc-cortex-panel {
   min-height: 0;
@@ -2828,18 +2918,32 @@ button.nc-cortex-open:hover {
   flex: 1;
   min-width: 160px;
 }
-.nc-cortex-search {
-  padding: 6px 6px 6px 10px;
+.nc-cortex-inspector form.nc-cortex-search {
+  display: flex;
+  flex-wrap: nowrap;
+  padding: 4px 4px 4px 12px;
   border: 1px solid rgb(245 181 68 / 25%);
-  border-radius: 9px;
+  border-radius: 10px;
   background: rgb(245 181 68 / 5%);
   color: var(--nc-cortex);
+  transition: border-color 0.15s;
 }
-.nc-cortex-search input {
+.nc-cortex-inspector form.nc-cortex-search:focus-within {
+  border-color: rgb(245 181 68 / 55%);
+}
+.nc-cortex-search input,
+.nc-cortex-search input:hover,
+.nc-cortex-search input:focus {
   flex: 1;
-  min-width: 200px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 4px;
   border: 0;
   background: transparent;
+}
+.nc-cortex-search button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .nc-cortex-results {
   display: grid;
@@ -2942,6 +3046,21 @@ button.nc-cortex-open:hover {
   font-size: 12px;
   color: var(--muted-foreground);
 }
+/* An empty list: the drop over a faint comb, instead of a bare dashed box. */
+.nc-cortex-state-box.empty {
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 20px;
+  border-color: rgb(245 181 68 / 22%);
+  text-align: center;
+  text-wrap: balance;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='42' viewBox='0 0 24 42'%3E%3Cpath d='M12 1 23 7.5v13L12 27 1 20.5v-13zM12 27v14M1 7.5 0 7M23 7.5l1-.5' fill='none' stroke='%23f5b544' stroke-opacity='.07'/%3E%3C/svg%3E")
+    0 0 / 24px 42px;
+}
+.nc-cortex-state-box.empty span {
+  max-width: 52ch;
+}
 .nc-cortex-state-box.error {
   border-color: rgb(248 113 133 / 45%);
   color: var(--danger);
@@ -2950,6 +3069,26 @@ button.nc-cortex-open:hover {
   margin: 0;
   font-size: 12px;
   color: var(--success);
+}
+/* Checkboxes and radios sit beside their text; the global `label` stacks its content. */
+.nc-cortex-inspector label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 0;
+  padding: 5px 0;
+  font-weight: 400;
+  color: var(--foreground);
+  cursor: pointer;
+}
+.nc-cortex-inspector label.check input {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--nc-cortex);
+  cursor: pointer;
 }
 .nc-cortex-checks {
   display: flex;

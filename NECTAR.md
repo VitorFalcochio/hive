@@ -13,9 +13,9 @@ Tudo o que um agente envia ao Nectar vira uma **proposta pendente**. Só depois 
 1. Abra o Nexus e clique em **Blocos** na toolbar (ou `Ctrl + Espaço` → _Nectar — Shared Intelligence_, ou botão direito no canvas → _Novo Nectar_).
 2. Arraste **Nectar — Shared Intelligence**, da categoria **Nectar**, para o canvas.
 3. Arraste uma linha da borda direita de um agente (Backend, Frontend…) até o bloco. A conexão nasce com **Read + Propose**.
-4. Dê dois cliques no bloco para abrir o **Nectar Inspector**. Na aba **Conexões** ajuste as permissões de cada agente; com o botão direito sobre a linha, abra as permissões ou desconecte.
+4. Dê dois cliques no bloco para abrir o **Inspector do Nectar**. Na aba **Conexões** ajuste as permissões de cada agente; com o botão direito sobre a linha, abra as permissões ou desconecte.
 5. Execute a missão. Antes de cada tarefa, o agente recebe as memórias aprovadas relevantes para ela e as ferramentas que suas permissões liberam.
-6. Quando um agente propõe algo, o bloco mostra a contagem de **pendentes**. Em **Approvals** você vê o conteúdo, a justificativa, as evidências, o agente e a tarefa de origem, e decide: aprovar (podendo ajustar o texto antes), rejeitar ou pedir ajustes. O botão **Parecer da Queen** pede à Queen uma recomendação; a decisão continua sendo sua.
+6. Quando um agente propõe algo, o bloco mostra a contagem de **pendentes**. Em **Aprovações** você vê o conteúdo, a justificativa, as evidências, o agente e a tarefa de origem, e decide: aprovar (podendo ajustar o texto antes), rejeitar ou pedir ajustes. O botão **Parecer da Queen** pede à Queen uma recomendação; a decisão continua sendo sua.
 7. A memória aprovada fica no banco local do Hive. Outra missão do mesmo projeto mostra o mesmo bloco, com as mesmas conexões e memórias.
 
 ## Permissões
@@ -27,14 +27,14 @@ Tudo o que um agente envia ao Nectar vira uma **proposta pendente**. Só depois 
 | **Approve** | Usa `nectar_pending` e `nectar_review`. Com a aprovação humana obrigatória (padrão), o veredito é só uma recomendação exibida ao usuário. Ninguém revisa a própria proposta. |
 | **Manage**  | Propõe alterar ou revogar qualquer memória do Nectar, inclusive as escritas pelo usuário.                                                                                    |
 
-Propose, Approve e Manage incluem Read. As permissões são verificadas no processo principal a cada operação: o bloco é relido em cada chamada de ferramenta, então uma desconexão feita no meio de uma tarefa corta o acesso na hora. Tentativas negadas ficam registradas na aba **Activity**.
+Propose, Approve e Manage incluem Read. As permissões são verificadas no processo principal a cada operação: o bloco é relido em cada chamada de ferramenta, então uma desconexão feita no meio de uma tarefa corta o acesso na hora. Tentativas negadas ficam registradas na aba **Atividade**.
 
 ## Capacidades
 
 - **Memória compartilhada e persistente.** As memórias ficam no SQLite do Hive (tabelas `cortex_*`, migration 5) e sobrevivem ao encerramento da missão e ao reinício do aplicativo.
 - **Memória por projeto.** Cada bloco pertence a um workspace. O contexto de uma tarefa usa apenas os blocos do projeto da própria execução. Um agente conectado a Nectar de dois projetos nunca recebe a memória de um no outro, inclusive com missões simultâneas.
 - **Memória contextual.** A consulta usa título, descrição e critérios da tarefa. O ranking combina similaridade semântica (peso principal), afinidade com o papel do agente (frontend: UI, contratos de API, autenticação; backend: serviços, banco, regras; QA: requisitos, testes…), atualidade e tipo da memória (decisões e contratos pesam mais). Resultados quase idênticos são descartados e o total respeita o orçamento de tokens (padrão: 1.200 tokens por tarefa e 900 por `nectar_search`, configuráveis).
-- **Histórico de decisões.** Cada memória tem id, tipo, título, conteúdo, justificativa, autor, aprovador, missão/tarefa de origem, projeto, evidências, datas, versão e histórico de alterações com o conteúdo anterior. Uma decisão alterada vira uma **nova decisão**; a anterior fica como _substituída_, ligada à nova (`supersedes` / `supersededBy`). Revogadas também permanecem consultáveis. A aba **Decisions** mostra a cadeia completa.
+- **Histórico de decisões.** Cada memória tem id, tipo, título, conteúdo, justificativa, autor, aprovador, missão/tarefa de origem, projeto, evidências, datas, versão e histórico de alterações com o conteúdo anterior. Uma decisão alterada vira uma **nova decisão**; a anterior fica como _substituída_, ligada à nova (`supersedes` / `supersededBy`). Revogadas também permanecem consultáveis. A aba **Decisões** mostra a cadeia completa.
 - **Notificações inteligentes.** Quando uma memória é aprovada, alterada, substituída ou revogada, o Nectar escolhe quem deve saber: agentes conectados com Read que já usaram aquela memória, que a proposta indicou como público (`audience`) ou, quando ninguém foi indicado, cujo papel trabalha com o assunto de uma memória normativa. O autor da mudança não é avisado. O aviso espera o **início da próxima tarefa** do agente, que é o ponto seguro: nenhuma execução é interrompida.
 
 ## Busca semântica
@@ -46,9 +46,9 @@ Há dois motores:
 - **Local do Hive** (padrão, offline e gratuito): hashing de radicais, trigramas de caracteres, bigramas e uma tabela de **conceitos de software em português e inglês** (autenticação ↔ login ↔ identificação ↔ JWT ↔ sessão; banco ↔ tabela ↔ migração; contrato ↔ endpoint ↔ rota…). É o que faz _"Como devemos implementar a identificação dos usuários?"_ encontrar a decisão sobre JWT sem palavras em comum.
 - **Provedor compatível com OpenAI** (`/embeddings`): por exemplo Ollama com `nomic-embed-text` (local e gratuito), LM Studio, OpenAI ou OpenRouter. Configure em _Conexões → Embeddings_. O texto passa pelo redator de segredos antes de sair da máquina.
 
-Se o provedor falhar, a busca usa o motor local e a tarefa segue normalmente. A falha aparece no bloco (_Busca local_), na aba Activity (no máximo uma vez por minuto) e no resumo da tarefa. Vetores de modelos diferentes nunca são comparados entre si.
+Se o provedor falhar, a busca usa o motor local e a tarefa segue normalmente. A falha aparece no bloco (_Busca local_), na aba Atividade (no máximo uma vez por minuto) e no resumo da tarefa. Vetores de modelos diferentes nunca são comparados entre si.
 
-Na aba Memories, **Buscar por significado** roda a mesma busca que os agentes usam, para conferir o que eles receberiam.
+Na aba Memórias, **Buscar por significado** roda a mesma busca que os agentes usam, para conferir o que eles receberiam.
 
 ## Segurança
 
