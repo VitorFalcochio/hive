@@ -1,7 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
-  Droplet,
   Gauge,
   Plug,
   CheckSquare,
@@ -21,6 +20,7 @@ import {
   FlaskConical,
   Stamp,
 } from 'lucide-react';
+import { PixelDrop } from './cortex/nectar-art';
 import type { ComponentType } from 'react';
 import { ClaudeLogo } from '../provider-logo';
 import {
@@ -46,7 +46,7 @@ const icons: Record<CommandIcon, ComponentType<{ size?: number }>> = {
   play: Play,
   queen: Bot,
   pin: MapPin,
-  cortex: Droplet,
+  cortex: PixelDrop,
   tokens: Gauge,
   provider: Plug,
   terminal: SquareTerminal,

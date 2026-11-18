@@ -149,26 +149,60 @@ export class CortexService {
 
   create(input: IpcInput<'cortex.create'>): CortexOverview {
     const run = this.repos.runs.require(input.runId, 'Execução');
-    const existing = this.nodesOf(run.workspaceId);
+    const node = this.createIn(run.workspaceId, input.name);
+    this.log(node, 'created', USER, `Nectar “${node.name}” criado no projeto.`);
+    this.options.onChange(node.id);
+    return this.overview(node);
+  }
+
+  /**
+   * Every project gets one Nectar, with the whole team connected (Read + Propose), the first time
+   * Hive sees it. Only once: a project that already had a block, or whose Nectar the user
+   * deleted, is left alone. Approve is never granted here; approving stays with the user.
+   */
+  ensureDefault(workspaceId: string): void {
+    const key = `nectarDefault:${workspaceId}`;
+    if (this.repos.getValue(key)) return;
+    this.repos.setValue(key, nowIso());
+    if (this.nodesOf(workspaceId).length) return;
+    const node = this.createIn(workspaceId);
+    const workers = this.repos.workers.list();
+    const saved = this.repo.nodes.put({
+      ...node,
+      connections: workers.map((worker) => ({
+        workerId: worker.id,
+        permissions: { ...defaultCortexPermissions },
+        connectedAt: node.createdAt,
+        source: 'user' as const,
+      })),
+    });
+    this.log(
+      saved,
+      'created',
+      { kind: 'system', workerId: null, name: 'Hive' },
+      `Nectar criado com o projeto: ${workers.length} agente(s) conectado(s) com ${describe(defaultCortexPermissions)}.`,
+    );
+    this.options.onChange(saved.id);
+  }
+
+  private createIn(workspaceId: string, name?: string | null): CortexNode {
+    const existing = this.nodesOf(workspaceId);
     if (existing.length >= MAX_NODES_PER_PROJECT)
       throw new HiveError(
         'LIMIT',
         `Um projeto tem no máximo ${MAX_NODES_PER_PROJECT} blocos Nectar.`,
       );
     const at = nowIso();
-    const node = this.repo.nodes.put({
+    return this.repo.nodes.put({
       id: newId('cortex'),
-      workspaceId: run.workspaceId,
-      name: input.name?.trim() || (existing.length ? `Nectar ${existing.length + 1}` : 'Nectar'),
-      description: 'Shared Intelligent Memory',
+      workspaceId,
+      name: name?.trim() || (existing.length ? `Nectar ${existing.length + 1}` : 'Nectar'),
+      description: 'Shared Intelligence',
       config: { ...defaultCortexConfig },
       connections: [],
       createdAt: at,
       updatedAt: at,
     });
-    this.log(node, 'created', USER, `Nectar “${node.name}” criado no projeto.`);
-    this.options.onChange(node.id);
-    return this.overview(node);
   }
 
   update(input: IpcInput<'cortex.update'>): CortexOverview {

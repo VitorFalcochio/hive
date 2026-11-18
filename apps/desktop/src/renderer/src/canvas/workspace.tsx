@@ -1830,7 +1830,7 @@ export function Workspace({
                   const { ref } = (node.data ?? {}) as { ref?: string };
                   if (node.type === 'lane' || node.type === 'frame') return 'rgb(255 255 255 / 4%)';
                   if (node.type === 'note') return 'rgb(245 181 68 / 40%)';
-                  if (node.type === 'cortex') return 'rgb(167 139 250 / 70%)';
+                  if (node.type === 'cortex') return 'rgb(245 181 68 / 70%)';
                   if (node.type === 'agent')
                     return toneColors[view.agents.get(ref ?? '')?.tone ?? 'pending'];
                   const task = view.tasks.get(ref ?? '');

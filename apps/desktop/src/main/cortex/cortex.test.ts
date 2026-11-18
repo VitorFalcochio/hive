@@ -242,6 +242,54 @@ const callTool = (
   return tool.run(args);
 };
 
+describe('Nectar por padrão em todo projeto', () => {
+  it('o projeto ganha um Nectar com a equipe toda em Read + Propose, uma vez só', async () => {
+    const ctx = await setup();
+    const nectar = ctx.service.cortex;
+    nectar.ensureDefault('ws');
+    const [node, ...others] = nectar.nodesOf('ws');
+    expect(others).toHaveLength(0);
+    expect(node!.name).toBe('Nectar');
+    const team = ctx.repos.workers.list().map((worker) => worker.id);
+    expect(node!.connections.map((connection) => connection.workerId).sort()).toEqual(
+      [...team].sort(),
+    );
+    for (const connection of node!.connections)
+      expect(connection.permissions).toEqual({
+        read: true,
+        propose: true,
+        approve: false,
+        manage: false,
+      });
+
+    // Calling again, or after the user deleted the block, never creates another one.
+    nectar.ensureDefault('ws');
+    expect(nectar.nodesOf('ws')).toHaveLength(1);
+    nectar.delete(node!.id, true);
+    nectar.ensureDefault('ws');
+    expect(nectar.nodesOf('ws')).toHaveLength(0);
+  });
+
+  it('não mexe num projeto que já tinha o seu Nectar', async () => {
+    const ctx = await setup();
+    const existing = await cortexWith(ctx, ctx.makeRun('r-own', 'ws2').id);
+    ctx.service.cortex.ensureDefault('ws2');
+    const nodes = ctx.service.cortex.nodesOf('ws2');
+    expect(nodes.map((node) => node.id)).toEqual([existing]);
+    expect(nodes[0]!.connections).toHaveLength(0);
+  });
+
+  it('projetos que já existiam ganham o Nectar ao abrir o Hive', async () => {
+    const file = path.join(await mkdtemp(path.join(os.tmpdir(), 'hive-nectar-')), 'hive.sqlite');
+    const first = await setup({ file });
+    expect(first.service.cortex.nodesOf('ws')).toHaveLength(0);
+    first.close();
+    const second = await setup({ file });
+    expect(second.service.cortex.nodesOf('ws')).toHaveLength(1);
+    expect(second.service.cortex.nodesOf('ws2')).toHaveLength(1);
+  });
+});
+
 describe('Nectar: acesso por conexão e permissões', () => {
   it('um agente conectado consulta as memórias aprovadas; um não conectado não acessa o Nectar', async () => {
     const ctx = await setup();

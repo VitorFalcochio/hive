@@ -1,7 +1,6 @@
 import type { ComponentType } from 'react';
 import {
   Bell,
-  Droplet,
   CalendarClock,
   FlaskConical,
   Stamp,
@@ -13,6 +12,7 @@ import {
   StickyNote,
   X,
 } from 'lucide-react';
+import { PixelDrop } from './nectar-art';
 import { ClaudeLogo } from '../../provider-logo';
 
 /** Blocks the user can drag onto the canvas; the drop decides where they go. */
@@ -126,7 +126,7 @@ const categories: {
         kind: 'cortex',
         title: 'Nectar — Shared Intelligence',
         description: 'Memória persistente do projeto. Conecte agentes para dar acesso.',
-        icon: Droplet,
+        icon: PixelDrop,
       },
     ],
   },

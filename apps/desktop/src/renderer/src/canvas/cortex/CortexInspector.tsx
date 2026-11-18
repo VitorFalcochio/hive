@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import {
   Activity,
-  Droplet,
   Check,
   GitCommitVertical,
   History,
@@ -14,6 +20,7 @@ import {
   Unlink,
   X,
 } from 'lucide-react';
+import { PixelDrop } from './nectar-art';
 import {
   cortexMemoryKindLabels,
   type CanvasWorker,
@@ -32,8 +39,8 @@ import { roleLabel } from '../model';
 
 export type CortexTab = 'memories' | 'approvals' | 'decisions' | 'activity' | 'connections';
 
-const tabs: { id: CortexTab; label: string; icon: typeof Activity }[] = [
-  { id: 'memories', label: 'Memories', icon: Droplet },
+const tabs: { id: CortexTab; label: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: 'memories', label: 'Memories', icon: PixelDrop },
   { id: 'approvals', label: 'Approvals', icon: Inbox },
   { id: 'decisions', label: 'Decisions', icon: GitCommitVertical },
   { id: 'activity', label: 'Activity', icon: Activity },

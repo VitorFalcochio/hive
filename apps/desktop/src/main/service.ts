@@ -340,6 +340,8 @@ export class DesktopService {
     }
     this.raiseLimits();
     this.detachWorkers();
+    // Projects from before the default Nectar get theirs once; new ones get it when opened.
+    for (const workspace of this.repos.workspaces.list()) this.cortex.ensureDefault(workspace.id);
     // A process interruption must not leave a plan marked as running indefinitely.
     for (const run of this.repos.runs.list()) {
       if (run.status === 'planning')
@@ -592,6 +594,7 @@ export class DesktopService {
     });
     this.saveOpenedWorkspaceIds([...this.openedWorkspaceIds(), workspace.id]);
     this.repos.setValue('activeWorkspace', workspace.id);
+    this.cortex.ensureDefault(workspace.id);
     this.changed('workspace', workspace.id);
     return workspace;
   }

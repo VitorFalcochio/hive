@@ -1,8 +1,8 @@
 import { createContext, memo, useContext, useEffect, useState, type CSSProperties } from 'react';
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
+import { FULL_AT, NectarDrips, PixelDrop } from './cortex/nectar-art';
 import {
   ArrowUpRight,
-  Droplet,
   ChevronDown,
   ChevronRight,
   GitBranch,
@@ -900,17 +900,21 @@ export const CortexNode = memo(function CortexNode({ id, data, selected }: NodeP
       : 'Sem acesso';
   const shown = connected.slice(0, 4);
   return (
-    <div className={`nc-node nc-cortex tone-${tone}${selected ? ' selected' : ''}`}>
+    <div
+      className={`nc-node nc-cortex tone-${tone}${selected ? ' selected' : ''}`}
+      style={{ '--level': Math.min(block.memories.active / FULL_AT, 1) } as CSSProperties}
+    >
+      <span className="nc-cortex-fill" aria-hidden />
       <Handle type="target" position={Position.Left} isConnectable />
       <Handle type="target" position={Position.Top} id="top" isConnectable />
       <header className="nc-cortex-head">
         <span className="nc-cortex-icon" aria-hidden>
-          <Droplet size={18} />
+          <PixelDrop size={22} />
         </span>
         <div className="nc-cortex-title">
           <strong className="truncate">{node.name}</strong>
           <span className="truncate">
-            Memória compartilhada · {view.snapshot.workspace?.name ?? 'projeto'}
+            Shared Intelligence · {view.snapshot.workspace?.name ?? 'projeto'}
           </span>
         </div>
         <PinMark id={id} />
@@ -978,6 +982,7 @@ export const CortexNode = memo(function CortexNode({ id, data, selected }: NodeP
           Abrir <ArrowUpRight size={12} />
         </button>
       </footer>
+      {connected.length > 0 && <NectarDrips pending={pending} />}
     </div>
   );
 });
