@@ -238,7 +238,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Queen · Coordinator',
     description: 'Decomposes missions into tasks with dependencies and acceptance criteria.',
     tools: presetReadOnlyTools,
-    skills: ['planejar-tarefas'],
+    skills: ['planning-and-task-breakdown', 'writing-plans'],
     systemPrompt:
       'You coordinate a team of software agents. Break objectives into small, independently verifiable tasks. Prefer tasks that touch different files so they can run in parallel. Every task needs concrete acceptance criteria.',
   },
@@ -247,7 +247,11 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Software Architect',
     description: 'Designs structure and module boundaries; writes design notes and scaffolding.',
     tools: presetTools,
-    skills: ['decisoes-de-arquitetura', 'verificar-antes-de-concluir'],
+    skills: [
+      'api-and-interface-design',
+      'documentation-and-adrs',
+      'verification-before-completion',
+    ],
     systemPrompt:
       'You are a pragmatic software architect. Keep changes minimal and consistent with the existing structure. Explain trade-offs briefly in your final summary.',
   },
@@ -256,7 +260,13 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Frontend Developer',
     description: 'Builds user interfaces and client-side logic.',
     tools: presetTools,
-    skills: ['interface-de-qualidade', 'depurar-sistematicamente', 'verificar-antes-de-concluir'],
+    skills: [
+      'frontend-design',
+      'frontend-ui-engineering',
+      'accessibility-engineering',
+      'systematic-debugging',
+      'verification-before-completion',
+    ],
     systemPrompt:
       'You are a senior frontend engineer. Match the existing component patterns, keep markup accessible, and verify your changes with the project test or build commands when available.',
   },
@@ -266,10 +276,11 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     description: 'Implements services, data access and APIs.',
     tools: presetTools,
     skills: [
-      'apis-e-dados',
-      'seguranca-no-codigo',
-      'depurar-sistematicamente',
-      'verificar-antes-de-concluir',
+      'api-and-interface-design',
+      'security-and-hardening',
+      'performance-optimization',
+      'systematic-debugging',
+      'verification-before-completion',
     ],
     systemPrompt:
       'You are a senior backend engineer. Validate inputs, handle errors explicitly and keep functions small. Run the relevant tests before finishing.',
@@ -279,7 +290,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'QA Engineer',
     description: 'Writes and runs tests; reports failures with evidence.',
     tools: presetTools,
-    skills: ['escrever-testes', 'depurar-sistematicamente', 'verificar-antes-de-concluir'],
+    skills: ['test-driven-development', 'systematic-debugging', 'verification-before-completion'],
     systemPrompt:
       'You are a QA engineer. Add focused tests for the behaviour described in the task, run them, and report exact commands and results.',
   },
@@ -288,7 +299,7 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     label: 'Code Reviewer',
     description: 'Reviews changes for correctness and risk without editing.',
     tools: presetReadOnlyTools,
-    skills: ['revisar-codigo', 'seguranca-no-codigo'],
+    skills: ['code-review-and-quality', 'code-simplification', 'security-and-hardening'],
     systemPrompt:
       'You are a careful code reviewer. Read the relevant code, identify concrete defects with file and line references, and do not modify files.',
   },

@@ -3,7 +3,7 @@ import { cp, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { SkillDetail, SkillDiagnostic, SkillSummary, SkillValidation } from '@hive/core';
 import { HiveError, errorMessage, newId } from '@hive/shared';
-import { builtinSkill } from './builtin';
+import { builtinSkill, retiredSkill, type BuiltinSkill } from './builtin';
 import { discoverSkillDirectories, exists, listSkillFiles, readTextFile } from './filesystem';
 import { parseSkillMarkdown, skillNameSchema } from './format';
 import { validateSkillDirectory, validateSkillText } from './validator';
@@ -101,6 +101,8 @@ export class SkillForgeAdapter {
         modified: original ? raw.replace(/\r\n/g, '\n') !== original.raw : false,
         name: parsed.metadata.name,
         description: parsed.metadata.description,
+        origin: parsed.metadata.metadata?.origin ?? null,
+        originUrl: parsed.metadata.metadata?.source ?? null,
         license: parsed.metadata.license ?? null,
         compatibility: parsed.metadata.compatibility ?? null,
         allowedTools: parsed.metadata['allowed-tools'] ?? null,
@@ -112,6 +114,8 @@ export class SkillForgeAdapter {
         modified: false,
         name: path.basename(directory),
         description: `Cannot read SKILL.md: ${errorMessage(error)}`,
+        origin: null,
+        originUrl: null,
         license: null,
         compatibility: null,
         allowedTools: null,
@@ -307,7 +311,7 @@ export class SkillForgeAdapter {
       const original = builtinSkill(name);
       if (!original) continue;
       if (await exists(path.join(this.options.libraryDir, name, 'SKILL.md'))) continue;
-      await this.writeLocal(name, original.raw);
+      await this.writeBuiltin(original);
       written.push(name);
     }
     return written;
@@ -317,7 +321,38 @@ export class SkillForgeAdapter {
   async restoreBuiltin(name: string): Promise<SkillSummary> {
     const original = builtinSkill(name);
     if (!original) throw new HiveError('NOT_FOUND', `Not a built-in skill: ${name}`);
-    return this.writeLocal(name, original.raw);
+    return this.writeBuiltin(original);
+  }
+
+  /**
+   * Removes library copies of retired built-in skills that the user never edited; an edited one
+   * is the user's now and stays. Returns the names removed.
+   */
+  async removeRetired(names: string[]): Promise<string[]> {
+    const removed: string[] = [];
+    for (const name of names) {
+      const original = retiredSkill(name);
+      if (!original) continue;
+      const directory = path.join(this.options.libraryDir, name);
+      const file = path.join(directory, 'SKILL.md');
+      if (!(await exists(file))) continue;
+      const current = (await readTextFile(file)).replace(/\r\n/g, '\n');
+      if (current !== original.raw) continue;
+      await rm(directory, { recursive: true, force: true });
+      removed.push(name);
+    }
+    return removed;
+  }
+
+  /** SKILL.md plus the files that ship beside it (references, the author's license). */
+  private async writeBuiltin(skill: BuiltinSkill): Promise<SkillSummary> {
+    const destination = path.join(this.options.libraryDir, skill.name);
+    for (const [relative, text] of Object.entries(skill.files)) {
+      const target = path.join(destination, ...relative.split('/'));
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, text, 'utf8');
+    }
+    return this.writeLocal(skill.name, skill.raw);
   }
 
   private async writeLocal(name: string, raw: string): Promise<SkillSummary> {

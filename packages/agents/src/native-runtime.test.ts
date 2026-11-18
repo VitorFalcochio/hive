@@ -274,6 +274,85 @@ describe('NativeAgentRuntime token savings', () => {
     expect(requests).toHaveLength(1);
   });
 
+  it('lists skills by name, logs the one opened as used, and never shortens its text', async () => {
+    const skillDir = await mkdtemp(path.join(os.tmpdir(), 'hive-skill-'));
+    const body = `# Depurar\n${'Passo do processo. '.repeat(400)}\nFIM DA SKILL`;
+    await writeFile(path.join(skillDir, 'SKILL.md'), `---\nname: depurar\n---\n${body}`);
+    await writeFile(path.join(skillDir, 'notas.md'), 'nota curta');
+    const requests: ChatRequest[] = [];
+    const events: RuntimeEvent[] = [];
+    // Opens the skill, then reads a reference four times, then finishes.
+    const calls = [
+      { skill: 'depurar', path: 'SKILL.md' },
+      ...Array.from({ length: 4 }, () => ({ skill: 'depurar', path: 'notas.md' })),
+    ];
+    const chat = {
+      async chat(request: ChatRequest): Promise<ChatResponse> {
+        requests.push(structuredClone(request));
+        const next = calls[requests.length - 1];
+        return {
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              next
+                ? {
+                    id: `s${requests.length}`,
+                    type: 'function',
+                    function: { name: 'read_skill_resource', arguments: JSON.stringify(next) },
+                  }
+                : {
+                    id: 'fim',
+                    type: 'function',
+                    function: { name: 'finish', arguments: '{"summary":"ok","success":true}' },
+                  },
+            ],
+          },
+          reasoning: null,
+          finishReason: 'tool_calls',
+          usage: null,
+          latencyMs: 1,
+        };
+      },
+    } as ChatClient;
+    const runtime = new NativeAgentRuntime();
+    const session = await runtime.start({
+      sessionId: 'skills-test',
+      task: { title: 'Corrigir', description: 'Ache o bug.', acceptanceCriteria: [], upstream: [] },
+      worker: { ...worker, tools: ['read_skill_resource'] } as Worker,
+      model: 'test-model',
+      chat,
+      worktreePath: await mkdtemp(path.join(os.tmpdir(), 'hive-skill-work-')),
+      skills: [
+        {
+          name: 'depurar',
+          description: 'Use diante de um bug.',
+          body,
+          directory: skillDir,
+          source: 'local',
+          resources: ['notas.md'],
+        },
+      ],
+      limits,
+      requestApproval: async () => false,
+    });
+    runtime.subscribe('skills-test', (event) => events.push(event));
+    expect((await session.done).status).toBe('completed');
+
+    const system = String(requests[0]!.messages[0]!.content);
+    expect(system).toContain('- **depurar**: Use diante de um bug.');
+    expect(system).not.toContain('FIM DA SKILL');
+    expect(events.map((event) => event.message)).toContain('Usou a skill depurar');
+    expect(events.map((event) => event.message)).toContain('Consultou notas.md da skill depurar');
+    // Four steps later the skill is still there in full, unlike any other old output.
+    const skillOutput = requests
+      .at(-1)!
+      .messages.find(
+        (message) => message.role === 'tool' && String(message.content).includes('# Depurar'),
+      );
+    expect(String(skillOutput?.content)).toContain('FIM DA SKILL');
+  });
+
   it('shortens long tool outputs from older steps, once', () => {
     const long = 'x'.repeat(5_000);
     const step = (id: string): ChatRequest['messages'] => [

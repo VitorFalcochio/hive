@@ -1,15 +1,98 @@
+// The ?raw declaration, for the other packages that compile this file through their own include.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="./raw.d.ts" />
+import accessibilityEngineering from '../builtin/accessibility-engineering/SKILL.md?raw';
+import apiAndInterfaceDesign from '../builtin/api-and-interface-design/SKILL.md?raw';
+import codeReviewAndQuality from '../builtin/code-review-and-quality/SKILL.md?raw';
+import codeSimplification from '../builtin/code-simplification/SKILL.md?raw';
+import documentationAndAdrs from '../builtin/documentation-and-adrs/SKILL.md?raw';
+import frontendDesign from '../builtin/frontend-design/SKILL.md?raw';
+import frontendUiEngineering from '../builtin/frontend-ui-engineering/SKILL.md?raw';
+import performanceOptimization from '../builtin/performance-optimization/SKILL.md?raw';
+import performancePatterns from '../builtin/performance-optimization/references/optimization-patterns.md?raw';
+import planningAndTaskBreakdown from '../builtin/planning-and-task-breakdown/SKILL.md?raw';
+import securityAndHardening from '../builtin/security-and-hardening/SKILL.md?raw';
+import securityPatterns from '../builtin/security-and-hardening/references/hardening-patterns.md?raw';
+import systematicDebugging from '../builtin/systematic-debugging/SKILL.md?raw';
+import conditionBasedWaiting from '../builtin/systematic-debugging/condition-based-waiting.md?raw';
+import defenseInDepth from '../builtin/systematic-debugging/defense-in-depth.md?raw';
+import rootCauseTracing from '../builtin/systematic-debugging/root-cause-tracing.md?raw';
+import testDrivenDevelopment from '../builtin/test-driven-development/SKILL.md?raw';
+import writingGoodTests from '../builtin/test-driven-development/writing-good-tests.md?raw';
+import verificationBeforeCompletion from '../builtin/verification-before-completion/SKILL.md?raw';
+import writingPlans from '../builtin/writing-plans/SKILL.md?raw';
+import addyLicense from '../builtin/LICENSES/addy-osmani-agent-skills.txt?raw';
+import anthropicLicense from '../builtin/LICENSES/anthropic-skills-apache-2.0.txt?raw';
+import superpowersLicense from '../builtin/LICENSES/obra-superpowers.txt?raw';
+
 /**
  * Skills that ship with Hive. They are copied into the user's library once, where they can be
- * edited like any other local skill; `restore` puts the original text back. Kept short because
- * an agent's skills go into its system prompt on every step.
+ * edited like any other local skill; `restore` puts the original text back. An agent's prompt
+ * lists them by name and description; the agent opens the full text when a task needs it.
+ *
+ * Most come from open-source collections (Superpowers, Addy Osmani's agent-skills, Anthropic's
+ * skills), translated to Portuguese and adapted to Hive's tools. Each keeps its author's license
+ * file beside it, as MIT and Apache 2.0 require.
  */
 export interface BuiltinSkill {
   name: string;
   raw: string;
+  /** Files installed beside SKILL.md, by relative path. */
+  files: Record<string, string>;
 }
 
+const lf = (text: string) => text.replace(/\r\n/g, '\n');
+const shipped = (name: string, raw: string, files: Record<string, string> = {}): BuiltinSkill => ({
+  name,
+  raw: lf(raw),
+  files: Object.fromEntries(Object.entries(files).map(([file, text]) => [file, lf(text)])),
+});
+
+const superpowers = { 'LICENSE.txt': superpowersLicense };
+const addy = { 'LICENSE.txt': addyLicense };
+const anthropic = { 'LICENSE.txt': anthropicLicense };
+
+export const builtinSkills: BuiltinSkill[] = [
+  // Superpowers, by Jesse Vincent (MIT).
+  shipped('writing-plans', writingPlans, superpowers),
+  shipped('test-driven-development', testDrivenDevelopment, {
+    ...superpowers,
+    'writing-good-tests.md': writingGoodTests,
+  }),
+  shipped('systematic-debugging', systematicDebugging, {
+    ...superpowers,
+    'root-cause-tracing.md': rootCauseTracing,
+    'defense-in-depth.md': defenseInDepth,
+    'condition-based-waiting.md': conditionBasedWaiting,
+  }),
+  shipped('verification-before-completion', verificationBeforeCompletion, superpowers),
+  // agent-skills, by Addy Osmani (MIT).
+  shipped('planning-and-task-breakdown', planningAndTaskBreakdown, addy),
+  shipped('api-and-interface-design', apiAndInterfaceDesign, addy),
+  shipped('documentation-and-adrs', documentationAndAdrs, addy),
+  shipped('frontend-ui-engineering', frontendUiEngineering, addy),
+  shipped('accessibility-engineering', accessibilityEngineering, addy),
+  shipped('security-and-hardening', securityAndHardening, {
+    ...addy,
+    'references/hardening-patterns.md': securityPatterns,
+  }),
+  shipped('performance-optimization', performanceOptimization, {
+    ...addy,
+    'references/optimization-patterns.md': performancePatterns,
+  }),
+  shipped('code-review-and-quality', codeReviewAndQuality, addy),
+  shipped('code-simplification', codeSimplification, addy),
+  // Anthropic's skills (Apache 2.0).
+  shipped('frontend-design', frontendDesign, anthropic),
+];
+
+/*
+ * Hive's first built-in skills: short Portuguese texts written before the imported ones. Kept to
+ * recognise an untouched copy in the library, which is replaced; one the user edited stays.
+ */
 const skill = (name: string, description: string, body: string): BuiltinSkill => ({
   name,
+  files: {},
   raw: `---
 name: ${name}
 description: ${JSON.stringify(description)}
@@ -22,7 +105,7 @@ ${body.trim()}
 `,
 });
 
-export const builtinSkills: BuiltinSkill[] = [
+const retiredSkills: BuiltinSkill[] = [
   skill(
     'planejar-tarefas',
     'Quebra um objetivo em tarefas pequenas, paralelas e verificáveis, com dependências e critérios de aceite. Use ao planejar uma missão.',
@@ -286,8 +369,30 @@ Ao criar a estrutura para outros agentes, deixe cada arquivo com o mínimo que c
   ),
 ];
 
+/** What each retired skill became; an agent that had it gets these instead. */
+export const retiredSkillReplacements: Record<string, string[]> = {
+  'planejar-tarefas': ['planning-and-task-breakdown', 'writing-plans'],
+  'decisoes-de-arquitetura': ['api-and-interface-design', 'documentation-and-adrs'],
+  'interface-de-qualidade': [
+    'frontend-design',
+    'frontend-ui-engineering',
+    'accessibility-engineering',
+  ],
+  'apis-e-dados': ['api-and-interface-design', 'performance-optimization'],
+  'escrever-testes': ['test-driven-development'],
+  'depurar-sistematicamente': ['systematic-debugging'],
+  'revisar-codigo': ['code-review-and-quality', 'code-simplification'],
+  'seguranca-no-codigo': ['security-and-hardening'],
+  'verificar-antes-de-concluir': ['verification-before-completion'],
+};
+
 export const builtinSkillNames = builtinSkills.map((item) => item.name);
 
 export function builtinSkill(name: string): BuiltinSkill | undefined {
   return builtinSkills.find((item) => item.name === name);
+}
+
+/** The original text of a retired built-in skill, to tell an untouched copy from an edited one. */
+export function retiredSkill(name: string): BuiltinSkill | undefined {
+  return retiredSkills.find((item) => item.name === name);
 }

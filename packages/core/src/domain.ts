@@ -449,6 +449,10 @@ export const skillSummarySchema = z.object({
   source: skillSourceSchema,
   category: z.string(),
   description: z.string(),
+  /** Who wrote it, from `metadata.origin`: Superpowers, Anthropic, Addy Osmani, Hive… */
+  origin: z.string().nullable(),
+  /** Where the original lives, from `metadata.source`. */
+  originUrl: z.string().nullable(),
   license: z.string().nullable(),
   compatibility: z.string().nullable(),
   allowedTools: z.string().nullable(),

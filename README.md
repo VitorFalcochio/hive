@@ -13,7 +13,7 @@ Planeje missões, coordene agentes e revise cada entrega em um workspace desktop
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178c6?style=flat-square&logo=typescript&logoColor=white)
 ![Electron](https://img.shields.io/badge/Electron-desktop-47848f?style=flat-square&logo=electron&logoColor=white)
 
-[Nexus](#nexus-a-missão-ao-vivo) · [Nectar](#nectar-inteligência-compartilhada) · [Recursos](#recursos) · [Como funciona](#como-funciona) · [Começar](#começar) · [Contribuir](#contribuir)
+[Nexus](#nexus-a-missão-ao-vivo) · [Nectar](#nectar-inteligência-compartilhada) · [Skills](#skills) · [Recursos](#recursos) · [Como funciona](#como-funciona) · [Começar](#começar) · [Contribuir](#contribuir)
 
 </div>
 
@@ -58,24 +58,38 @@ O **Nectar** é a inteligência compartilhada do Hive. Como as abelhas que levam
 
 Detalhes em [NECTAR.md](NECTAR.md).
 
+## Skills
+
+Skills são jeitos de trabalhar que os agentes seguem: depurar com método, testar primeiro, conferir antes de concluir, desenhar uma API, revisar código. O prompt de cada agente leva só o nome e a descrição das suas skills; o agente abre a skill inteira quando a tarefa pede, e o registro da tarefa mostra cada uma que ele usou ("Usou a skill systematic-debugging"). Assim as skills podem ser completas sem gastar tokens em todo passo.
+
+O Hive vem com 14 skills de fábrica, traduzidas para o português e adaptadas às ferramentas do Hive, cada uma com a licença do autor ao lado:
+
+| Origem                                                                     | Skills                                                                                                                                                                                                                                              | Licença    |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| [Superpowers](https://github.com/obra/superpowers), de Jesse Vincent       | `writing-plans`, `test-driven-development`, `systematic-debugging`, `verification-before-completion`                                                                                                                                                | MIT        |
+| [agent-skills](https://github.com/addyosmani/agent-skills), de Addy Osmani | `planning-and-task-breakdown`, `api-and-interface-design`, `documentation-and-adrs`, `frontend-ui-engineering`, `accessibility-engineering`, `security-and-hardening`, `performance-optimization`, `code-review-and-quality`, `code-simplification` | MIT        |
+| [Anthropic](https://github.com/anthropics/skills)                          | `frontend-design`                                                                                                                                                                                                                                   | Apache 2.0 |
+
+Na tela **Skills** elas aparecem agrupadas por origem; dá para editar, restaurar o original e criar as suas. Os textos ficam em [packages/skills/builtin](packages/skills/builtin) e as licenças em [packages/skills/builtin/LICENSES](packages/skills/builtin/LICENSES).
+
 ## Recursos
 
-|                           | O que você pode fazer                                                                                                        |
-| :------------------------ | :--------------------------------------------------------------------------------------------------------------------------- |
-| 🐝 **Equipe de agentes**  | Configurar Queen, arquitetura, frontend, backend, QA, revisão e papéis personalizados, com modelos e ferramentas por agente. |
-| 🕸️ **Nexus**              | Acompanhar a missão ao vivo, com uma janela por agente, e editar dependências e delegações direto no canvas.                 |
-| 🍯 **Nectar**             | Compartilhar memória persistente entre os agentes conectados, com aprovação humana e busca semântica.                        |
-| 🧭 **Planejamento**       | Gerar planos com tarefas, dependências e critérios de aceitação; executar tarefas independentes em paralelo.                 |
-| ✨ **Nexus Autopilot**    | Transformar um objetivo em um fluxo visual de agentes e tarefas, revisável antes de aplicar.                                 |
-| 🔀 **Troca automática**   | Seguir em outro modelo ou provedor na hora em que um modelo esgota, e voltar ao principal quando ele libera.                 |
-| 🌿 **Isolamento com Git** | Trabalhar em branches e worktrees por tarefa, revisar resultados e escolher entre aplicar ou descartar.                      |
-| 💻 **Editor integrado**   | Explorar arquivos, editar com Monaco, dividir o editor, buscar arquivos e inspecionar diffs.                                 |
-| 🤖 **IA no código**       | Pedir explicações, revisões e edições. As propostas aparecem como diff para aceitar no editor e salvar.                      |
-| ▶️ **Terminal e preview** | Usar um terminal interativo, conversar com os agentes pelo comando `agents` e abrir endereços locais dentro do aplicativo.   |
-| 🎨 **Design Mode**        | Inspecionar elementos do preview local e transformar ajustes de estilo em propostas de código revisáveis.                    |
-| 🌙 **Modo Turno**         | Enfileirar missões para planejar e executar em sequência, com tentativas configuráveis e entregas aguardando revisão.        |
-| 📚 **Skills**             | Associar instruções e recursos aos agentes a partir de um catálogo de skills.                                                |
-| 📊 **Controle**           | Acompanhar atividade e tokens, definir limites e configurar a aprovação de comandos.                                         |
+|                           | O que você pode fazer                                                                                                          |
+| :------------------------ | :----------------------------------------------------------------------------------------------------------------------------- |
+| 🐝 **Equipe de agentes**  | Configurar Queen, arquitetura, frontend, backend, QA, revisão e papéis personalizados, com modelos e ferramentas por agente.   |
+| 🕸️ **Nexus**              | Acompanhar a missão ao vivo, com uma janela por agente, e editar dependências e delegações direto no canvas.                   |
+| 🍯 **Nectar**             | Compartilhar memória persistente entre os agentes conectados, com aprovação humana e busca semântica.                          |
+| 🧭 **Planejamento**       | Gerar planos com tarefas, dependências e critérios de aceitação; executar tarefas independentes em paralelo.                   |
+| ✨ **Nexus Autopilot**    | Transformar um objetivo em um fluxo visual de agentes e tarefas, revisável antes de aplicar.                                   |
+| 🔀 **Troca automática**   | Seguir em outro modelo ou provedor na hora em que um modelo esgota, e voltar ao principal quando ele libera.                   |
+| 🌿 **Isolamento com Git** | Trabalhar em branches e worktrees por tarefa, revisar resultados e escolher entre aplicar ou descartar.                        |
+| 💻 **Editor integrado**   | Explorar arquivos, editar com Monaco, dividir o editor, buscar arquivos e inspecionar diffs.                                   |
+| 🤖 **IA no código**       | Pedir explicações, revisões e edições. As propostas aparecem como diff para aceitar no editor e salvar.                        |
+| ▶️ **Terminal e preview** | Usar um terminal interativo, conversar com os agentes pelo comando `agents` e abrir endereços locais dentro do aplicativo.     |
+| 🎨 **Design Mode**        | Inspecionar elementos do preview local e transformar ajustes de estilo em propostas de código revisáveis.                      |
+| 🌙 **Modo Turno**         | Enfileirar missões para planejar e executar em sequência, com tentativas configuráveis e entregas aguardando revisão.          |
+| 📚 **Skills**             | Jeitos de trabalhar que os agentes abrem quando a tarefa pede: 14 de fábrica (Superpowers, Addy Osmani e Anthropic) e as suas. |
+| 📊 **Controle**           | Acompanhar atividade e tokens, definir limites e configurar a aprovação de comandos.                                           |
 
 ## Como funciona
 

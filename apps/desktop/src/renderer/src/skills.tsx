@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Check, ChevronRight, Hexagon, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Fragment, useEffect, useState } from 'react';
+import { Check, ChevronRight, ExternalLink, Hexagon, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type { SkillSummary, SkillValidation } from '@hive/core';
 import { useHive } from './context';
 import { AgentBee } from './mascot';
@@ -23,6 +23,49 @@ Descreva a situação em que o agente deve seguir estas instruções.
 O que o agente deve entregar ou relatar no fim.
 `;
 
+/** Where the built-in skills come from, in the order the library shows them. */
+const origins: { name: string; about: string }[] = [
+  {
+    name: 'Superpowers',
+    about:
+      'O método de trabalho de Jesse Vincent, o mais usado do GitHub: planejar, testar primeiro, depurar com método e conferir antes de concluir.',
+  },
+  {
+    name: 'Addy Osmani',
+    about:
+      'Skills de engenharia de Addy Osmani (Google): planejamento, APIs, interface, acessibilidade, segurança, desempenho e revisão.',
+  },
+  {
+    name: 'Anthropic',
+    about:
+      'Da Anthropic, criadora do Claude: design visual com personalidade, sem cara de genérico.',
+  },
+  { name: 'Hive', about: 'Escritas para o Hive.' },
+];
+const YOURS = 'Suas skills';
+
+/** The library's group for a skill: its author, or the user's own. */
+function originOf(skill: SkillSummary): string {
+  if (skill.origin?.toLowerCase() === 'hive') return 'Hive';
+  return skill.origin ?? (skill.builtin ? 'Hive' : YOURS);
+}
+
+function groupByOrigin(skills: SkillSummary[]) {
+  const names = [...origins.map((origin) => origin.name)];
+  for (const skill of skills) if (!names.includes(originOf(skill))) names.push(originOf(skill));
+  // The user's own skills come last, after every author.
+  names.sort((a, b) => Number(a === YOURS) - Number(b === YOURS));
+  return names
+    .map((name) => ({
+      name,
+      about:
+        origins.find((origin) => origin.name === name)?.about ??
+        (name === YOURS ? 'Criadas ou instaladas por você.' : ''),
+      items: skills.filter((skill) => originOf(skill) === name),
+    }))
+    .filter((group) => group.items.length);
+}
+
 /** `'new'` is a skill being written in the drawer, not saved yet. */
 type Selection = string | 'new' | null;
 
@@ -39,7 +82,7 @@ export function SkillsPage() {
       <PageHeader
         eyebrow="Conhecimento"
         title="Skills"
-        description="Instruções que os agentes seguem em toda tarefa. As de fábrica vêm com o Hive e podem ser editadas à vontade."
+        description="Jeitos de trabalhar que os agentes abrem quando a tarefa pede. Cada vez que um agente usa uma skill, aparece no registro da tarefa. As de fábrica vêm com o Hive e podem ser editadas à vontade."
       >
         <button
           className="secondary"
@@ -66,46 +109,56 @@ export function SkillsPage() {
       <section className="card flush">
         {library.length ? (
           <div className="rows">
-            {library.map((skill) => (
-              <button
-                key={skill.name}
-                className="row skill-row"
-                onClick={() => setSelected(skill.name)}
-              >
-                <div className="row-main">
-                  <span className="row-title skill-name">
-                    {skill.name}
-                    {skill.builtin && (
-                      <Hexagon
-                        size={12}
-                        strokeWidth={2.25}
-                        className={`skill-builtin${skill.modified ? ' modified' : ''}`}
-                        aria-label={
-                          skill.modified ? 'Skill de fábrica, editada por você' : 'Skill de fábrica'
-                        }
-                      >
-                        <title>
-                          {skill.modified
-                            ? 'Skill de fábrica, editada por você'
-                            : 'Skill de fábrica'}
-                        </title>
-                      </Hexagon>
-                    )}
-                  </span>
-                  <small>{skill.description}</small>
+            {groupByOrigin(library).map((group) => (
+              <Fragment key={group.name}>
+                <div className="skill-group">
+                  <strong>{group.name}</strong>
+                  <span>{group.about}</span>
                 </div>
-                <span
-                  className="skill-users"
-                  title={users(skill.name)
-                    .map((w) => w.name)
-                    .join(', ')}
-                >
-                  {users(skill.name).map((worker) => (
-                    <AgentBee key={worker.id} worker={worker} size={16} />
-                  ))}
-                </span>
-                <ChevronRight size={15} className="skill-chevron" />
-              </button>
+                {group.items.map((skill) => (
+                  <button
+                    key={skill.name}
+                    className="row skill-row"
+                    onClick={() => setSelected(skill.name)}
+                  >
+                    <div className="row-main">
+                      <span className="row-title skill-name">
+                        {skill.name}
+                        {skill.builtin && (
+                          <Hexagon
+                            size={12}
+                            strokeWidth={2.25}
+                            className={`skill-builtin${skill.modified ? ' modified' : ''}`}
+                            aria-label={
+                              skill.modified
+                                ? 'Skill de fábrica, editada por você'
+                                : 'Skill de fábrica'
+                            }
+                          >
+                            <title>
+                              {skill.modified
+                                ? 'Skill de fábrica, editada por você'
+                                : 'Skill de fábrica'}
+                            </title>
+                          </Hexagon>
+                        )}
+                      </span>
+                      <small>{skill.description}</small>
+                    </div>
+                    <span
+                      className="skill-users"
+                      title={users(skill.name)
+                        .map((w) => w.name)
+                        .join(', ')}
+                    >
+                      {users(skill.name).map((worker) => (
+                        <AgentBee key={worker.id} worker={worker} size={16} />
+                      ))}
+                    </span>
+                    <ChevronRight size={15} className="skill-chevron" />
+                  </button>
+                ))}
+              </Fragment>
             ))}
           </div>
         ) : (
@@ -240,7 +293,13 @@ function SkillEditor({ summary, onClose }: { summary: SkillSummary | null; onClo
 
   return (
     <Drawer
-      eyebrow={summary?.builtin ? 'Skill de fábrica' : summary ? 'Skill' : 'Nova skill'}
+      eyebrow={
+        summary?.builtin
+          ? `Skill de fábrica · ${originOf(summary)}`
+          : summary
+            ? 'Skill'
+            : 'Nova skill'
+      }
       title={name}
       onClose={onClose}
       onSubmit={() => void task.run(save)}
@@ -303,12 +362,27 @@ function SkillEditor({ summary, onClose }: { summary: SkillSummary | null; onClo
         </>
       }
     >
+      {summary?.origin && summary.origin.toLowerCase() !== 'hive' && (
+        <section className="agent-section skill-credit">
+          <h3>Origem</h3>
+          <p>
+            Escrita por <strong>{summary.origin}</strong>
+            {summary.license ? ` · licença ${summary.license}` : ''}. Traduzida para o português e
+            adaptada às ferramentas do Hive; a licença do autor fica junto da skill.
+          </p>
+          {summary.originUrl && (
+            <a href={summary.originUrl} target="_blank" rel="noreferrer">
+              <ExternalLink size={13} /> Ver o original
+            </a>
+          )}
+        </section>
+      )}
       <section className="agent-section">
         <h3>SKILL.md</h3>
         <span className="field-hint">
           O cabeçalho entre <code>---</code> precisa de <code>name</code> (minúsculas e hífens) e{' '}
-          <code>description</code>. O resto é o texto que o agente lê em toda tarefa: quanto mais
-          curto e direto, melhor.
+          <code>description</code>. O agente vê a descrição em toda tarefa e abre o resto quando ela
+          pede: escreva na descrição quando usar a skill.
         </span>
         <textarea
           className="mono skill-source"

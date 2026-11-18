@@ -11,6 +11,7 @@ import type { ToolDefinition } from '@hive/providers';
 import type { ResolvedSkill } from '@hive/skills';
 import { HiveError, resolveInside, toPosixRelative } from '@hive/shared';
 import { runCommand, type BackgroundProcesses } from './process';
+import { SKILL_MARK } from './skill-mark';
 import type { RuntimeEvent } from './runtime';
 import { fetchPage, isLocalUrl, parseWebUrl, type PageViewer } from './web';
 
@@ -206,7 +207,8 @@ export const toolDefinitions: Record<ToolName | 'finish', ToolDefinition> = {
     type: 'function',
     function: {
       name: 'read_skill_resource',
-      description: 'Read a reference file bundled with one of your assigned skills.',
+      description:
+        'Open one of your skills (path "SKILL.md") to follow it, or a file it points to.',
       parameters: {
         type: 'object',
         properties: { skill: { type: 'string' }, path: { type: 'string' } },
@@ -604,9 +606,14 @@ async function skillResourceTool(ctx: ToolContext, args: Record<string, unknown>
   const skill = ctx.skills.find((item) => item.name === str(args, 'skill'));
   if (!skill)
     throw new HiveError('NOT_FOUND', `Skill "${String(args.skill)}" is not assigned to you.`);
-  const file = await resolveInside(skill.directory, str(args, 'path'));
+  const relative = str(args, 'path');
+  const file = await resolveInside(skill.directory, relative);
   if (await isBinary(file)) return '(binary file — not shown)';
-  return readFile(file, 'utf8');
+  const text = await readFile(file, 'utf8');
+  // The skill itself is the agent's instructions for the task: marked so it is never shortened.
+  return /^(\.\/)?SKILL\.md$/i.test(relative.trim())
+    ? `${SKILL_MARK}${skill.name}\n\n${text}`
+    : text;
 }
 
 async function webFetchTool(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {

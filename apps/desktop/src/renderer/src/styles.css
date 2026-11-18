@@ -1154,6 +1154,42 @@ textarea.mono {
   color: var(--subtle-foreground);
 }
 /* Skills: their list, the editor's source and which agents use one. */
+/* The library is grouped by who wrote the skills: a heading with the author and what they bring. */
+.skill-group {
+  display: grid;
+  gap: 2px;
+  padding: 14px 12px 8px;
+}
+.skill-group:not(:first-child) {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.skill-group strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warning);
+}
+.skill-group span {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.skill-credit p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.skill-credit p strong {
+  color: var(--foreground);
+}
+.skill-credit a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--warning);
+}
 .skill-name {
   display: flex;
   align-items: center;

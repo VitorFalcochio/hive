@@ -42,6 +42,7 @@ import {
   type ToolOutcome,
 } from './tools';
 import { BackgroundProcesses } from './process';
+import { SKILL_MARK } from './skill-mark';
 import type { PageViewer } from './web';
 
 const MAX_SKILL_CHARS = 48_000;
@@ -110,7 +111,16 @@ export function buildSystemPrompt(input: AgentTaskInput, root: string): string {
       ];
   parts.push(buildSquadPrompt(callableSoldiers(worker)));
   if (input.memory?.guidance) parts.push(input.memory.guidance);
-  if (skills.length) {
+  if (skills.length && worker.tools.includes('read_skill_resource')) {
+    const catalog = skills.map((skill) => `- **${skill.name}**: ${skill.description}`);
+    parts.push(
+      [
+        '## Skills',
+        'Your skills are proven ways of working, written for this team. Before work a skill covers, open it with `read_skill_resource` (skill: its name, path: "SKILL.md") and follow it; its text stays with you for the whole task, so open each one once. Open the files it points to only when you need them. Scripts they mention are never executed automatically.',
+        ...catalog,
+      ].join('\n'),
+    );
+  } else if (skills.length) {
     let budget = MAX_SKILL_CHARS;
     const blocks: string[] = [];
     for (const skill of skills) {
@@ -982,7 +992,11 @@ export function compactToolOutputs(messages: ChatMessage[], keep: number): void 
     if (message.role === 'assistant' && message.tool_calls?.length) steps++;
     // Walking backwards, `steps` counts the steps newer than this output.
     if (steps < keep || message.role !== 'tool') continue;
-    if (message.content.length <= COMPACT_OVER_CHARS || message.content.endsWith(COMPACTED))
+    if (
+      message.content.length <= COMPACT_OVER_CHARS ||
+      message.content.endsWith(COMPACTED) ||
+      message.content.startsWith(SKILL_MARK)
+    )
       continue;
     messages[index] = {
       ...message,
@@ -1061,6 +1075,12 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 function describeCall(name: ToolName, args: Record<string, unknown>): string {
+  if (name === 'read_skill_resource' && typeof args.skill === 'string') {
+    const file = typeof args.path === 'string' ? args.path : 'SKILL.md';
+    return /^(\.\/)?SKILL\.md$/i.test(file)
+      ? `Usou a skill ${args.skill}`
+      : `Consultou ${excerpt(file, 120)} da skill ${args.skill}`;
+  }
   const target =
     typeof args.path === 'string'
       ? args.path

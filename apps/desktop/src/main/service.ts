@@ -64,7 +64,7 @@ import {
   type AgentRuntime,
   type PageViewer,
 } from '@hive/agents';
-import { SkillForgeAdapter, builtinSkillNames } from '@hive/skills';
+import { SkillForgeAdapter, builtinSkillNames, retiredSkillReplacements } from '@hive/skills';
 import { FileService } from './files';
 import { TerminalManager } from './terminal';
 import { TerminalAgents } from './terminal-agents';
@@ -433,6 +433,32 @@ export class DesktopService {
       this.changed('worker', worker.id);
     }
     this.repos.setValue('builtinSkills', JSON.stringify([...done, ...fresh]));
+    this.changed('skill');
+    await this.retireOldSkills();
+  }
+
+  /**
+   * Hive's first built-in skills gave way to fuller ones (Superpowers, Addy Osmani, Anthropic).
+   * Once: agents that had an old one get its replacements, and library copies the user never
+   * edited are removed. An edited copy is the user's and stays, still on its agents.
+   */
+  private async retireOldSkills(): Promise<void> {
+    if (this.repos.getValue('retiredSkills') === '1') return;
+    const names = Object.keys(retiredSkillReplacements);
+    const removed = new Set(await this.skills().removeRetired(names));
+    for (const worker of this.repos.workers.list()) {
+      if (!worker.skills.some((name) => removed.has(name))) continue;
+      const skills = [
+        ...new Set(
+          worker.skills.flatMap((name) =>
+            removed.has(name) ? (retiredSkillReplacements[name] ?? []) : [name],
+          ),
+        ),
+      ];
+      this.repos.workers.put({ ...worker, skills, updatedAt: nowIso() });
+      this.changed('worker', worker.id);
+    }
+    this.repos.setValue('retiredSkills', '1');
     this.changed('skill');
   }
 
