@@ -114,4 +114,15 @@ describe('cliente de provedores compatíveis com OpenAI', () => {
     const empty = client(() => json({ choices: [] }));
     await expect(empty.api.chat(request)).rejects.toThrow('no message');
   });
+
+  it('no OpenRouter, o teste de conexão confere a chave e não só o catálogo público (caso real)', async () => {
+    // From a real run: the catalog listed 400+ models with a key that every chat call refused.
+    const { api, calls } = client((url) =>
+      url.endsWith('/key')
+        ? json({ error: { message: 'User not found.' } }, { status: 401 })
+        : json({ data: [{ id: 'a/b:free' }] }),
+    );
+    await expect(api.testConnection()).rejects.toThrow('Authentication failed (401)');
+    expect(calls.map((call) => call.url)).toEqual(['https://api.exemplo.dev/v1/key']);
+  });
 });

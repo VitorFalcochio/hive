@@ -117,9 +117,15 @@ export class OpenAICompatibleClient implements ChatClient {
     return normalizeModels(this.endpoint, body);
   }
 
-  /** Cheapest authenticated call available on every provider: listing models. */
+  /**
+   * Cheapest authenticated call available on every provider: listing models. OpenRouter serves
+   * its catalog without a key, so there the key is checked on `/key` first; otherwise a revoked
+   * or mistyped key would pass the test and only fail once an agent calls a model.
+   */
   async testConnection(signal?: AbortSignal): Promise<{ latencyMs: number; modelCount: number }> {
     const started = Date.now();
+    if (this.endpoint.kind === 'openrouter')
+      await this.request('/key', { method: 'GET' }, signal, 30_000);
     const models = await this.listModels(signal);
     return { latencyMs: Date.now() - started, modelCount: models.length };
   }
