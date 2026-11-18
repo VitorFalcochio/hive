@@ -43,6 +43,7 @@ import {
 } from './tools';
 import { BackgroundProcesses } from './process';
 import { SKILL_MARK } from './skill-mark';
+import { TokenSaver, readOutput, readOutputDefinition } from './token-saver';
 import type { PageViewer } from './web';
 
 const MAX_SKILL_CHARS = 48_000;
@@ -385,7 +386,11 @@ type LoopResult = Pick<AgentOutcome, 'summary' | 'error'> & { status: 'completed
  */
 async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
   const { chat, limits, signal, usage } = env;
-  const { messages, tools, allowed, ctx, progress } = loop;
+  const { messages, allowed, progress } = loop;
+  // Each loop remembers only what its own messages show.
+  const saver = new TokenSaver();
+  const ctx: ToolContext = { ...loop.ctx, saver };
+  const tools = allowed.has('run_command') ? [...loop.tools, readOutputDefinition] : loop.tools;
   const emit = (event: RuntimeEvent) => ctx.emit(event);
   const done = (status: LoopResult['status'], summary: string, error: string | null) => ({
     status,
@@ -573,6 +578,22 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
           : done('failed', summary, 'The agent reported that it could not complete the task.');
         break;
       }
+      if (call.function.name === readOutputDefinition.function.name && allowed.has('run_command')) {
+        let content: string;
+        try {
+          content = readOutput(saver, args);
+        } catch (error) {
+          content = `Error: ${errorMessage(error)}`;
+        }
+        emit({
+          type: 'tool.call',
+          level: 'info',
+          message: `Leu mais da saída ${typeof args.id === 'string' ? args.id : ''}`.trim(),
+          data: { tool: 'read_output', args: summarizeArgs(args) },
+        });
+        messages.push({ role: 'tool', tool_call_id: call.id, content });
+        continue;
+      }
       const extra = loop.extraTools?.[call.function.name];
       if (extra) {
         const result = await extra(args);
@@ -636,10 +657,12 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
         },
       });
       messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
+      if (result.read)
+        saver.remember(result.read.key, result.read.lines, call.id, result.read.buildsOnEarlier);
       if (result.image) images.push(result.image);
     }
     if (finished) return finished;
-    compactToolOutputs(messages, KEEP_FULL_STEPS);
+    compactToolOutputs(messages, KEEP_FULL_STEPS, (callId) => saver.forgetCall(callId));
     // Tool messages carry text only, so the images follow them in a user message.
     if (images.length) {
       messages.push({
@@ -985,7 +1008,11 @@ function memoryHandlers(
  * message with tool calls). Each output is shortened once, so later prompts stay identical
  * from there on and providers that cache prompt prefixes keep their cache.
  */
-export function compactToolOutputs(messages: ChatMessage[], keep: number): void {
+export function compactToolOutputs(
+  messages: ChatMessage[],
+  keep: number,
+  onShortened?: (toolCallId: string) => void,
+): void {
   let steps = 0;
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]!;
@@ -1002,6 +1029,7 @@ export function compactToolOutputs(messages: ChatMessage[], keep: number): void 
       ...message,
       content: message.content.slice(0, COMPACT_TO_CHARS) + COMPACTED,
     };
+    onShortened?.(message.tool_call_id);
   }
 }
 

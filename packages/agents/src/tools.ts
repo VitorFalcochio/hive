@@ -12,6 +12,14 @@ import type { ResolvedSkill } from '@hive/skills';
 import { HiveError, resolveInside, toPosixRelative } from '@hive/shared';
 import { runCommand, type BackgroundProcesses } from './process';
 import { SKILL_MARK } from './skill-mark';
+import {
+  CONDENSE_OVER_CHARS,
+  LOOP_AFTER,
+  LOOP_NOTE,
+  condenseOutput,
+  rereadOutput,
+  type TokenSaver,
+} from './token-saver';
 import type { RuntimeEvent } from './runtime';
 import { fetchPage, isLocalUrl, parseWebUrl, type PageViewer } from './web';
 
@@ -50,6 +58,8 @@ export interface ToolContext {
   viewPage?: PageViewer;
   /** Servers and watchers started with run_command background; killed when the session ends. */
   background?: BackgroundProcesses;
+  /** This loop's memory of reads and long outputs; without it every result is sent in full. */
+  saver?: TokenSaver;
 }
 
 export interface ToolImage {
@@ -63,6 +73,8 @@ export interface ToolOutcome {
   isError: boolean;
   /** An image the model should look at, sent right after the tool results. */
   image?: ToolImage;
+  /** A file window the loop should remember, under the id of the tool message it went in. */
+  read?: { key: string; lines: string[]; buildsOnEarlier: boolean };
 }
 
 export function truncate(text: string, limit = MAX_TOOL_OUTPUT): string {
@@ -316,24 +328,37 @@ async function readImage(ctx: ToolContext, file: string, mime: string): Promise<
   };
 }
 
-async function readTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
+async function readTool(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const file = await resolveInside(ctx.root, str(args, 'path'));
   const info = await lstat(file);
   if (!info.isFile()) throw new HiveError('VALIDATION', 'Not a regular file.');
   if (info.size > MAX_READ_BYTES && args.start_line === undefined) {
     throw new HiveError('LIMIT', `File is ${info.size} bytes; read it with a line range.`);
   }
-  if (await isBinary(file)) return '(binary file — not shown)';
+  if (await isBinary(file)) return { output: '(binary file — not shown)', isError: false };
   const lines = (await readFile(file, 'utf8')).split(/\r?\n/);
   const start = Math.max(1, Number(args.start_line ?? 1));
   // A whole file is rarely needed, and every line read is paid again on later steps.
   const end = Math.min(lines.length, Number(args.end_line ?? start + READ_WINDOW - 1));
-  const body = lines
-    .slice(start - 1, end)
+  const window = lines.slice(start - 1, end);
+  const relative = toPosixRelative(ctx.root, file);
+  // The same range asked again: the window it covers, whatever the file's length now.
+  const key = `${relative}:${start}:${String(args.end_line ?? 'window')}`;
+  const earlier = ctx.saver?.lastRead(key);
+  if (earlier) {
+    const header = { path: relative, start, end, total: lines.length };
+    const short = rereadOutput(header, earlier.lines, window);
+    if (short)
+      return { output: short, isError: false, read: { key, lines: window, buildsOnEarlier: true } };
+  }
+  const body = window
     .map((line, index) => `${String(start + index).padStart(5)}  ${line}`)
     .join('\n');
   const more = end < lines.length ? `; pass start_line=${end + 1} to read on` : '';
-  return `${toPosixRelative(ctx.root, file)} (lines ${start}-${end} of ${lines.length}${more})\n${body}`;
+  const output = `${relative} (lines ${start}-${end} of ${lines.length}${more})\n${body}`;
+  // A window cut by truncate was not fully seen, so a later read of it must be sent in full.
+  if (output.length > MAX_TOOL_OUTPUT) return { output: truncate(output), isError: false };
+  return { output, isError: false, read: { key, lines: window, buildsOnEarlier: false } };
 }
 
 async function searchTool(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
@@ -557,10 +582,25 @@ async function commandTool(ctx: ToolContext, args: Record<string, unknown>): Pro
   const status = result.timedOut
     ? `timed out after ${Math.round(ctx.commandTimeoutMs / 1000)}s`
     : `exit code ${result.exitCode}`;
-  return {
-    output: `$ ${command}\n(${status})\n${truncate(result.output) || '(no output)'}`,
-    isError: result.exitCode !== 0,
-  };
+  const failed = result.exitCode !== 0;
+  let output = `$ ${command}\n(${status})\n${shownOutput(ctx, result.output) || '(no output)'}`;
+  if (ctx.saver && ctx.saver.commandResult(command, failed, result.output) === LOOP_AFTER) {
+    output += LOOP_NOTE;
+    ctx.emit({
+      type: 'info',
+      level: 'warn',
+      message: `"${command}" falhou ${LOOP_AFTER} vezes seguidas com o mesmo erro; o agente foi avisado para mudar de abordagem.`,
+      data: { command, loop: LOOP_AFTER },
+    });
+  }
+  return { output, isError: failed };
+}
+
+/** A long output condensed to its errors and summary, the full text kept for read_output. */
+function shownOutput(ctx: ToolContext, text: string): string {
+  if (!ctx.saver || text.length <= CONDENSE_OVER_CHARS) return truncate(text);
+  const lines = text.replace(/\s+$/, '').split(/\r?\n/);
+  return truncate(condenseOutput(lines, ctx.saver.storeOutput(lines)));
 }
 
 const BACKGROUND_WAIT_MS = 4000;
@@ -677,7 +717,7 @@ export async function executeTool(
         const file = await resolveInside(ctx.root, str(args, 'path'));
         const mime = imageType(file);
         if (mime) return await readImage(ctx, file, mime);
-        return { output: truncate(await readTool(ctx, args)), isError: false };
+        return await readTool(ctx, args);
       }
       case 'search':
         return { output: truncate(await searchTool(ctx, args)), isError: false };

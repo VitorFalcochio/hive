@@ -72,6 +72,17 @@ O Hive vem com 14 skills de fábrica, traduzidas para o português e adaptadas �
 
 Na tela **Skills** elas aparecem agrupadas por origem; dá para editar, restaurar o original e criar as suas. Os textos ficam em [packages/skills/builtin](packages/skills/builtin) e as licenças em [packages/skills/builtin/LICENSES](packages/skills/builtin/LICENSES).
 
+## Economia de tokens
+
+Provedores gratuitos limitam os tokens por minuto, então cada token poupado é menos espera por limite (429). Durante a tarefa, o Hive:
+
+- **Releitura inteligente:** quando o agente lê de novo um trecho de arquivo que já está no contexto, recebe só "não mudou desde a sua última leitura" ou apenas as linhas que mudaram, com os números delas. Se a leitura anterior já foi encurtada, o trecho volta inteiro.
+- **Saída de comando enxuta:** saídas longas de testes, build e lint chegam ao agente com o começo, as linhas de erro e aviso e o final (onde fica o resumo). A saída inteira fica guardada e o agente lê mais dela com `read_output`, por intervalo de linhas ou por texto.
+- **Detecção de laço:** quando o mesmo comando falha 3 vezes seguidas com o mesmo erro, o agente é avisado para mudar de abordagem, e o registro da tarefa mostra o aviso.
+- **Resultados antigos encurtados:** saídas longas de passos antigos são encurtadas uma única vez, sem quebrar o cache de prompt dos provedores.
+
+Ideias inspiradas no [token-optimizer](https://github.com/alexgreensh/token-optimizer), de alexgreensh, com código próprio do Hive.
+
 ## Recursos
 
 |                           | O que você pode fazer                                                                                                          |
