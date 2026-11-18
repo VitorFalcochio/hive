@@ -80,6 +80,47 @@ describe('troca automática de modelo', () => {
     expect(b.calls).toHaveLength(2);
   });
 
+  it('com o provedor pausado por um 429 de outro agente, troca na hora em vez de esperar na fila', async () => {
+    let now = 0;
+    const health = new RouteHealth(() => now);
+    // The frontend hit Groq's limit on its model: the whole provider pauses for 60s.
+    const groqForFrontend = provider(limited());
+    const other = provider('resposta de outro provedor');
+    await new FailoverClient(
+      () => [
+        route('groq', 'kimi', groqForFrontend.client),
+        route('nvidia', 'kimi-k2', other.client),
+      ],
+      health,
+    ).chat(request);
+    // The QA uses another Groq model, not resting itself; it must not wait for the pause.
+    const groqForQa = provider('resposta do groq');
+    const switches: RouteSwitch[] = [];
+    const qa = new FailoverClient(
+      () => [
+        route('groq', 'gpt-oss-120b', groqForQa.client),
+        route('nvidia', 'kimi-k2', other.client),
+      ],
+      health,
+      (change) => switches.push(change),
+    );
+    expect((await qa.chat(request)).message.content).toBe('resposta de outro provedor');
+    expect(groqForQa.calls).toHaveLength(0);
+    expect(switches[0]?.reason).toBe('provedor pausado após limite (429)');
+
+    // Once the pause is over, the QA goes back to its own model.
+    now = 61_000;
+    expect((await qa.chat(request)).message.content).toBe('resposta do groq');
+  });
+
+  it('com o provedor pausado e nenhum outro modelo, espera nele como antes', async () => {
+    const health = new RouteHealth();
+    health.rest({ providerId: 'groq', model: 'outro' }, 60_000, 60_000);
+    const groq = provider('ok');
+    const only = new FailoverClient(() => [route('groq', 'gpt-oss-120b', groq.client)], health);
+    expect((await only.chat(request)).message.content).toBe('ok');
+  });
+
   it('volta ao modelo principal assim que ele descansa', async () => {
     let now = 0;
     const health = new RouteHealth(() => now);

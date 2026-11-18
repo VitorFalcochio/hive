@@ -162,8 +162,14 @@ export class FailoverClient implements ChatClient {
     if (!primary)
       throw new HiveError('VALIDATION', 'Nenhum provedor configurado para este agente.');
     let last: { error: unknown; reason: string; route: ChatRoute } | null = null;
+    // A provider paused after a 429 (another agent hit its limit) holds every call in its gate
+    // until the pause ends, which can be minutes: with somewhere else to go, go there instead.
+    const paused =
+      this.health.providerPaused(primary.providerId) > 0 && this.routes(true).length > 1;
+    if (paused)
+      last = { error: null, reason: 'provedor pausado após limite (429)', route: primary };
     // The usual case: the agent's own model, not resting, answers.
-    if (this.health.resting(primary) === 0) {
+    if (!paused && this.health.resting(primary) === 0) {
       try {
         return this.succeeded(primary, primary, await primary.client.chat(request, signal), null);
       } catch (error) {
