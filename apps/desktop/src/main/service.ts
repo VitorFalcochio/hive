@@ -1511,6 +1511,7 @@ export class DesktopService {
           createdAt: previous?.createdAt ?? nowIso(),
           updatedAt: nowIso(),
         });
+        if (!previous) this.cortex.connectNewWorker(result.id);
         this.changed('worker', result.id);
         return result;
       }
@@ -2012,6 +2013,7 @@ export class DesktopService {
           createdAt: nowIso(),
           updatedAt: nowIso(),
         });
+        this.cortex.connectNewWorker(worker.id);
         this.changed('worker', worker.id);
         return canvasWorker(this.repos, worker);
       }

@@ -185,6 +185,40 @@ export class CortexService {
     this.options.onChange(saved.id);
   }
 
+  /**
+   * A new agent joins the team's shared memory at once: it is connected, with Read + Propose, to
+   * the main Nectar (the first block) of every project. Approve stays with the user.
+   */
+  connectNewWorker(workerId: string): void {
+    const worker = this.repos.workers.require(workerId, 'Agente');
+    for (const workspace of this.repos.workspaces.list()) {
+      const [main] = this.nodesOf(workspace.id);
+      if (!main || connectionOf(main, worker.id)) continue;
+      const saved = this.repo.nodes.put({
+        ...main,
+        connections: [
+          ...main.connections,
+          {
+            workerId: worker.id,
+            permissions: { ...defaultCortexPermissions },
+            connectedAt: nowIso(),
+            source: 'user',
+          },
+        ],
+        updatedAt: nowIso(),
+      });
+      this.log(
+        saved,
+        'connected',
+        { kind: 'system', workerId: null, name: 'Hive' },
+        `${worker.name} entrou na equipe e foi conectado (${describe(defaultCortexPermissions)}).`,
+        [],
+        { workerId: worker.id, permissions: defaultCortexPermissions },
+      );
+      this.options.onChange(saved.id);
+    }
+  }
+
   private createIn(workspaceId: string, name?: string | null): CortexNode {
     const existing = this.nodesOf(workspaceId);
     if (existing.length >= MAX_NODES_PER_PROJECT)

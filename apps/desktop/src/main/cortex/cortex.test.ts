@@ -288,6 +288,43 @@ describe('Nectar por padrão em todo projeto', () => {
     expect(second.service.cortex.nodesOf('ws')).toHaveLength(1);
     expect(second.service.cortex.nodesOf('ws2')).toHaveLength(1);
   });
+
+  it('um agente novo entra no Nectar principal de cada projeto, em Read + Propose', async () => {
+    const ctx = await setup();
+    const nectar = ctx.service.cortex;
+    nectar.ensureDefault('ws');
+    nectar.ensureDefault('ws2');
+    // A second block in the project: only the main one gets new agents.
+    const extra = await cortexWith(ctx, ctx.makeRun('r-extra').id);
+    const mains = ['ws', 'ws2'].map((id) => nectar.nodesOf(id)[0]!.id);
+    const access = (cortexId: string, workerId: string) =>
+      nectar.node(cortexId).connections.find((c) => c.workerId === workerId)?.permissions;
+
+    const template: Partial<Worker> = { ...ctx.workers.backend, name: 'Mobile' };
+    for (const key of ['id', 'createdAt', 'updatedAt'] as const) delete template[key];
+    const fromPage = await ctx.invoke<Worker>('worker.save', template);
+    const fromCanvas = await ctx.invoke<{ id: string }>('canvas.worker.create', {
+      name: 'Dados',
+      role: 'backend',
+      providerId: null,
+      modelId: null,
+    });
+    for (const workerId of [fromPage.id, fromCanvas.id]) {
+      for (const main of mains)
+        expect(access(main, workerId)).toEqual({
+          read: true,
+          propose: true,
+          approve: false,
+          manage: false,
+        });
+      expect(access(extra, workerId)).toBeUndefined();
+    }
+
+    // Editing an agent later never reconnects one the user took off the Nectar.
+    nectar.disconnect(mains[0]!, fromPage.id);
+    await ctx.invoke('worker.save', { ...fromPage, name: 'Mobile Dev' });
+    expect(access(mains[0]!, fromPage.id)).toBeUndefined();
+  });
 });
 
 describe('Nectar: acesso por conexão e permissões', () => {
