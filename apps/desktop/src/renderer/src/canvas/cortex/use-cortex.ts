@@ -9,7 +9,7 @@ export interface CortexState {
 }
 
 /**
- * The Cortex blocks of the run's project. They belong to the project, not the run, so another
+ * The Nectar blocks of the run's project. They belong to the project, not the run, so another
  * mission of the same project shows the same blocks, connections and memories.
  */
 export function useCortex(runId: string): CortexState {

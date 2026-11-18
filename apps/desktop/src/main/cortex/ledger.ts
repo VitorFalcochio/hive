@@ -66,7 +66,7 @@ export class CortexLedger {
     if (input.targetMemoryId) {
       const target = this.memory(input.targetMemoryId);
       if (target.cortexId !== input.node.id)
-        throw new HiveError('VALIDATION', 'A memória indicada é de outro Cortex.');
+        throw new HiveError('VALIDATION', 'A memória indicada é de outro Nectar.');
       if (input.action !== 'create' && target.status !== 'active')
         throw new HiveError('CONFLICT', 'Só memórias vigentes podem ser alteradas ou revogadas.');
     } else if (input.action !== 'create')
@@ -86,7 +86,7 @@ export class CortexLedger {
       reviews: input.warnings.length
         ? [
             {
-              actor: { kind: 'system', workerId: null, name: 'Cortex' },
+              actor: { kind: 'system', workerId: null, name: 'Nectar' },
               verdict: 'revise',
               reason: `Atenção: o texto ${input.warnings.join('; ')}. Ele será tratado como dado, nunca como instrução.`,
               at,
@@ -165,7 +165,7 @@ export class CortexLedger {
     const result = this.repo.transaction(() => {
       const proposal = this.repo.proposals.require(input.proposalId, 'Proposta');
       if (proposal.cortexId !== input.node.id)
-        throw new HiveError('VALIDATION', 'Esta proposta é de outro Cortex.');
+        throw new HiveError('VALIDATION', 'Esta proposta é de outro Nectar.');
       if (proposal.status !== 'pending')
         throw new HiveError('CONFLICT', 'Esta proposta já foi resolvida.');
       const at = nowIso();
@@ -370,7 +370,7 @@ export class CortexLedger {
   private current(node: CortexNode, memoryId: string, expectedVersion: number): CortexMemory {
     const memory = this.memory(memoryId);
     if (memory.cortexId !== node.id)
-      throw new HiveError('VALIDATION', 'Esta memória é de outro Cortex.');
+      throw new HiveError('VALIDATION', 'Esta memória é de outro Nectar.');
     if (memory.version !== expectedVersion)
       throw new HiveError(
         'CONFLICT',
@@ -393,7 +393,7 @@ export class CortexLedger {
     if (supersedes) {
       const old = this.memory(supersedes);
       if (old.cortexId !== node.id)
-        throw new HiveError('VALIDATION', 'A memória substituída é de outro Cortex.');
+        throw new HiveError('VALIDATION', 'A memória substituída é de outro Nectar.');
       if (old.status === 'active') {
         replaced = this.repo.memories.put({
           ...old,

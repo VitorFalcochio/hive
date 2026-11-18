@@ -888,7 +888,7 @@ export class DesktopService {
     this.push({ kind: 'event', event });
   }
 
-  /** Cortex knowledge for the Queen's plan, when she is connected with Read; never blocks planning. */
+  /** Nectar knowledge for the Queen's plan, when she is connected with Read; never blocks planning. */
   private async queenMemory(run: RunDetail['run'], queenId: string, objective: string) {
     try {
       const context = await this.cortex.planningContext(run, queenId, objective);
@@ -1157,7 +1157,7 @@ export class DesktopService {
           title: 'Restaurar backup',
           message: `Restaurar o backup de ${new Date(meta.createdAt).toLocaleString('pt-BR')}?`,
           detail:
-            'Missões, agentes, provedores, configurações, memórias do Cortex e skills voltam ao estado do backup, e o Hive reinicia. Uma cópia dos dados atuais fica guardada em Backups, para desfazer se precisar.\n\nChaves de API só funcionam no mesmo usuário do Windows em que o backup foi feito.',
+            'Missões, agentes, provedores, configurações, memórias do Nectar e skills voltam ao estado do backup, e o Hive reinicia. Uma cópia dos dados atuais fica guardada em Backups, para desfazer se precisar.\n\nChaves de API só funcionam no mesmo usuário do Windows em que o backup foi feito.',
         });
         if (choice.response !== 0) {
           await cancelRestore(this.dataDir);

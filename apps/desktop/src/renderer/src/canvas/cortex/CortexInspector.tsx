@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Activity,
-  BrainCircuit,
+  Droplet,
   Check,
   GitCommitVertical,
   History,
@@ -33,7 +33,7 @@ import { roleLabel } from '../model';
 export type CortexTab = 'memories' | 'approvals' | 'decisions' | 'activity' | 'connections';
 
 const tabs: { id: CortexTab; label: string; icon: typeof Activity }[] = [
-  { id: 'memories', label: 'Memories', icon: BrainCircuit },
+  { id: 'memories', label: 'Memories', icon: Droplet },
   { id: 'approvals', label: 'Approvals', icon: Inbox },
   { id: 'decisions', label: 'Decisions', icon: GitCommitVertical },
   { id: 'activity', label: 'Activity', icon: Activity },
@@ -49,7 +49,7 @@ const permissionHelp: Record<CortexPermission, string> = {
   read: 'Read — consulta memórias aprovadas e recebe as relevantes como contexto.',
   propose: 'Propose — sugere memórias novas e altera as próprias (com aprovação).',
   approve: 'Approve — recomenda aprovar ou rejeitar propostas de outros agentes.',
-  manage: 'Manage — propõe alterar ou revogar qualquer memória deste Cortex.',
+  manage: 'Manage — propõe alterar ou revogar qualquer memória deste Nectar.',
 };
 const verdictLabels: Record<CortexProposal['reviews'][number]['verdict'], string> = {
   approve: 'aprovar',
@@ -148,8 +148,8 @@ export function CortexInspector({
 
   return (
     <Modal
-      title={`Cortex Inspector · ${node.name}`}
-      description="Memória compartilhada e persistente do projeto. Só agentes conectados acessam; o que eles propõem espera a sua aprovação."
+      title={`Nectar Inspector · ${node.name}`}
+      description="Shared Intelligence do projeto: os agentes trabalham individualmente e aprendem coletivamente. Só agentes conectados acessam; o que eles propõem espera a sua aprovação."
       size="xl"
       onClose={onClose}
     >
@@ -397,7 +397,7 @@ function MemoriesTab({
               draft: editing.draft,
               note: 'Editada no Inspector.',
             }),
-          'Memória atualizada. Agentes afetados serão avisados na próxima tarefa.',
+          'Nectar atualizado. Agentes afetados serão avisados na próxima tarefa.',
         )
       : await act(
           () =>
@@ -406,7 +406,7 @@ function MemoriesTab({
               draft: editing.draft,
               supersedes: null,
             }),
-          'Memória registrada e disponível aos agentes conectados.',
+          'Conhecimento salvo no Nectar e disponível aos agentes conectados.',
         );
     if (ok) setEditing(null);
   };
@@ -456,13 +456,15 @@ function MemoriesTab({
           onChange={(event) => setQuery(event.target.value)}
         />
         <button className="secondary nc-small" disabled={searching || !query.trim()}>
-          {searching ? 'Buscando…' : 'Buscar por significado'}
+          {searching ? 'Buscando no Nectar…' : 'Buscar por significado'}
         </button>
       </form>
       {result && (
         <div className="nc-cortex-results" role="status">
           <span className="muted-text">
-            {result.hits.length} resultado(s) · {result.tokens} tokens · motor {result.model}
+            {result.hits.length
+              ? `${result.hits.length} resultado(s) · ${result.tokens} tokens · motor ${result.model}`
+              : `Nenhuma memória relevante encontrada · motor ${result.model}`}
             {result.degraded ? ` · provedor indisponível: ${result.degraded}` : ''}
           </span>
           {result.hits.map((hit) => (
@@ -854,7 +856,7 @@ function DecisionsTab({
     <section className="nc-cortex-section">
       {!block.node.config.architecturalDecisions && (
         <p className="nc-cortex-warn">
-          O histórico de decisões está desligado nas conexões deste Cortex.
+          O histórico de decisões está desligado nas conexões deste Nectar.
         </p>
       )}
       <State
@@ -1028,7 +1030,7 @@ function ConnectionsTab({
       </p>
       {node.connections.length === 0 ? (
         <div className="nc-cortex-state-box">
-          Nenhum agente conectado: ninguém acessa este Cortex.
+          Nenhum agente conectado: ninguém acessa este Nectar.
         </div>
       ) : (
         <table className="nc-cortex-table">

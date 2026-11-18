@@ -2,7 +2,7 @@ import { createContext, memo, useContext, useEffect, useState, type CSSPropertie
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
 import {
   ArrowUpRight,
-  BrainCircuit,
+  Droplet,
   ChevronDown,
   ChevronRight,
   GitBranch,
@@ -108,7 +108,7 @@ export interface CanvasView {
   frames: Map<string, Frame>;
   updateNote: (id: string, patch: Partial<Note>) => void;
   updateFrame: (id: string, patch: Partial<Frame>) => void;
-  /** Cortex blocks of the project, by id. */
+  /** Nectar blocks of the project, by id. */
   cortex: Map<string, CortexOverview>;
   openCortex: (cortexId: string) => void;
 }
@@ -160,7 +160,7 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
   if (!worker || !status) return null;
   const queen = worker.role === 'queen';
   // A line from an agent to a task delegates it (the engine checks it has not started); to a
-  // Cortex it gives access. The Queen only connects to a Cortex, for planning context. A line
+  // Nectar it gives access. The Queen only connects to a Nectar, for planning context. A line
   // from a Provider block into an agent switches its provider.
   const handles = <Handles source target />;
   const windowed = view.grouping === 'workspace' && !queen && !view.minimized.has(worker.id);
@@ -905,7 +905,7 @@ export const CortexNode = memo(function CortexNode({ id, data, selected }: NodeP
       <Handle type="target" position={Position.Top} id="top" isConnectable />
       <header className="nc-cortex-head">
         <span className="nc-cortex-icon" aria-hidden>
-          <BrainCircuit size={18} />
+          <Droplet size={18} />
         </span>
         <div className="nc-cortex-title">
           <strong className="truncate">{node.name}</strong>
@@ -973,7 +973,7 @@ export const CortexNode = memo(function CortexNode({ id, data, selected }: NodeP
         <button
           className="nc-cortex-open nodrag"
           onClick={() => view.openCortex(node.id)}
-          title="Abrir o Cortex Inspector (duplo clique)"
+          title="Abrir o Nectar Inspector (duplo clique)"
         >
           Abrir <ArrowUpRight size={12} />
         </button>

@@ -398,7 +398,7 @@ export const agentEventTypeSchema = z.enum([
   'plan',
   'error',
   'info',
-  /** Cortex: context handed to a task, searches, proposals and change notices. */
+  /** Nectar: context handed to a task, searches, proposals and change notices. */
   'memory',
 ]);
 export type AgentEventType = z.infer<typeof agentEventTypeSchema>;

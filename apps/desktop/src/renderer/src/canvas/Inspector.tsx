@@ -49,7 +49,7 @@ const edgeMeaning: Record<EdgeKind, { title: string; text: string }> = {
     text: 'A Queen planejou este trabalho e o distribuiu no plano da missão.',
   },
   memory: {
-    title: 'Acesso ao Cortex',
+    title: 'Acesso ao Nectar',
     text: 'O agente acessa a memória compartilhada do projeto conforme as permissões da conexão. Sem esta linha, ele não lê nem propõe nada. Botão direito: permissões ou desconectar.',
   },
 };
@@ -159,7 +159,7 @@ export function Inspector({
         return (
           <div className="nc-inspector-body">
             <header className="nc-inspector-head">
-              <p className="eyebrow">Cortex · Shared Memory</p>
+              <p className="eyebrow">Nectar · Shared Intelligence</p>
               <h2>{block.node.name}</h2>
             </header>
             <dl className="nc-fields">
@@ -181,7 +181,7 @@ export function Inspector({
               </Field>
             </dl>
             <button className="ghost" onClick={() => view.openCortex(ref)}>
-              Abrir Cortex Inspector
+              Abrir Nectar Inspector
             </button>
           </div>
         );

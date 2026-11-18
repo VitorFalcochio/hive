@@ -31,7 +31,7 @@ interface Options {
   chatFor: (providerId: string) => ChatClient;
   invoke: (channel: IpcChannel, input: unknown) => Promise<unknown>;
   resultContext: (runId: string) => string;
-  /** Cortex blocks of the project; the flow may only connect its agents to these. */
+  /** Nectar blocks of the project; the flow may only connect its agents to these. */
   cortex?: CortexService;
   onEvent: (event: AgentEvent) => void;
   /** Adaptive replanning: the scheduler's own reroute and re-check of a run. */
@@ -131,7 +131,7 @@ export class NexusAutopilot {
     }
     this.checkAgents(parsed.agents, parsed.tasks, options, workers);
     for (const access of parsed.cortexAccess ?? []) {
-      if (!this.options.cortex) throw new HiveError('VALIDATION', 'O Cortex não está disponível.');
+      if (!this.options.cortex) throw new HiveError('VALIDATION', 'O Nectar não está disponível.');
       this.options.cortex.validateAutopilotGrant(run, access);
     }
   }
@@ -280,7 +280,7 @@ export class NexusAutopilot {
                 'Agentes existentes usam {source:"existing",key,workerId}. Agentes novos usam {source:"new",key,name,role,providerId,modelId} e somente pares presentes no contexto.',
                 'Tarefas usam workerKey de um agente declarado ou null e dependências por chave. Resultado Vivo é singleton; connectResult deve ser true.',
                 'Não invente provedores, modelos, ferramentas, permissões, testes concluídos nem evidências.',
-                'Cortex é memória compartilhada do projeto. Só blocos listados em context.cortex existem. Conexões existentes são mantidas como estão. Para que um agente do fluxo use um Cortex, inclua em cortexAccess {cortexId,agentKey,permissions:["read"] ou ["read","propose"]} somente quando a tarefa precisar; nunca dê acesso a todos por padrão. Approve e Manage são exclusivos do usuário.',
+                'Nectar é memória compartilhada do projeto. Só blocos listados em context.cortex existem. Conexões existentes são mantidas como estão. Para que um agente do fluxo use um Nectar, inclua em cortexAccess {cortexId,agentKey,permissions:["read"] ou ["read","propose"]} somente quando a tarefa precisar; nunca dê acesso a todos por padrão. Approve e Manage são exclusivos do usuário.',
                 'Schema exato: {objective:string,agents:Agent[],tasks:[{key,title,description,workerKey,dependsOn,acceptanceCriteria}],connectResult:boolean,approvalSteps:string[],warnings:string[],cortexAccess:[{cortexId,agentKey,permissions}]}.',
               ].join('\n'),
             },
@@ -496,7 +496,7 @@ export class NexusAutopilot {
         workerId: state.run.queenWorkerId,
         type: 'plan',
         level: 'info',
-        message: `Workspace Autopilot v${working.version}: ${Object.keys(taskIds).length} tarefa(s) aplicada(s)${cortexGranted ? `, ${cortexGranted} conexão(ões) ao Cortex` : ''}${started ? ' e execução iniciada' : ''}.`,
+        message: `Workspace Autopilot v${working.version}: ${Object.keys(taskIds).length} tarefa(s) aplicada(s)${cortexGranted ? `, ${cortexGranted} conexão(ões) ao Nectar` : ''}${started ? ' e execução iniciada' : ''}.`,
         data: { planId, version: working.version, source: 'nexus-autopilot' },
       };
       this.options.repos.appendEvent(event);

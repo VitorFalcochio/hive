@@ -13,7 +13,7 @@ Planeje missões, coordene agentes e revise cada entrega em um workspace desktop
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178c6?style=flat-square&logo=typescript&logoColor=white)
 ![Electron](https://img.shields.io/badge/Electron-desktop-47848f?style=flat-square&logo=electron&logoColor=white)
 
-[Nexus](#nexus-a-missão-ao-vivo) · [Cortex](#cortex-memória-compartilhada) · [Recursos](#recursos) · [Como funciona](#como-funciona) · [Começar](#começar) · [Contribuir](#contribuir)
+[Nexus](#nexus-a-missão-ao-vivo) · [Nectar](#nectar-inteligência-compartilhada) · [Recursos](#recursos) · [Como funciona](#como-funciona) · [Começar](#começar) · [Contribuir](#contribuir)
 
 </div>
 
@@ -29,11 +29,11 @@ Você acompanha a execução, abre o código, roda o projeto e revisa os diffs a
 
 O **Nexus** é a janela onde a missão acontece. A Queen monta a equipe, cada agente ganha uma janela própria e as tarefas aparecem ligadas por dependência, mudando de estado em tempo real.
 
-<img src="docs/assets/screenshots/nexus-workspace.png" width="100%" alt="Nexus em modo Workspace: a Queen coordenando as janelas dos agentes, as tarefas com suas dependências e o bloco Cortex conectado aos agentes" />
+<img src="docs/assets/screenshots/nexus-workspace.png" width="100%" alt="Nexus em modo Workspace: a Queen coordenando as janelas dos agentes, as tarefas com suas dependências e o bloco Nectar conectado aos agentes" />
 
 - **Três visualizações:** **Workspace** (janelas dos agentes com as tarefas embaixo), **Agentes** (raias por agente) e **Fluxo** (só as tarefas, em colunas de dependência).
 - **Edição direta no canvas:** arraste de uma tarefa para outra para criar uma dependência, ou de um agente para uma tarefa para delegá-la. O motor valida cada linha e recusa ciclos e tarefas já iniciadas.
-- **Blocos:** notas, grupos e o **Cortex** são arrastados do menu **Blocos** para o canvas.
+- **Blocos:** notas, grupos e o **Nectar** são arrastados do menu **Blocos** para o canvas.
 - **Nexus Autopilot:** descreva um objetivo e a Queen propõe um fluxo de agentes e tarefas, com prévia, edição e aprovação antes de criar qualquer coisa.
 - **Command Palette** (`Ctrl + Espaço`): crie, encontre e navegue sem tirar as mãos do teclado.
 
@@ -43,20 +43,20 @@ Cada janela mostra o que o agente está fazendo, passo a passo: arquivos lidos e
 
 Na visualização **Agentes**, cada integrante da equipe ganha uma raia com as suas tarefas. O **Resultado Vivo** reúne o andamento real da missão (tarefas concluídas, arquivos alterados e evidências de testes) a partir dos registros do motor, sem estimativas.
 
-<img src="docs/assets/screenshots/nexus-raias.png" width="100%" alt="Visualização Agentes do Nexus: raias por agente, dependências entre tarefas, Resultado Vivo e o bloco Cortex" />
+<img src="docs/assets/screenshots/nexus-raias.png" width="100%" alt="Visualização Agentes do Nexus: raias por agente, dependências entre tarefas, Resultado Vivo e o bloco Nectar" />
 
-## Cortex: memória compartilhada
+## Nectar: inteligência compartilhada
 
-O **Cortex** é o bloco de memória do Nexus: um cérebro compartilhado e persistente, por projeto, que acumula decisões, contratos de API, convenções e descobertas ao longo das missões.
+O **Nectar** é a inteligência compartilhada do Hive. Como as abelhas que levam o néctar de muitas flores para a colmeia, cada agente contribui com o que aprende, e o que você aprova vira memória persistente do projeto: decisões, contratos de API, convenções e descobertas que os outros agentes consultam nas próximas missões. Os agentes trabalham individualmente, mas aprendem coletivamente.
 
 - **Acesso por conexão:** só os agentes ligados ao bloco por uma linha no canvas usam a memória, cada um com as suas permissões (Read, Propose, Approve e Manage).
-- **Aprovação humana:** o que um agente propõe fica pendente até você aprovar no **Cortex Inspector**. Propostas nunca viram fato sozinhas.
+- **Aprovação humana:** o que um agente propõe fica pendente até você aprovar no **Nectar Inspector**. Propostas nunca viram fato sozinhas.
 - **Contexto na medida:** antes de cada tarefa, o agente recebe só as memórias relevantes para ela, escolhidas por busca semântica e dentro de um orçamento de tokens.
 - **Histórico de decisões:** uma decisão alterada vira uma decisão nova, e a anterior fica registrada como substituída.
 - **Avisos de mudança:** quem depende de uma memória alterada é avisado no início da próxima tarefa, sem interromper nada.
 - **Seguro e local:** as memórias ficam no SQLite do Hive, separadas por projeto e tratadas como dados, nunca como instruções.
 
-Detalhes em [CORTEX.md](CORTEX.md).
+Detalhes em [NECTAR.md](NECTAR.md).
 
 ## Recursos
 
@@ -64,7 +64,7 @@ Detalhes em [CORTEX.md](CORTEX.md).
 | :------------------------ | :--------------------------------------------------------------------------------------------------------------------------- |
 | 🐝 **Equipe de agentes**  | Configurar Queen, arquitetura, frontend, backend, QA, revisão e papéis personalizados, com modelos e ferramentas por agente. |
 | 🕸️ **Nexus**              | Acompanhar a missão ao vivo, com uma janela por agente, e editar dependências e delegações direto no canvas.                 |
-| 🧠 **Cortex**             | Compartilhar memória persistente entre os agentes conectados, com aprovação humana e busca semântica.                        |
+| 🍯 **Nectar**             | Compartilhar memória persistente entre os agentes conectados, com aprovação humana e busca semântica.                        |
 | 🧭 **Planejamento**       | Gerar planos com tarefas, dependências e critérios de aceitação; executar tarefas independentes em paralelo.                 |
 | ✨ **Nexus Autopilot**    | Transformar um objetivo em um fluxo visual de agentes e tarefas, revisável antes de aplicar.                                 |
 | 🔀 **Troca automática**   | Seguir em outro modelo ou provedor na hora em que um modelo esgota, e voltar ao principal quando ele libera.                 |
@@ -81,7 +81,7 @@ Detalhes em [CORTEX.md](CORTEX.md).
 
 ![Fluxo de funcionamento do Hive: missão, planejamento pela Queen, execução dos agentes e revisão das entregas](design/fluxo.png)
 
-O scheduler respeita a ordem de dependência e o limite de tarefas simultâneas. O runtime nativo permite aos agentes ler, buscar e editar arquivos, consultar recursos de skills e o Cortex, e executar comandos conforme a política de aprovação.
+O scheduler respeita a ordem de dependência e o limite de tarefas simultâneas. O runtime nativo permite aos agentes ler, buscar e editar arquivos, consultar recursos de skills e o Nectar, e executar comandos conforme a política de aprovação.
 
 No **Modo Turno**, a fila avança sem aguardar aprovação manual do plano. As permissões de comandos dependem das configurações globais e da lista do turno. As entregas ficam disponíveis para revisão, sem aplicação automática no projeto.
 
@@ -153,7 +153,7 @@ O Hive instalado procura versões novas no GitHub Releases do repositório defin
 
 ### Backup
 
-Em **Configurações → Backup** você faz, exporta e restaura backups. Cada backup é um único arquivo `.hive-backup` com missões, agentes, provedores, configurações, memórias do Cortex e skills. Por padrão, o Hive faz um backup automático por dia e guarda os 7 mais recentes. Restaurar reinicia o app e guarda antes uma cópia dos dados atuais. As chaves de API só funcionam no mesmo usuário do Windows em que o backup foi feito.
+Em **Configurações → Backup** você faz, exporta e restaura backups. Cada backup é um único arquivo `.hive-backup` com missões, agentes, provedores, configurações, memórias do Nectar e skills. Por padrão, o Hive faz um backup automático por dia e guarda os 7 mais recentes. Restaurar reinicia o app e guarda antes uma cópia dos dados atuais. As chaves de API só funcionam no mesmo usuário do Windows em que o backup foi feito.
 
 ## Equipe e provedores de IA
 
@@ -208,7 +208,7 @@ Os scripts mantêm os dados e caches em `.local/`, na unidade do projeto.
 ```text
 .local/
 ├── data/
-│   ├── hive.sqlite     # Repositórios, agentes, provedores, planos, memórias do Cortex e configurações
+│   ├── hive.sqlite     # Repositórios, agentes, provedores, planos, memórias do Nectar e configurações
 │   └── worktrees/      # Áreas de trabalho das tarefas
 ├── electron-cache/
 ├── npm-cache/
@@ -232,7 +232,7 @@ Monorepo em **TypeScript**, gerenciado com **pnpm workspaces**.
 
 ```text
 apps/
-└── desktop/           # Electron, preload e interface React (inclui o Nexus e o Cortex)
+└── desktop/           # Electron, preload e interface React (inclui o Nexus e o Nectar)
 packages/
 ├── agents/            # Runtime nativo e ferramentas dos agentes
 ├── core/              # Domínio, schemas, políticas e presets
@@ -251,7 +251,7 @@ A interface usa **React 19**, **Tailwind CSS 4**, **Monaco Editor**, **xterm.js*
 
 | Documento                                | Assunto                                                         |
 | :--------------------------------------- | :-------------------------------------------------------------- |
-| [CORTEX.md](CORTEX.md)                   | Memória compartilhada: permissões, aprovação, busca e segurança |
+| [NECTAR.md](NECTAR.md)                   | Memória compartilhada: permissões, aprovação, busca e segurança |
 | [NEXUS-AUTOPILOT.md](NEXUS-AUTOPILOT.md) | Fluxos criados pela Queen a partir de um objetivo               |
 | [RESULTADO-VIVO.md](RESULTADO-VIVO.md)   | Relatório da missão gerado a partir dos registros do motor      |
 | [COMMAND-PALETTE.md](COMMAND-PALETTE.md) | Comandos e atalhos do Nexus                                     |

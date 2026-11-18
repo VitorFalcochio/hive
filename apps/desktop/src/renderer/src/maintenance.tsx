@@ -46,7 +46,7 @@ export function BackupSection({
   return (
     <Section
       title="Backup"
-      description="Uma cópia de missões, agentes, provedores, configurações, memórias do Cortex e skills. Use para voltar atrás ou levar o Hive para outro computador."
+      description="Uma cópia de missões, agentes, provedores, configurações, memórias do Nectar e skills. Use para voltar atrás ou levar o Hive para outro computador."
     >
       <label className="settings-check">
         <input

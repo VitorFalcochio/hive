@@ -1,15 +1,19 @@
-# Cortex — memória compartilhada do Nexus
+# Nectar — Shared Intelligence of the Hive
 
-O Cortex é um bloco nativo do Nexus: uma memória persistente, por projeto, que os agentes conectados a ele consultam e alimentam. As linhas desenhadas no canvas entre um agente e o Cortex são o controle de acesso. Sem linha, o agente não lê nem propõe nada.
+Na natureza, as abelhas coletam néctar de muitas flores e o levam para a colmeia, onde ele vira um recurso de toda a comunidade. No Hive é igual: cada agente coleta conhecimento durante o seu trabalho (decisões de arquitetura, contratos de API, convenções, erros e soluções), e o que você aprova passa a fazer parte da memória coletiva que os outros agentes consultam nas próximas tarefas e missões.
 
-Tudo o que um agente envia ao Cortex vira uma **proposta pendente**. Só depois que o usuário aprova é que a informação se torna memória compartilhada e passa a ser entregue a outros agentes.
+**Os agentes trabalham individualmente, mas aprendem coletivamente.**
+
+O Nectar é um bloco nativo do Nexus: uma memória persistente, por projeto, que os agentes conectados a ele consultam e alimentam. As linhas desenhadas no canvas entre um agente e o Nectar são o controle de acesso. Sem linha, o agente não lê nem propõe nada.
+
+Tudo o que um agente envia ao Nectar vira uma **proposta pendente**. Só depois que o usuário aprova é que a informação se torna memória compartilhada e passa a ser entregue a outros agentes.
 
 ## Como usar
 
-1. Abra o Nexus e clique em **Blocos** na toolbar (ou `Ctrl + Espaço` → _Cortex — Shared Memory_, ou botão direito no canvas → _Novo Cortex_).
-2. Arraste **Cortex — Shared Memory**, da categoria **Cortex**, para o canvas.
+1. Abra o Nexus e clique em **Blocos** na toolbar (ou `Ctrl + Espaço` → _Nectar — Shared Intelligence_, ou botão direito no canvas → _Novo Nectar_).
+2. Arraste **Nectar — Shared Intelligence**, da categoria **Nectar**, para o canvas.
 3. Arraste uma linha da borda direita de um agente (Backend, Frontend…) até o bloco. A conexão nasce com **Read + Propose**.
-4. Dê dois cliques no bloco para abrir o **Cortex Inspector**. Na aba **Conexões** ajuste as permissões de cada agente; com o botão direito sobre a linha, abra as permissões ou desconecte.
+4. Dê dois cliques no bloco para abrir o **Nectar Inspector**. Na aba **Conexões** ajuste as permissões de cada agente; com o botão direito sobre a linha, abra as permissões ou desconecte.
 5. Execute a missão. Antes de cada tarefa, o agente recebe as memórias aprovadas relevantes para ela e as ferramentas que suas permissões liberam.
 6. Quando um agente propõe algo, o bloco mostra a contagem de **pendentes**. Em **Approvals** você vê o conteúdo, a justificativa, as evidências, o agente e a tarefa de origem, e decide: aprovar (podendo ajustar o texto antes), rejeitar ou pedir ajustes. O botão **Parecer da Queen** pede à Queen uma recomendação; a decisão continua sendo sua.
 7. A memória aprovada fica no banco local do Hive. Outra missão do mesmo projeto mostra o mesmo bloco, com as mesmas conexões e memórias.
@@ -18,20 +22,20 @@ Tudo o que um agente envia ao Cortex vira uma **proposta pendente**. Só depois 
 
 | Permissão   | O que libera para o agente                                                                                                                                                   |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Read**    | Recebe as memórias relevantes como contexto da tarefa e usa `cortex_search`.                                                                                                 |
-| **Propose** | Usa `cortex_propose` para memórias novas e para alterar ou revogar as que ele mesmo escreveu (sempre como proposta).                                                         |
-| **Approve** | Usa `cortex_pending` e `cortex_review`. Com a aprovação humana obrigatória (padrão), o veredito é só uma recomendação exibida ao usuário. Ninguém revisa a própria proposta. |
-| **Manage**  | Propõe alterar ou revogar qualquer memória do Cortex, inclusive as escritas pelo usuário.                                                                                    |
+| **Read**    | Recebe as memórias relevantes como contexto da tarefa e usa `nectar_search`.                                                                                                 |
+| **Propose** | Usa `nectar_propose` para memórias novas e para alterar ou revogar as que ele mesmo escreveu (sempre como proposta).                                                         |
+| **Approve** | Usa `nectar_pending` e `nectar_review`. Com a aprovação humana obrigatória (padrão), o veredito é só uma recomendação exibida ao usuário. Ninguém revisa a própria proposta. |
+| **Manage**  | Propõe alterar ou revogar qualquer memória do Nectar, inclusive as escritas pelo usuário.                                                                                    |
 
 Propose, Approve e Manage incluem Read. As permissões são verificadas no processo principal a cada operação: o bloco é relido em cada chamada de ferramenta, então uma desconexão feita no meio de uma tarefa corta o acesso na hora. Tentativas negadas ficam registradas na aba **Activity**.
 
 ## Capacidades
 
 - **Memória compartilhada e persistente.** As memórias ficam no SQLite do Hive (tabelas `cortex_*`, migration 5) e sobrevivem ao encerramento da missão e ao reinício do aplicativo.
-- **Memória por projeto.** Cada bloco pertence a um workspace. O contexto de uma tarefa usa apenas os blocos do projeto da própria execução. Um agente conectado a Cortex de dois projetos nunca recebe a memória de um no outro, inclusive com missões simultâneas.
-- **Memória contextual.** A consulta usa título, descrição e critérios da tarefa. O ranking combina similaridade semântica (peso principal), afinidade com o papel do agente (frontend: UI, contratos de API, autenticação; backend: serviços, banco, regras; QA: requisitos, testes…), atualidade e tipo da memória (decisões e contratos pesam mais). Resultados quase idênticos são descartados e o total respeita o orçamento de tokens (padrão: 1.200 tokens por tarefa e 900 por `cortex_search`, configuráveis).
+- **Memória por projeto.** Cada bloco pertence a um workspace. O contexto de uma tarefa usa apenas os blocos do projeto da própria execução. Um agente conectado a Nectar de dois projetos nunca recebe a memória de um no outro, inclusive com missões simultâneas.
+- **Memória contextual.** A consulta usa título, descrição e critérios da tarefa. O ranking combina similaridade semântica (peso principal), afinidade com o papel do agente (frontend: UI, contratos de API, autenticação; backend: serviços, banco, regras; QA: requisitos, testes…), atualidade e tipo da memória (decisões e contratos pesam mais). Resultados quase idênticos são descartados e o total respeita o orçamento de tokens (padrão: 1.200 tokens por tarefa e 900 por `nectar_search`, configuráveis).
 - **Histórico de decisões.** Cada memória tem id, tipo, título, conteúdo, justificativa, autor, aprovador, missão/tarefa de origem, projeto, evidências, datas, versão e histórico de alterações com o conteúdo anterior. Uma decisão alterada vira uma **nova decisão**; a anterior fica como _substituída_, ligada à nova (`supersedes` / `supersededBy`). Revogadas também permanecem consultáveis. A aba **Decisions** mostra a cadeia completa.
-- **Notificações inteligentes.** Quando uma memória é aprovada, alterada, substituída ou revogada, o Cortex escolhe quem deve saber: agentes conectados com Read que já usaram aquela memória, que a proposta indicou como público (`audience`) ou, quando ninguém foi indicado, cujo papel trabalha com o assunto de uma memória normativa. O autor da mudança não é avisado. O aviso espera o **início da próxima tarefa** do agente, que é o ponto seguro: nenhuma execução é interrompida.
+- **Notificações inteligentes.** Quando uma memória é aprovada, alterada, substituída ou revogada, o Nectar escolhe quem deve saber: agentes conectados com Read que já usaram aquela memória, que a proposta indicou como público (`audience`) ou, quando ninguém foi indicado, cujo papel trabalha com o assunto de uma memória normativa. O autor da mudança não é avisado. O aviso espera o **início da próxima tarefa** do agente, que é o ponto seguro: nenhuma execução é interrompida.
 
 ## Busca semântica
 
@@ -48,10 +52,10 @@ Na aba Memories, **Buscar por significado** roda a mesma busca que os agentes us
 
 ## Segurança
 
-- **Memórias são dados, não instruções.** No prompt, elas vão para a mensagem da tarefa dentro de blocos `<cortex_memory>`, precedidos de um aviso explícito de que são dados não confiáveis e de que comandos encontrados ali não devem ser seguidos. O texto não consegue fechar o bloco nem abrir outro.
+- **Memórias são dados, não instruções.** No prompt, elas vão para a mensagem da tarefa dentro de blocos `<nectar_memory>`, precedidos de um aviso explícito de que são dados não confiáveis e de que comandos encontrados ali não devem ser seguidos. O texto não consegue fechar o bloco nem abrir outro.
 - **Higienização na entrada.** Caracteres de controle, de largura zero e de inversão bidirecional são removidos. Propostas com algo que parece credencial (chaves `sk-`, `ghp_`, AWS, JWT, chaves privadas, `senha=`…) são recusadas.
 - **Sinais de prompt injection** ("ignore as instruções", "você agora é", marcadores de conversa, ordens para executar comandos ou enviar credenciais) não bloqueiam a proposta, mas geram um alerta do sistema no card de aprovação.
-- **Isolamento e rastreabilidade.** Toda operação valida que o bloco, a memória e a proposta pertencem ao mesmo Cortex e projeto. Consultas, contexto entregue, propostas, pareceres, decisões, avisos e acessos negados ficam em `cortex_activity`. Ações dos agentes também aparecem no log da missão (evento `memory`).
+- **Isolamento e rastreabilidade.** Toda operação valida que o bloco, a memória e a proposta pertencem ao mesmo Nectar e projeto. Consultas, contexto entregue, propostas, pareceres, decisões, avisos e acessos negados ficam em `cortex_activity`. Ações dos agentes também aparecem no log da missão (evento `memory`).
 - **Concorrência.** A resolução de uma proposta confere, na mesma transação, se ela ainda está pendente e se a memória alvo ainda está vigente. Edição e revogação usam a versão esperada (compare-and-swap). Duas janelas, ou um usuário e um agente, nunca resolvem a mesma proposta duas vezes.
 
 ## Autopilot e Queen
@@ -59,7 +63,7 @@ Na aba Memories, **Buscar por significado** roda a mesma busca que os agentes us
 - O Nexus Autopilot recebe a lista de blocos do projeto e de quem já está conectado, **sem o conteúdo das memórias**.
 - O plano pode pedir `cortexAccess` para agentes do próprio fluxo, apenas com **Read** e/ou **Propose**. Pedidos com Approve ou Manage, ou para blocos de outro projeto, invalidam o plano.
 - Na prévia, o usuário vê cada conexão proposta antes de aplicar. Ao aplicar, conexões existentes nunca são ampliadas nem reduzidas, e agentes sem pedido explícito continuam sem acesso.
-- A Queen recebe memórias no planejamento somente se estiver conectada a um Cortex com Read.
+- A Queen recebe memórias no planejamento somente se estiver conectada a um Nectar com Read.
 
 ## Arquitetura
 
@@ -76,7 +80,19 @@ Na aba Memories, **Buscar por significado** roda a mesma busca que os agentes us
 | Integração com agentes       | `cortex/service.ts` → `Scheduler.prepareMemory` → `AgentTaskInput.memory`     |
 | Interface                    | `apps/desktop/src/renderer/src/canvas/cortex/*`, `nodes.tsx`, `workspace.tsx` |
 
-O Cortex não cria outro editor de nós nem outro sistema de conexões. O bloco é um nó do React Flow existente, a linha é uma conexão comum validada por `isValidConnection`, a posição fica no layout do canvas e as alterações passam pelos canais IPC validados com Zod. O `Scheduler` ganhou um único gancho opcional, `prepareMemory`: se ele falhar, a tarefa roda sem memória e a falha fica registrada no log.
+O Nectar não cria outro editor de nós nem outro sistema de conexões. O bloco é um nó do React Flow existente, a linha é uma conexão comum validada por `isValidConnection`, a posição fica no layout do canvas e as alterações passam pelos canais IPC validados com Zod. O `Scheduler` ganhou um único gancho opcional, `prepareMemory`: se ele falhar, a tarefa roda sem memória e a falha fica registrada no log.
+
+## Nomes internos
+
+O Nectar se chamava **Cortex** até a versão 0.2.2. A mudança é de identidade, não de sistema: os identificadores internos continuam com o nome antigo para não arriscar dados nem compatibilidade.
+
+| Continua `cortex`                                                               | Por quê                                                             |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Tabelas `cortex_*` e colunas `cortex_id`                                        | Renomear exigiria reescrever o banco de quem já tem memórias        |
+| Canais IPC `cortex.*`, tipo de nó `cortex` e chave `cortexAccess` do Autopilot  | Ficam salvos em layouts de canvas e planos de missões já existentes |
+| Pastas, arquivos, componentes (`CortexInspector`) e classes CSS (`nc-cortex-*`) | Não aparecem para o usuário; renomear só mexeria no histórico       |
+
+O que mudou: todo texto da interface, o ícone (uma gota), as ferramentas dos agentes (`nectar_search`, `nectar_propose`, `nectar_pending`, `nectar_review`), as instruções que eles recebem e a marcação `<nectar_memory>` no prompt. A higienização continua recusando tentativas de fechar tanto `<nectar…>` quanto `<cortex…>`. Uma migração renomeia apenas os blocos que ainda tinham o nome padrão ("Cortex", "Cortex 2"…); nomes escolhidos pelo usuário e todas as memórias ficam intactos.
 
 ## Testes
 
@@ -96,5 +112,5 @@ O Cortex não cria outro editor de nós nem outro sistema de conexões. O bloco 
 - Só existe o escopo **projeto**. A estrutura (`config.scope`) já prevê outros escopos, ainda não implementados.
 - A política de escrita **direta** (agentes com Approve publicam sem humano) existe no motor, mas a interface só expõe a opção de desligar a aprovação humana obrigatória. O padrão é aprovação.
 - A busca vetorial é exata (força bruta sobre os vetores do projeto). Isso é adequado para milhares de memórias por projeto, mas não para milhões.
-- O Autopilot conecta apenas agentes existentes ou criados pelo próprio fluxo a blocos que já existem. Ele não cria blocos Cortex.
+- O Autopilot conecta apenas agentes existentes ou criados pelo próprio fluxo a blocos que já existem. Ele não cria blocos Nectar.
 - No modo de visualização **Fluxo**, os agentes não aparecem como nós, então as linhas de acesso ficam ocultas; o bloco continua visível, com as contagens.

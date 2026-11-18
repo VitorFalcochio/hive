@@ -30,7 +30,7 @@ interface ActivityRow {
 }
 
 /**
- * Storage of the Cortex: blocks, memories, proposals, change notices, the activity log and the
+ * Storage of the Nectar: blocks, memories, proposals, change notices, the activity log and the
  * vector index. Every read is validated again; vectors are stored per embedding model, so a
  * change of model never compares vectors of different spaces.
  */

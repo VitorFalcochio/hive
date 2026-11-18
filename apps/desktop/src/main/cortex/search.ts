@@ -87,7 +87,7 @@ export async function vectorsFor(
   return vectors;
 }
 
-/** Word overlap, for a Cortex with semantic search turned off. */
+/** Word overlap, for a Nectar with semantic search turned off. */
 function keywordSimilarity(query: string, memory: CortexMemory): number {
   const wanted = new Set(normalizeWords(query).map(stem));
   if (!wanted.size) return 0;

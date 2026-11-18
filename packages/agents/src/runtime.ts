@@ -8,14 +8,14 @@ import type {
 import type { ChatClient, ToolDefinition } from '@hive/providers';
 import type { ResolvedSkill } from '@hive/skills';
 
-/** A tool the caller runs itself, e.g. the Cortex search; its output goes back to the model. */
+/** A tool the caller runs itself, e.g. the Nectar search; its output goes back to the model. */
 export interface AgentExtraTool {
   definition: ToolDefinition;
   run: (args: Record<string, unknown>) => Promise<string>;
 }
 
 /**
- * Shared memory for this task, from the Cortex blocks the agent is connected to. `context` is
+ * Shared memory for this task, from the Nectar blocks the agent is connected to. `context` is
  * data already framed as untrusted; `guidance` is Hive's own text about how to use the tools.
  */
 export interface AgentMemory {

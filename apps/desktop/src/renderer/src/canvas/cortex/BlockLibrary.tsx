@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react';
 import {
   Bell,
-  BrainCircuit,
+  Droplet,
   CalendarClock,
   FlaskConical,
   Stamp,
@@ -120,13 +120,13 @@ const categories: {
     ],
   },
   {
-    title: 'Cortex',
+    title: 'Nectar',
     blocks: [
       {
         kind: 'cortex',
-        title: 'Cortex — Shared Memory',
+        title: 'Nectar — Shared Intelligence',
         description: 'Memória persistente do projeto. Conecte agentes para dar acesso.',
-        icon: BrainCircuit,
+        icon: Droplet,
       },
     ],
   },

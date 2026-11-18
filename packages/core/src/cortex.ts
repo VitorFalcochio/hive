@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { workerRoleSchema } from './domain';
 
 /**
- * Cortex: shared, persistent memory for the agents connected to it on the Nexus. A Cortex
+ * Nectar: shared, persistent memory for the agents connected to it on the Nexus. A Nectar
  * belongs to one project (workspace); its memories never cross to another project. What an agent
  * may do with it comes only from its connection: no connection, no access.
  *
@@ -24,7 +24,7 @@ export const cortexPermissionsSchema = z
     propose: z.boolean(),
     /** Review proposals: a recommendation while human approval is required, a decision otherwise. */
     approve: z.boolean(),
-    /** Propose changes to, or revocation of, any memory of this Cortex. */
+    /** Propose changes to, or revocation of, any memory of this Nectar. */
     manage: z.boolean(),
   })
   .strict();
@@ -73,7 +73,7 @@ export const cortexConfigSchema = z
     deduplication: z.boolean(),
     /** Most tokens of memory placed in one task's prompt. */
     taskTokenBudget: z.number().int().min(100).max(8_000),
-    /** Most tokens one `cortex_search` call returns to an agent. */
+    /** Most tokens one `nectar_search` call returns to an agent. */
     queryTokenBudget: z.number().int().min(100).max(4_000),
     maxResults: z.number().int().min(1).max(20),
     embedding: cortexEmbeddingConfigSchema,

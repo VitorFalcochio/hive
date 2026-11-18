@@ -902,7 +902,7 @@ export const ipcContract = {
     }),
   ),
 
-  /** Cortex blocks of the run's project, with what the Nexus block shows. */
+  /** Nectar blocks of the run's project, with what the Nexus block shows. */
   'cortex.list': channel<CortexOverview[]>()(id),
   'cortex.create': channel<CortexOverview>()(cortexCreateSchema),
   'cortex.update': channel<CortexOverview>()(cortexUpdateSchema),

@@ -439,7 +439,7 @@ export function Workspace({
       buildGraph(snapshot, {
         grouping,
         collapsed,
-        // An agent with access to a Cortex stays on the canvas, so its line is visible.
+        // An agent with access to a Nectar stays on the canvas, so its line is visible.
         extraAgents: [
           ...new Set([...layout.agents, ...cortexGraph.flatMap((block) => block.workers)]),
         ],
@@ -790,7 +790,7 @@ export function Workspace({
 
   /**
    * Only lines with a meaning the engine knows: task → task (dependency), agent → task
-   * (delegation), agent → Cortex (access to shared memory).
+   * (delegation), agent → Nectar (access to shared memory).
    */
   const validConnection = useCallback(
     (connection: FlowConnection | Edge) => {
@@ -935,7 +935,7 @@ export function Workspace({
     },
     [layoutApi],
   );
-  /** A Cortex block of the project, placed where it was dropped (or in view). */
+  /** A Nectar block of the project, placed where it was dropped (or in view). */
   const addCortex = useCallback(
     (at: { x: number; y: number }) =>
       void act(async () => {
@@ -944,7 +944,7 @@ export function Workspace({
           [`cortex:${created.node.id}`]: { x: Math.round(at.x), y: Math.round(at.y) },
         });
         await cortexState.reload();
-      }, 'Cortex criado. Arraste de um agente até ele para dar acesso à memória.'),
+      }, 'Nectar criado. Arraste de um agente até ele para dar acesso à memória.'),
     [act, runId, layoutApi, grouping, cortexState],
   );
   const addMeter = useCallback(
@@ -1124,7 +1124,7 @@ export function Workspace({
   const paneItems = (at: { x: number; y: number }): (MenuItem | 'separator')[] => [
     { label: 'Nova nota', hint: 'N', run: () => addNote(at) },
     { label: 'Novo grupo', run: () => addFrame(at) },
-    { label: 'Novo Cortex — Shared Memory', run: () => addCortex(at) },
+    { label: 'Novo Nectar — Shared Intelligence', run: () => addCortex(at) },
     { label: 'Agrupar seleção', hint: 'Ctrl+G', run: groupSelection },
     'separator',
     {
@@ -1252,7 +1252,7 @@ export function Workspace({
         title: block.node.name,
         items: [
           {
-            label: 'Abrir Cortex Inspector',
+            label: 'Abrir Nectar Inspector',
             hint: '2× clique',
             run: () => setCortexOpen({ id: ref }),
           },
@@ -1277,7 +1277,7 @@ export function Workspace({
               )
                 void act(
                   () => window.hive.invoke('cortex.delete', { cortexId: ref, purge: false }),
-                  'Cortex removido.',
+                  'Nectar removido.',
                 );
             },
           },
@@ -1399,7 +1399,7 @@ export function Workspace({
           run: () =>
             void act(
               () => window.hive.invoke('cortex.disconnect', { cortexId, workerId }),
-              `${worker?.name ?? 'Agente'} perdeu o acesso ao Cortex.`,
+              `${worker?.name ?? 'Agente'} perdeu o acesso ao Nectar.`,
             ),
         },
       ];
@@ -1647,11 +1647,11 @@ export function Workspace({
       registry.register({
         id: `entity:cortex:${block.node.id}`,
         title: block.node.name,
-        description: `Cortex · ${block.memories.active} memórias · ${block.pendingApprovals} pendentes`,
-        category: 'Cortex',
+        description: `Nectar · ${block.memories.active} memórias · ${block.pendingApprovals} pendentes`,
+        category: 'Nectar',
         icon: 'cortex',
         entity: 'block',
-        keywords: ['cortex', 'memória', 'memory', 'aprovações', block.node.id],
+        keywords: ['nectar', 'néctar', 'cortex', 'memória', 'memory', 'aprovações', block.node.id],
         availability: () => true,
         execute: () => setCortexOpen({ id: block.node.id }),
       });
@@ -1853,7 +1853,7 @@ export function Workspace({
             )}
             {cortexState.error && (
               <div className="nc-banner subtle" role="status">
-                Cortex: {cortexState.error}
+                Nectar: {cortexState.error}
                 <button className="ghost" onClick={() => void cortexState.reload()}>
                   Tentar novamente
                 </button>
@@ -2054,7 +2054,7 @@ function Legend() {
           </div>
           <div>
             <dt className="line memory" />
-            <dd>Acesso ao Cortex: arraste de um agente para o bloco</dd>
+            <dd>Acesso ao Nectar: arraste de um agente para o bloco</dd>
           </div>
           <div className="keys">
             <dt>

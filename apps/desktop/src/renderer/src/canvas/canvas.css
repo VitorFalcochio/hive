@@ -3220,7 +3220,7 @@ button.nc-cortex-open:hover {
 }
 
 /* ---------------------------------------------------------------- Provider block */
-/* Same build as the Cortex block, in honey: a wax-gold edge and a faint honeycomb behind the
+/* Same build as the Nectar block, in honey: a wax-gold edge and a faint honeycomb behind the
    header. */
 .nc-provider {
   --tone: var(--warning);

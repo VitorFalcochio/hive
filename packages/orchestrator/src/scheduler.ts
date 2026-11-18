@@ -71,7 +71,7 @@ export interface SchedulerOptions {
     notify: (message: string, data: Record<string, unknown>) => void,
   ) => ChatClient;
   /**
-   * Shared memory (the Cortex) for a task about to start: the safe point where context and change
+   * Shared memory (the Nectar) for a task about to start: the safe point where context and change
    * notices are handed over. A failure here is logged and the task runs without memory.
    */
   prepareMemory?: (context: {
@@ -788,7 +788,7 @@ export class Scheduler {
             worker.id,
             'memory',
             'warn',
-            `Cortex indisponível para esta tarefa; seguindo sem memória compartilhada: ${errorMessage(error)}`,
+            `Nectar indisponível para esta tarefa; seguindo sem memória compartilhada: ${errorMessage(error)}`,
           );
         }
       checkCancelled();

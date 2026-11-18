@@ -36,7 +36,7 @@ export const nexusAutopilotTaskSchema = planTaskSchema
 export type NexusAutopilotTask = z.infer<typeof nexusAutopilotTaskSchema>;
 
 /**
- * Access to an existing Cortex block for an agent of the flow. Only Read and Propose: Approve and
+ * Access to an existing Nectar block for an agent of the flow. Only Read and Propose: Approve and
  * Manage are given by the user on the canvas. Existing connections are never changed.
  */
 export const nexusAutopilotCortexAccessSchema = z
@@ -96,7 +96,7 @@ function refineFlow(draft: FlowShape, context: z.RefinementCtx): void {
       context.addIssue({
         code: 'custom',
         path: ['cortexAccess', index, 'agentKey'],
-        message: `Agente desconhecido no acesso ao Cortex: ${access.agentKey}.`,
+        message: `Agente desconhecido no acesso ao Nectar: ${access.agentKey}.`,
       });
   const byKey = new Map(draft.tasks.map((task) => [task.key, task]));
   const visiting = new Set<string>();

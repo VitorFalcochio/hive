@@ -218,7 +218,7 @@ export interface GraphOptions {
   extraAgents?: readonly string[];
   /** Size of an agent's window in the workspace view; null when it is shown as a card. */
   windowSize?: (workerId: string) => { width: number; height: number } | null;
-  /** Cortex blocks of the project, with the agents connected to each. */
+  /** Nectar blocks of the project, with the agents connected to each. */
   cortex?: readonly { id: string; workers: readonly string[] }[];
 }
 

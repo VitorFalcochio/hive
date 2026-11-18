@@ -90,7 +90,7 @@ export function planNotifications(
       cortexId: node.id,
       workspaceId: node.workspaceId,
       type: 'notified',
-      actor: { kind: 'system', workerId: null, name: 'Cortex' },
+      actor: { kind: 'system', workerId: null, name: 'Nectar' },
       runId: null,
       taskId: null,
       message: `${changeLabels[change.change]}: “${memory.title}”. Aviso para ${notices.map((notice) => workers.get(notice.workerId)?.name ?? notice.workerId).join(', ')} na próxima tarefa.`,

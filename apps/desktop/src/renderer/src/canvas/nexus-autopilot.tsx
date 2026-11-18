@@ -458,7 +458,7 @@ export function NexusAutopilot({
                   <li>Criar {plan.draft.tasks.length} tarefa(s) pelo motor real</li>
                   {(plan.draft.cortexAccess ?? []).map((access) => (
                     <li key={`${access.cortexId}:${access.agentKey}`}>
-                      Conectar {access.agentKey} ao Cortex ({access.permissions.join(' + ')}) —
+                      Conectar {access.agentKey} ao Nectar ({access.permissions.join(' + ')}) —
                       conexões existentes não mudam
                     </li>
                   ))}

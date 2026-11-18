@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
-  BrainCircuit,
+  Droplet,
   Gauge,
   Plug,
   CheckSquare,
@@ -46,7 +46,7 @@ const icons: Record<CommandIcon, ComponentType<{ size?: number }>> = {
   play: Play,
   queen: Bot,
   pin: MapPin,
-  cortex: BrainCircuit,
+  cortex: Droplet,
   tokens: Gauge,
   provider: Plug,
   terminal: SquareTerminal,

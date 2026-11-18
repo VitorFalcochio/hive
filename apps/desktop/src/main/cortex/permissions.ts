@@ -8,7 +8,7 @@ import type {
 import { HiveError } from '@hive/shared';
 
 /**
- * Access to a Cortex comes only from a connection drawn on the Nexus (or applied from an
+ * Access to a Nectar comes only from a connection drawn on the Nexus (or applied from an
  * Autopilot flow the user approved). These checks run in the main process for every agent
  * operation; the renderer never decides who may read or write.
  */
@@ -28,7 +28,7 @@ export function can(node: CortexNode, workerId: string, permission: CortexPermis
   return !!connectionOf(node, workerId)?.permissions[permission];
 }
 
-/** The Cortex blocks of the run's project that grant this agent a permission. */
+/** The Nectar blocks of the run's project that grant this agent a permission. */
 export function grantingNodes(
   nodes: CortexNode[],
   run: Pick<Run, 'workspaceId'>,
@@ -47,11 +47,11 @@ export function requirePermission(
 ): CortexConnection {
   const connection = connectionOf(node, workerId);
   if (!connection)
-    throw new HiveError('VALIDATION', `Este agente não está conectado ao Cortex “${node.name}”.`);
+    throw new HiveError('VALIDATION', `Este agente não está conectado ao Nectar “${node.name}”.`);
   if (!connection.permissions[permission])
     throw new HiveError(
       'VALIDATION',
-      `Este agente não tem a permissão ${permissionLabels[permission]} no Cortex “${node.name}”.`,
+      `Este agente não tem a permissão ${permissionLabels[permission]} no Nectar “${node.name}”.`,
     );
   return connection;
 }

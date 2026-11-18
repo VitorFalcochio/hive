@@ -1,6 +1,6 @@
 import type { CanvasQueenRequest, CanvasSnapshot } from '@hive/core';
 
-export type CommandCategory = 'Criar' | 'Fluxo' | 'Cortex' | 'Workspace' | 'Execução' | 'Queen AI';
+export type CommandCategory = 'Criar' | 'Fluxo' | 'Nectar' | 'Workspace' | 'Execução' | 'Queen AI';
 export type CommandIcon =
   | 'agent'
   | 'task'
@@ -87,7 +87,7 @@ const normalize = (value: string) =>
 export const commandCategories: CommandCategory[] = [
   'Criar',
   'Fluxo',
-  'Cortex',
+  'Nectar',
   'Workspace',
   'Execução',
   'Queen AI',
@@ -234,12 +234,22 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
   );
   command(
     'cortex.new',
-    'Cortex — Shared Memory',
+    'Nectar — Shared Intelligence',
     'Adicionar um bloco de memória compartilhada e persistente do projeto.',
-    'Cortex',
+    'Nectar',
     'cortex',
     'new-cortex',
-    ['criar', 'memória', 'memory', 'bloco', 'cérebro', 'conhecimento', 'decisões'],
+    [
+      'criar',
+      'nectar',
+      'néctar',
+      'cortex',
+      'memória',
+      'memory',
+      'bloco',
+      'conhecimento',
+      'decisões',
+    ],
   );
   command(
     'create.provider',
@@ -316,11 +326,11 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
   command(
     'blocks.open',
     'Abrir menu de blocos',
-    'Arrastar notas, grupos, provedores, tokens e Cortex para o canvas.',
+    'Arrastar notas, grupos, provedores, tokens e Nectar para o canvas.',
     'Criar',
     'note',
     'blocks',
-    ['blocos', 'adicionar', 'arrastar', 'cortex', 'tokens', 'provedor'],
+    ['blocos', 'adicionar', 'arrastar', 'nectar', 'cortex', 'tokens', 'provedor'],
   );
   command(
     'view.center',

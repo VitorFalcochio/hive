@@ -351,7 +351,7 @@ function Toolbar({
         {run && snapshot && (
           <button
             className="secondary nc-small"
-            title="Blocos: notas, grupos e Cortex — arraste para o canvas"
+            title="Blocos: notas, grupos e Nectar — arraste para o canvas"
             onClick={() => window.dispatchEvent(new Event('nc:blocks'))}
           >
             <Blocks size={12} /> Blocos

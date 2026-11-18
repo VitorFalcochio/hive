@@ -934,7 +934,7 @@ function mcpHandlers(
   );
 }
 
-/** The caller's own tools (the Cortex): logged like any call, run by the caller, never thrown. */
+/** The caller's own tools (the Nectar): logged like any call, run by the caller, never thrown. */
 function memoryHandlers(
   tools: AgentExtraTool[],
   ctx: ToolContext,

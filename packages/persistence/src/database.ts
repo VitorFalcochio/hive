@@ -120,6 +120,15 @@ const migrations: string[] = [
   CREATE INDEX nexus_autopilot_recoveries_run ON nexus_autopilot_recoveries(run_id);
   CREATE INDEX nexus_autopilot_recoveries_task ON nexus_autopilot_recoveries(task_id, state);
   `,
+  // The shared memory is now called Nectar. Tables keep their cortex_ names; only blocks still
+  // carrying the default name ("Cortex", "Cortex 2"…) are renamed, never a name the user chose.
+  `
+  UPDATE cortex_nodes
+  SET data = json_set(data, '$.name', 'Nectar' || substr(json_extract(data, '$.name'), 7))
+  WHERE json_extract(data, '$.name') = 'Cortex'
+     OR (json_extract(data, '$.name') GLOB 'Cortex [1-9]*'
+         AND substr(json_extract(data, '$.name'), 8) NOT GLOB '*[^0-9]*');
+  `,
 ];
 
 /** The schema version this build creates; a database above it came from a newer Hive. */

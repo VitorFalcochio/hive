@@ -87,7 +87,7 @@ const block = (patch: Partial<CortexOverview> = {}): CortexOverview => ({
   node: {
     id: 'cx1',
     workspaceId: 'ws1',
-    name: 'Cortex',
+    name: 'Nectar',
     description: 'Shared Intelligent Memory',
     config: defaultCortexConfig,
     connections: [
@@ -146,8 +146,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('Cortex no Nexus', () => {
-  it('desenha o bloco e só liga ao Cortex os agentes conectados', () => {
+describe('Nectar no Nexus', () => {
+  it('desenha o bloco e só liga ao Nectar os agentes conectados', () => {
     const graph = buildGraph(snapshot, {
       grouping: 'workspace',
       collapsed: new Set(),
@@ -161,11 +161,11 @@ describe('Cortex no Nexus', () => {
     expect(memory[0]?.target).toBe(nodeId.cortex('cx1'));
   });
 
-  it('o menu de blocos tem a categoria Cortex e o bloco é arrastável', () => {
+  it('o menu de blocos tem a categoria Nectar e o bloco é arrastável', () => {
     const place = vi.fn();
     render(<BlockLibrary onPlace={place} onClose={() => {}} />);
-    expect(screen.getByText('Cortex', { selector: 'h4' })).toBeTruthy();
-    const item = screen.getByRole('button', { name: /Cortex — Shared Memory/ });
+    expect(screen.getByText('Nectar', { selector: 'h4' })).toBeTruthy();
+    const item = screen.getByRole('button', { name: /Nectar — Shared Intelligence/ });
     expect(item.getAttribute('draggable')).toBe('true');
     const data = new Map<string, string>();
     fireEvent.dragStart(item, {
@@ -176,7 +176,7 @@ describe('Cortex no Nexus', () => {
     expect(place).toHaveBeenCalledWith('cortex');
   });
 
-  it('a paleta de comandos oferece o Cortex na própria categoria', () => {
+  it('a paleta de comandos oferece o Nectar na própria categoria', () => {
     const registry = registerCanvasCommands(new CommandRegistry<CommandContext>());
     const hits = registry.search('cortex shared memory', {
       snapshot,
@@ -189,7 +189,7 @@ describe('Cortex no Nexus', () => {
       autopilot: () => {},
     });
     const hit = hits.find((item) => item.command.id === 'cortex.new');
-    expect(hit?.command.category).toBe('Cortex');
+    expect(hit?.command.category).toBe('Nectar');
     expect(hit?.available).toBe(true);
   });
 

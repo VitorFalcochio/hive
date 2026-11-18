@@ -440,7 +440,7 @@ export class ChatGPTPlanClient {
   async embed(): Promise<number[][]> {
     throw new HiveError(
       'PROVIDER',
-      'O plano ChatGPT não oferece embeddings. Use outro provedor para a memória (Cortex).',
+      'O plano ChatGPT não oferece embeddings. Use outro provedor para a memória (Nectar).',
     );
   }
 
