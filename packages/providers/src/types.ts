@@ -38,6 +38,8 @@ export interface ChatRequest {
 export interface ChatUsage {
   promptTokens: number;
   completionTokens: number;
+  /** Prompt tokens served from the provider's prompt cache; absent when it does not say. */
+  cachedTokens?: number;
 }
 
 export interface ChatResponse {

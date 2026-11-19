@@ -1,7 +1,18 @@
 import { rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { NativeAgentRuntime, type AgentOutcome, type RuntimeEvent } from '@hive/agents';
-import { isSafeCommand, rolePresets, type ExecutionLimits, type Worker } from '@hive/core';
+import {
+  NativeAgentRuntime,
+  metricsTotals,
+  type AgentOutcome,
+  type RuntimeEvent,
+} from '@hive/agents';
+import {
+  isSafeCommand,
+  rolePresets,
+  type ContextMetrics,
+  type ExecutionLimits,
+  type Worker,
+} from '@hive/core';
 import type { ChatClient } from '@hive/providers';
 import { builtinSkill, parseSkillMarkdown, type ResolvedSkill } from '@hive/skills';
 import type { BenchTask } from './tasks';
@@ -32,6 +43,13 @@ export interface BenchResult {
   modelCalls: number;
   promptTokens: number;
   completionTokens: number;
+  /** Prompt tokens served from the provider's cache; null when it never reported one. */
+  cachedTokens: number | null;
+  /** Characters the tools produced, and the characters of them that reached the prompt. */
+  rawToolChars: number;
+  sentToolChars: number;
+  /** read_output calls: the agent went back for output it had not been shown. */
+  recoveries: number;
   toolCalls: number;
   toolErrors: number;
   failedEdits: number;
@@ -43,6 +61,8 @@ export interface BenchResult {
   filesChanged: string[];
   summary: string;
   gradeOutput: string;
+  /** By agent, model and tool. Absent in results from before Hive measured them. */
+  metrics?: ContextMetrics;
 }
 
 export interface RunTaskOptions {
@@ -156,6 +176,7 @@ export async function runTask(options: RunTaskOptions): Promise<BenchResult> {
     startError = error instanceof Error ? error.message : String(error);
   }
   const seconds = Math.round((Date.now() - started) / 1000);
+  const measured = outcome?.metrics ? metricsTotals([outcome.metrics]) : null;
   const files = await changedFiles(dir);
   const graded = await grade(task.id, dir);
   if (!options.keepWorkdir) await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -172,6 +193,10 @@ export async function runTask(options: RunTaskOptions): Promise<BenchResult> {
     modelCalls: counters.modelCalls,
     promptTokens: outcome?.usage.promptTokens ?? 0,
     completionTokens: outcome?.usage.completionTokens ?? 0,
+    cachedTokens: measured?.cachedTokens ?? null,
+    rawToolChars: measured?.rawToolChars ?? 0,
+    sentToolChars: measured?.sentToolChars ?? 0,
+    recoveries: measured?.recoveries ?? 0,
     toolCalls: counters.toolCalls,
     toolErrors: counters.toolErrors,
     failedEdits: counters.failedEdits,
@@ -181,5 +206,6 @@ export async function runTask(options: RunTaskOptions): Promise<BenchResult> {
     filesChanged: files,
     summary: (outcome?.summary ?? '').slice(0, 1_500),
     gradeOutput: graded.passed && graded.noRegressions ? '' : graded.output,
+    ...(outcome?.metrics ? { metrics: outcome.metrics } : {}),
   };
 }

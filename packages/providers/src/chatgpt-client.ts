@@ -108,7 +108,11 @@ interface OutputItem {
 interface ResponseBody {
   status?: string;
   output?: OutputItem[];
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    input_tokens_details?: { cached_tokens?: number } | null;
+  };
   incomplete_details?: { reason?: string } | null;
   error?: { code?: string; message?: string } | null;
   /** Event types seen in the stream, for diagnosing a response Hive could not read. */
@@ -431,6 +435,9 @@ export class ChatGPTPlanClient {
         ? {
             promptTokens: body.usage.input_tokens ?? 0,
             completionTokens: body.usage.output_tokens ?? 0,
+            ...(typeof body.usage.input_tokens_details?.cached_tokens === 'number'
+              ? { cachedTokens: body.usage.input_tokens_details.cached_tokens }
+              : {}),
           }
         : null,
       latencyMs: Date.now() - started,

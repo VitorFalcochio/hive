@@ -75,6 +75,17 @@ export interface ToolOutcome {
   image?: ToolImage;
   /** A file window the loop should remember, under the id of the tool message it went in. */
   read?: { key: string; lines: string[]; buildsOnEarlier: boolean };
+  /**
+   * Characters the tool produced before Hive shortened them for the prompt (condensed,
+   * truncated, a re-read sent as a diff). Absent when `output` is what it produced.
+   */
+  rawChars?: number;
+}
+
+/** A tool's text cut to the prompt limit, remembering how long it was when it was cut. */
+export function measured(text: string, isError: boolean): ToolOutcome {
+  const output = truncate(text);
+  return { output, isError, ...(output.length < text.length ? { rawChars: text.length } : {}) };
 }
 
 export function truncate(text: string, limit = MAX_TOOL_OUTPUT): string {
@@ -344,20 +355,26 @@ async function readTool(ctx: ToolContext, args: Record<string, unknown>): Promis
   const relative = toPosixRelative(ctx.root, file);
   // The same range asked again: the window it covers, whatever the file's length now.
   const key = `${relative}:${start}:${String(args.end_line ?? 'window')}`;
-  const earlier = ctx.saver?.lastRead(key);
-  if (earlier) {
-    const header = { path: relative, start, end, total: lines.length };
-    const short = rereadOutput(header, earlier.lines, window);
-    if (short)
-      return { output: short, isError: false, read: { key, lines: window, buildsOnEarlier: true } };
-  }
   const body = window
     .map((line, index) => `${String(start + index).padStart(5)}  ${line}`)
     .join('\n');
   const more = end < lines.length ? `; pass start_line=${end + 1} to read on` : '';
   const output = `${relative} (lines ${start}-${end} of ${lines.length}${more})\n${body}`;
+  const earlier = ctx.saver?.lastRead(key);
+  if (earlier) {
+    const header = { path: relative, start, end, total: lines.length };
+    const short = rereadOutput(header, earlier.lines, window);
+    if (short)
+      return {
+        output: short,
+        isError: false,
+        read: { key, lines: window, buildsOnEarlier: true },
+        rawChars: output.length,
+      };
+  }
   // A window cut by truncate was not fully seen, so a later read of it must be sent in full.
-  if (output.length > MAX_TOOL_OUTPUT) return { output: truncate(output), isError: false };
+  if (output.length > MAX_TOOL_OUTPUT)
+    return { output: truncate(output), isError: false, rawChars: output.length };
   return { output, isError: false, read: { key, lines: window, buildsOnEarlier: false } };
 }
 
@@ -583,7 +600,11 @@ async function commandTool(ctx: ToolContext, args: Record<string, unknown>): Pro
     ? `timed out after ${Math.round(ctx.commandTimeoutMs / 1000)}s`
     : `exit code ${result.exitCode}`;
   const failed = result.exitCode !== 0;
-  let output = `$ ${command}\n(${status})\n${shownOutput(ctx, result.output) || '(no output)'}`;
+  const head = `$ ${command}\n(${status})\n`;
+  let output = `${head}${shownOutput(ctx, result.output) || '(no output)'}`;
+  // Measured before the loop note, which Hive adds and the command never printed.
+  const rawChars = head.length + Math.max(result.output.length, '(no output)'.length);
+  const shortened = output.length < rawChars;
   if (ctx.saver && ctx.saver.commandResult(command, failed, result.output) === LOOP_AFTER) {
     output += LOOP_NOTE;
     ctx.emit({
@@ -593,7 +614,7 @@ async function commandTool(ctx: ToolContext, args: Record<string, unknown>): Pro
       data: { command, loop: LOOP_AFTER },
     });
   }
-  return { output, isError: failed };
+  return { output, isError: failed, ...(shortened ? { rawChars } : {}) };
 }
 
 /** A long output condensed to its errors and summary, the full text kept for read_output. */
@@ -659,10 +680,10 @@ async function skillResourceTool(ctx: ToolContext, args: Record<string, unknown>
 async function webFetchTool(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const page = await fetchPage(str(args, 'url'), ctx.signal);
   const type = page.contentType ? `, ${page.contentType}` : '';
-  return {
-    output: truncate(`${page.url} (HTTP ${page.status}${type})\n\n${page.text || '(empty)'}`),
-    isError: !page.ok,
-  };
+  return measured(
+    `${page.url} (HTTP ${page.status}${type})\n\n${page.text || '(empty)'}`,
+    !page.ok,
+  );
 }
 
 function dimension(value: unknown, fallback: number, min: number, max: number): number {
@@ -720,7 +741,7 @@ export async function executeTool(
         return await readTool(ctx, args);
       }
       case 'search':
-        return { output: truncate(await searchTool(ctx, args)), isError: false };
+        return measured(await searchTool(ctx, args), false);
       case 'write_file':
         return { output: await writeTool(ctx, args), isError: false };
       case 'replace_in_file':
@@ -728,7 +749,7 @@ export async function executeTool(
       case 'run_command':
         return await commandTool(ctx, args);
       case 'read_skill_resource':
-        return { output: truncate(await skillResourceTool(ctx, args)), isError: false };
+        return measured(await skillResourceTool(ctx, args), false);
       case 'web_fetch':
         return await webFetchTool(ctx, args);
       case 'view_page':

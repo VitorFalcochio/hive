@@ -24,3 +24,4 @@ export {
   type CommandResult,
   type BackgroundStart,
 } from './process';
+export { CAPTAIN, ContextLedger, metricsTotals } from './context-shield/ledger';

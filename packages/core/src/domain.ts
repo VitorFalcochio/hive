@@ -279,6 +279,61 @@ export const commandEvidenceSchema = z.object({
 });
 export type CommandEvidence = z.infer<typeof commandEvidenceSchema>;
 
+/**
+ * How an agent session treats tool outputs before they enter the prompt. 'legacy' is Hive's
+ * long-standing token saver; 'off' sends everything as produced; 'shield' is the Context Shield
+ * prototype. Only 'legacy' runs in the app until the bench has compared them.
+ */
+export const contextModeSchema = z.enum(['off', 'legacy', 'shield']);
+export type ContextMode = z.infer<typeof contextModeSchema>;
+
+/** Model calls of one agent of a session (the captain or one soldier role) on one model. */
+export const modelMetricsSchema = z.object({
+  agent: z.string(),
+  model: z.string(),
+  calls: z.number().int().min(0),
+  promptTokens: z.number().int().min(0),
+  completionTokens: z.number().int().min(0),
+  /** Prompt tokens the provider served from its cache; null when it never said. */
+  cachedTokens: z.number().int().min(0).nullable(),
+  latencyMs: z.number().min(0),
+});
+export type ModelMetrics = z.infer<typeof modelMetricsSchema>;
+
+/**
+ * Calls of one tool by one agent. `rawChars` is what the tool produced, `sentChars` what went
+ * into the prompt after Hive shortened it (condensed, truncated, or a re-read sent as a diff).
+ */
+export const toolMetricsSchema = z.object({
+  agent: z.string(),
+  tool: z.string(),
+  calls: z.number().int().min(0),
+  errors: z.number().int().min(0),
+  rawChars: z.number().int().min(0),
+  sentChars: z.number().int().min(0),
+  /** Calls whose output reached the prompt shorter than the tool produced it. */
+  shortened: z.number().int().min(0),
+});
+export type ToolMetrics = z.infer<typeof toolMetricsSchema>;
+
+/** What one agent session spent, measured; counts only, never content. */
+export const contextMetricsSchema = z.object({
+  version: z.literal(1),
+  mode: contextModeSchema,
+  models: z.array(modelMetricsSchema),
+  tools: z.array(toolMetricsSchema),
+  /** Older tool outputs cut down on later steps to keep the prompt small. */
+  compaction: z.object({
+    outputs: z.number().int().min(0),
+    charsRemoved: z.number().int().min(0),
+  }),
+  /** read_output calls: the agent went back for a part of an output it was not shown. */
+  recoveries: z.number().int().min(0),
+  /** Times the agent was told it was repeating a failing command. */
+  loopWarnings: z.number().int().min(0),
+});
+export type ContextMetrics = z.infer<typeof contextMetricsSchema>;
+
 export const taskResultSchema = z.object({
   summary: z.string(),
   filesChanged: z.array(z.object({ path: z.string(), status: z.string() })),
@@ -287,6 +342,8 @@ export const taskResultSchema = z.object({
   commit: z.string().nullable(),
   commands: z.array(commandEvidenceSchema),
   usage: z.object({ promptTokens: z.number(), completionTokens: z.number() }),
+  /** Absent on results saved before Hive measured them. */
+  metrics: contextMetricsSchema.optional(),
 });
 export type TaskResult = z.infer<typeof taskResultSchema>;
 

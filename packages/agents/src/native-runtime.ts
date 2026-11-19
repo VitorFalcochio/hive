@@ -43,7 +43,8 @@ import {
 } from './tools';
 import { BackgroundProcesses } from './process';
 import { SKILL_MARK } from './skill-mark';
-import { TokenSaver, readOutput, readOutputDefinition } from './token-saver';
+import { LOOP_NOTE, TokenSaver, readOutput, readOutputDefinition } from './token-saver';
+import { CAPTAIN, ContextLedger } from './context-shield/ledger';
 import type { PageViewer } from './web';
 
 const MAX_SKILL_CHARS = 48_000;
@@ -242,6 +243,7 @@ export class NativeAgentRuntime implements AgentRuntime {
     };
     const usage = { promptTokens: 0, completionTokens: 0 };
     const commands: CommandEvidence[] = [];
+    const ledger = new ContextLedger('legacy');
     const { limits, worker } = input;
     const timeout = AbortSignal.timeout(limits.taskTimeoutMin * 60_000);
     const signal = AbortSignal.any([session.controller.signal, timeout]);
@@ -257,13 +259,14 @@ export class NativeAgentRuntime implements AgentRuntime {
       steps: progress.steps,
       usage,
       commands,
+      metrics: ledger.snapshot(),
     });
 
     let mcp: McpSession | null = null;
     const background = new BackgroundProcesses();
     try {
       const root = await realpath(input.worktreePath);
-      const env: LoopEnv = { chat: input.chat, limits, signal, usage };
+      const env: LoopEnv = { chat: input.chat, limits, signal, usage, ledger };
       const ctx: ToolContext = {
         root,
         worker,
@@ -318,6 +321,7 @@ export class NativeAgentRuntime implements AgentRuntime {
         },
       });
       const result = await runLoop(env, {
+        agent: CAPTAIN,
         model: input.model,
         messages: [
           { role: 'system', content: buildSystemPrompt(input, root) },
@@ -358,9 +362,13 @@ interface LoopEnv {
   signal: AbortSignal;
   /** Summed over the captain and all her soldiers; the token budget applies to the total. */
   usage: { promptTokens: number; completionTokens: number };
+  /** Counts every loop of the session: the captain's and her soldiers'. */
+  ledger: ContextLedger;
 }
 
 interface LoopOptions {
+  /** Who this loop is in the ledger: the captain or a soldier role. */
+  agent: string;
   model: string;
   messages: ChatMessage[];
   tools: ToolDefinition[];
@@ -385,7 +393,9 @@ type LoopResult = Pick<AgentOutcome, 'summary' | 'error'> & { status: 'completed
  * budget (after a last summary) or on the step limit. Provider errors and aborts are thrown.
  */
 async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
-  const { chat, limits, signal, usage } = env;
+  const { chat, limits, signal, usage, ledger } = env;
+  const record = (tool: string, result: { output: string; isError: boolean; rawChars?: number }) =>
+    ledger.toolCall(loop.agent, tool, result);
   const { messages, allowed, progress } = loop;
   // Each loop remembers only what its own messages show.
   const saver = new TokenSaver();
@@ -488,6 +498,7 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
       });
       response = await request();
     }
+    ledger.modelCall(loop.agent, loop.model, response.usage, response.latencyMs);
     if (response.usage) {
       usage.promptTokens += response.usage.promptTokens;
       usage.completionTokens += response.usage.completionTokens;
@@ -553,11 +564,9 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
       try {
         args = parseArguments(call.function.arguments);
       } catch (error) {
-        messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          content: `Error: invalid JSON arguments (${errorMessage(error)}).`,
-        });
+        const content = `Error: invalid JSON arguments (${errorMessage(error)}).`;
+        record(call.function.name, { output: content, isError: true });
+        messages.push({ role: 'tool', tool_call_id: call.id, content });
         continue;
       }
       if (call.function.name === 'finish') {
@@ -580,11 +589,15 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
       }
       if (call.function.name === readOutputDefinition.function.name && allowed.has('run_command')) {
         let content: string;
+        let failed = false;
         try {
           content = readOutput(saver, args);
+          ledger.recovered();
         } catch (error) {
           content = `Error: ${errorMessage(error)}`;
+          failed = true;
         }
+        record(readOutputDefinition.function.name, { output: content, isError: failed });
         emit({
           type: 'tool.call',
           level: 'info',
@@ -598,11 +611,13 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
       if (extra) {
         const result = await extra(args);
         if (typeof result !== 'string') {
+          record(call.function.name, result);
           messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
           if (result.image) images.push(result.image);
           continue;
         }
         const output = result;
+        record(call.function.name, { output, isError: output.startsWith('Error:') });
         // Its successes are already in the log as the soldiers' own events; a refusal is not.
         if (output.startsWith('Error:'))
           emit({
@@ -616,11 +631,9 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
       }
       const parsedName = toolNameSchema.safeParse(call.function.name);
       if (!parsedName.success || !allowed.has(parsedName.data)) {
-        messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          content: `Error: tool "${call.function.name}" is not available to you.`,
-        });
+        const content = `Error: tool "${call.function.name}" is not available to you.`;
+        record(call.function.name, { output: content, isError: true });
+        messages.push({ role: 'tool', tool_call_id: call.id, content });
         emit({
           type: 'tool.call',
           level: 'warn',
@@ -645,6 +658,8 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
         data: { tool: name, args: summarizeArgs(args) },
       });
       const result = await executeTool(ctx, name, args);
+      record(name, result);
+      if (name === 'run_command' && result.output.endsWith(LOOP_NOTE)) ledger.loopWarned();
       emit({
         type: 'tool.result',
         level: result.isError ? 'warn' : 'debug',
@@ -662,7 +677,10 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
       if (result.image) images.push(result.image);
     }
     if (finished) return finished;
-    compactToolOutputs(messages, KEEP_FULL_STEPS, (callId) => saver.forgetCall(callId));
+    compactToolOutputs(messages, KEEP_FULL_STEPS, (callId, charsRemoved) => {
+      saver.forgetCall(callId);
+      ledger.compacted(charsRemoved);
+    });
     // Tool messages carry text only, so the images follow them in a user message.
     if (images.length) {
       messages.push({
@@ -828,6 +846,7 @@ async function callSoldiers(
       let result: LoopResult;
       try {
         result = await runLoop(env, {
+          agent: soldier.role,
           model,
           messages: [
             {
@@ -934,9 +953,11 @@ function mcpHandlers(
         try {
           const result = await mcp.call(tool, args, ctx.signal);
           const image = ctx.vision ? result.images[0] : undefined;
+          const output = truncate(result.text);
           outcome = {
-            output: truncate(result.text),
+            output,
             isError: result.isError,
+            ...(output.length < result.text.length ? { rawChars: result.text.length } : {}),
             ...(image
               ? {
                   image: {
@@ -1011,7 +1032,7 @@ function memoryHandlers(
 export function compactToolOutputs(
   messages: ChatMessage[],
   keep: number,
-  onShortened?: (toolCallId: string) => void,
+  onShortened?: (toolCallId: string, charsRemoved: number) => void,
 ): void {
   let steps = 0;
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -1025,11 +1046,9 @@ export function compactToolOutputs(
       message.content.startsWith(SKILL_MARK)
     )
       continue;
-    messages[index] = {
-      ...message,
-      content: message.content.slice(0, COMPACT_TO_CHARS) + COMPACTED,
-    };
-    onShortened?.(message.tool_call_id);
+    const content = message.content.slice(0, COMPACT_TO_CHARS) + COMPACTED;
+    messages[index] = { ...message, content };
+    onShortened?.(message.tool_call_id, message.content.length - content.length);
   }
 }
 

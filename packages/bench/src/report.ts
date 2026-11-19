@@ -30,6 +30,27 @@ function levelTable(results: BenchResult[]): string[] {
   return lines;
 }
 
+/**
+ * What the measured runs say about context: the prompt cache and how much tool output reached
+ * the prompt. Only facts; no saving is inferred from them without a run to compare against.
+ */
+export function contextLines(results: BenchResult[]): string[] {
+  const measured = results.filter((r) => r.metrics);
+  if (!measured.length) return [];
+  const prompt = sum(measured.map((r) => r.promptTokens));
+  const reported = measured.filter((r) => r.cachedTokens !== null);
+  const cached = sum(reported.map((r) => r.cachedTokens ?? 0));
+  const cache = reported.length
+    ? `${thousands(cached)} de ${thousands(sum(reported.map((r) => r.promptTokens)))} tokens enviados vieram do cache do provedor`
+    : 'o provedor não informou cache';
+  const raw = sum(measured.map((r) => r.rawToolChars));
+  const sent = sum(measured.map((r) => r.sentToolChars));
+  return [
+    `- Contexto (${measured.length} tarefas medidas, ${thousands(prompt)} tokens enviados): ${cache}`,
+    `- Saída das ferramentas: ${thousands(raw)} caracteres produzidos, ${thousands(sent)} levados ao prompt (${pct(sent, raw)}) · recuperações com read_output: ${sum(measured.map((r) => r.recoveries))}`,
+  ];
+}
+
 function verdict(r: BenchResult): string {
   if (solved(r)) return '✅ resolvida';
   if (r.passed) return '⚠️ fez, mas quebrou outra coisa';
@@ -63,6 +84,7 @@ export function renderReport(
       `- Espera por erro do provedor (429, timeout): ${minutes(waits)} em ${sum(mine.map((r) => r.providerRetries))} tentativas`,
       `- Edições que falharam: ${sum(mine.map((r) => r.failedEdits))} · erros de ferramenta: ${sum(mine.map((r) => r.toolErrors))} · comandos negados: ${sum(mine.map((r) => r.commandsDenied))}`,
       `- Disse que terminou sem ter feito: ${lies} de ${mine.length}`,
+      ...contextLines(mine),
       '',
       ...levelTable(mine),
       '',
