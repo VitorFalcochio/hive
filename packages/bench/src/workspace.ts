@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,8 +66,21 @@ export async function prepareWorkdir(taskId: string, base = os.tmpdir()): Promis
   return dir;
 }
 
+/**
+ * Writes the reference solution over a work copy, as an agent would. Not `cp`: on Windows it
+ * keeps each file's modification time, and a solution of the same size as the file it replaces,
+ * checked out in the same second, then looks unchanged to Git, which trusts size and time.
+ */
 export async function applySolution(taskId: string, dir: string): Promise<void> {
-  await cp(solutionDir(taskId), dir, { recursive: true });
+  const from = solutionDir(taskId);
+  const entries = await readdir(from, { recursive: true, withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const source = path.join(entry.parentPath, entry.name);
+    const target = path.join(dir, path.relative(from, source));
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(source));
+  }
 }
 
 export interface Grade {

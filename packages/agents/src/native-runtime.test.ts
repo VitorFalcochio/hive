@@ -494,6 +494,16 @@ describe('NativeAgentRuntime squad', () => {
     ).toBe(true);
     // Soldiers' tokens count against the task's budget.
     expect(outcome.usage.promptTokens).toBe(40);
+    // ...and are measured apart, under their own role and model.
+    const byAgent = Object.fromEntries(
+      outcome.metrics!.models.map((entry) => [entry.agent, entry]),
+    );
+    expect(byAgent.captain).toMatchObject({ model: 'captain-model', calls: 2, promptTokens: 20 });
+    expect(byAgent.scout).toMatchObject({ model: 'captain-model', calls: 1, promptTokens: 10 });
+    expect(byAgent.researcher).toMatchObject({ calls: 1, completionTokens: 5 });
+    expect(outcome.metrics!.tools).toEqual([
+      expect.objectContaining({ agent: 'captain', tool: 'call_soldiers', calls: 1, errors: 0 }),
+    ]);
   });
 
   it('refuses two soldiers that change the worktree in one call', async () => {

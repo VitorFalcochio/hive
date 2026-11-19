@@ -6,3 +6,5 @@ release
 coverage
 pnpm-lock.yaml
 design/reference
+# Reference recordings compared byte for byte; never reformat them.
+packages/agents/src/context-shield/__fixtures__

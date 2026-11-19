@@ -1,6 +1,7 @@
 import type {
   AgentEventType,
   CommandEvidence,
+  ContextMetrics,
   ExecutionLimits,
   ReviewComment,
   Worker,
@@ -72,6 +73,8 @@ export interface AgentOutcome {
   steps: number;
   usage: { promptTokens: number; completionTokens: number };
   commands: CommandEvidence[];
+  /** Spending by agent, model and tool. Engines that do not measure leave it out. */
+  metrics?: ContextMetrics;
 }
 
 export interface AgentSession {

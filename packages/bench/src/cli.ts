@@ -12,7 +12,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { parseArgs } from 'node:util';
-import { defaultLimits, type ExecutionLimits, type ProviderKind } from '@hive/core';
+import {
+  contextModeSchema,
+  defaultLimits,
+  type ExecutionLimits,
+  type ProviderKind,
+} from '@hive/core';
 import { OpenAICompatibleClient, type ProviderEndpoint } from '@hive/providers';
 import { renderReport, solved } from './report';
 import { runTask, type BenchResult } from './runner';
@@ -33,6 +38,8 @@ const { values: args } = parseArgs({
     'timeout-min': { type: 'string', default: '15' },
     'max-steps': { type: 'string' },
     label: { type: 'string', default: 'rodada' },
+    /** off | legacy: how tool outputs are cut down. 'legacy' is Hive as shipped. */
+    context: { type: 'string', default: 'legacy' },
     compare: { type: 'string' },
     keep: { type: 'boolean', default: false },
   },
@@ -170,7 +177,8 @@ async function main() {
   await mkdir(outDir, { recursive: true });
   const previous = await previousResults(folder);
   const chat = new OpenAICompatibleClient(config.endpoint);
-  const limitText = `${limits.maxSteps} passos, ${limits.taskTimeoutMin} min por tarefa`;
+  const contextMode = contextModeSchema.parse(args.context);
+  const limitText = `${limits.maxSteps} passos, ${limits.taskTimeoutMin} min por tarefa, contexto ${contextMode}`;
   console.log(
     `Hive Bench · ${tasks.length} tarefas × ${models.length} modelo(s) · ${limitText} · ${config.endpoint.baseUrl}`,
   );
@@ -187,7 +195,14 @@ async function main() {
   for (const model of models) {
     for (const task of tasks) {
       process.stdout.write(`  [${model}] nível ${task.level} · ${task.id} … `);
-      const result = await runTask({ task, model, chat, limits, keepWorkdir: args.keep });
+      const result = await runTask({
+        task,
+        model,
+        chat,
+        limits,
+        contextMode,
+        keepWorkdir: args.keep,
+      });
       results.push(result);
       await save();
       console.log(

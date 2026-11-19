@@ -166,11 +166,17 @@ async function run(
     requestApproval: async () => true,
   });
   runtime.subscribe(id, (event) => events.push(event));
-  expect((await session.done).status).toBe('completed');
+  const outcome = await session.done;
+  expect(outcome.status).toBe('completed');
   /** The output each call got, as the model saw it on the next step. */
   const outputs = requests.slice(1).map((request) => String(request.messages.at(-1)!.content));
   const final = requests.at(-1)!.messages.filter((message) => message.role === 'tool');
-  return { events, outputs, final: final.map((message) => String(message.content)) };
+  return {
+    events,
+    outputs,
+    final: final.map((message) => String(message.content)),
+    metrics: outcome.metrics!,
+  };
 }
 
 describe('NativeAgentRuntime token saver', () => {
@@ -181,7 +187,7 @@ describe('NativeAgentRuntime token saver', () => {
     await writeFile(file, original.join('\n'));
     await writeFile(path.join(worktree, 'b.txt'), 'b');
     const read = { name: 'read_file', args: { path: 'a.txt' } };
-    const { outputs, final } = await run(
+    const { outputs, final, metrics } = await run(
       'reread',
       worktree,
       ['read_file'],
@@ -207,6 +213,12 @@ describe('NativeAgentRuntime token saver', () => {
     expect(final[0]).toContain('older output shortened');
     expect(outputs[4]).toContain('   10  mudou');
     expect(outputs[4]).toContain('conteúdo da linha 60');
+    // Measured: the "unchanged" and diff re-reads reached the prompt shorter than the window.
+    const reads = metrics.tools.find((tool) => tool.tool === 'read_file')!;
+    expect(reads).toMatchObject({ agent: 'captain', calls: 5, errors: 0, shortened: 2 });
+    expect(reads.sentChars).toBeLessThan(reads.rawChars);
+    expect(metrics.compaction.outputs).toBeGreaterThan(0);
+    expect(metrics.compaction.charsRemoved).toBeGreaterThan(0);
   });
 
   it('condenses a long command output, keeps the rest for read_output and calls out a loop', async () => {
@@ -216,7 +228,7 @@ describe('NativeAgentRuntime token saver', () => {
       "for (let i = 1; i <= 400; i++) console.log('linha ' + i);\nconsole.log('Error: quebrou');\nprocess.exit(1);\n",
     );
     const command = { name: 'run_command', args: { command: 'node falha.js' } };
-    const { outputs, events } = await run(
+    const { outputs, events, metrics } = await run(
       'output',
       worktree,
       ['run_command'],
@@ -237,5 +249,24 @@ describe('NativeAgentRuntime token saver', () => {
       '"node falha.js" falhou 3 vezes seguidas com o mesmo erro; o agente foi avisado para mudar de abordagem.',
     );
     expect(events.map((event) => event.message)).toContain('Leu mais da saída out1');
+    const commands = metrics.tools.find((tool) => tool.tool === 'run_command')!;
+    expect(commands).toMatchObject({ calls: 3, errors: 3, shortened: 3 });
+    expect(commands.rawChars).toBeGreaterThan(3 * 3_000);
+    expect(metrics.tools.find((tool) => tool.tool === 'read_output')).toMatchObject({
+      calls: 1,
+      errors: 0,
+    });
+    expect(metrics.recoveries).toBe(1);
+    expect(metrics.loopWarnings).toBe(1);
+    expect(metrics.mode).toBe('legacy');
+    // The scripted model reports no usage, and that stays visible as "not reported".
+    expect(metrics.models).toEqual([
+      expect.objectContaining({
+        agent: 'captain',
+        model: 'test-model',
+        calls: 5,
+        cachedTokens: null,
+      }),
+    ]);
   });
 });

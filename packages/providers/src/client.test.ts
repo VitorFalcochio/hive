@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OpenAICompatibleClient } from './client';
+import { OpenAICompatibleClient, readUsage } from './client';
 import { ProviderError, retryDelay } from './retry';
 
 const endpoint = {
@@ -68,6 +68,29 @@ describe('cliente de provedores compatíveis com OpenAI', () => {
       finishReason: 'tool_calls',
       usage: { promptTokens: 12, completionTokens: 3 },
     });
+  });
+
+  it('lê os tokens em cache só quando o provedor informa', () => {
+    expect(readUsage({ prompt_tokens: 10, completion_tokens: 2 })).toEqual({
+      promptTokens: 10,
+      completionTokens: 2,
+    });
+    expect(
+      readUsage({
+        prompt_tokens: 10,
+        completion_tokens: 2,
+        prompt_tokens_details: { cached_tokens: 6 },
+      }),
+    ).toEqual({ promptTokens: 10, completionTokens: 2, cachedTokens: 6 });
+    // DeepSeek reports the cache hit under its own name; a zero hit is still a report.
+    expect(readUsage({ prompt_tokens: 10, prompt_cache_hit_tokens: 0 })).toEqual({
+      promptTokens: 10,
+      completionTokens: 0,
+      cachedTokens: 0,
+    });
+    expect(readUsage({ prompt_tokens: 10, prompt_tokens_details: null }).cachedTokens).toBe(
+      undefined,
+    );
   });
 
   it('classifica as falhas para decidir se vale tentar de novo', async () => {

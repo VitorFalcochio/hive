@@ -856,6 +856,7 @@ export class Scheduler {
         commit,
         commands: outcome.commands,
         usage: outcome.usage,
+        ...(outcome.metrics ? { metrics: outcome.metrics } : {}),
       };
       if (
         outcome.status === 'failed' &&

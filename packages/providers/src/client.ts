@@ -2,7 +2,14 @@ import { HiveError, errorMessage, secretRedactor } from '@hive/shared';
 import type { ModelInfo } from '@hive/core';
 import { normalizeModels } from './models';
 import { ProviderError, parseRetryAfter } from './retry';
-import type { ChatClient, ChatRequest, ChatResponse, ProviderEndpoint, ToolCall } from './types';
+import type {
+  ChatClient,
+  ChatRequest,
+  ChatResponse,
+  ChatUsage,
+  ProviderEndpoint,
+  ToolCall,
+} from './types';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 type FetchLike = typeof fetch;
@@ -154,7 +161,14 @@ export class OpenAICompatibleClient implements ChatClient {
         };
         finish_reason?: string | null;
       }[];
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        /** OpenAI, OpenRouter, Groq and others. */
+        prompt_tokens_details?: { cached_tokens?: number } | null;
+        /** DeepSeek. */
+        prompt_cache_hit_tokens?: number;
+      };
       error?: { message?: string; code?: unknown };
     };
     // Gateways report upstream failures (an upstream 429, say) in a 200 body.
@@ -183,12 +197,7 @@ export class OpenAICompatibleClient implements ChatClient {
       },
       reasoning: choice.message.reasoning_content ?? choice.message.reasoning ?? null,
       finishReason: choice.finish_reason ?? null,
-      usage: body.usage
-        ? {
-            promptTokens: body.usage.prompt_tokens ?? 0,
-            completionTokens: body.usage.completion_tokens ?? 0,
-          }
-        : null,
+      usage: body.usage ? readUsage(body.usage) : null,
       latencyMs: Date.now() - started,
     };
   }
@@ -287,4 +296,19 @@ export class OpenAICompatibleClient implements ChatClient {
       throw error;
     }
   }
+}
+
+/** Token counts in the OpenAI dialect; the cached part only when the provider reports one. */
+export function readUsage(usage: {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number } | null;
+  prompt_cache_hit_tokens?: number;
+}): ChatUsage {
+  const cached = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens;
+  return {
+    promptTokens: usage.prompt_tokens ?? 0,
+    completionTokens: usage.completion_tokens ?? 0,
+    ...(typeof cached === 'number' && cached >= 0 ? { cachedTokens: cached } : {}),
+  };
 }
