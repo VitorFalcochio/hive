@@ -53,7 +53,8 @@ function setup(file = ':memory:') {
   return { service, db, pushes };
 }
 
-describe('desktop integrado aos serviços locais', () => {
+// Several tests here create real git repositories; like the Scheduler's, they get time to spare.
+describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
   it('persiste os agentes iniciais sem duplicar ao reabrir o banco', async () => {
     const folder = await mkdtemp(path.join(os.tmpdir(), 'hive-service-'));
     const file = path.join(folder, 'test.sqlite');
