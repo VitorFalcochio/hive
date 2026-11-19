@@ -88,11 +88,24 @@ export class FlowEngine {
 
   /** A task changed: when it just finished, what is linked after its agent runs. */
   onTask(task: Task): void {
-    if (task.status !== 'completed' || !task.workerId) return;
+    if (task.status !== 'completed' || !task.workerId || this.partOfTeamWork(task)) return;
     const key = `${task.id}:${task.attempt}:${task.revision?.round ?? 0}`;
     if (this.handled.has(`done:${key}`)) return;
     this.handled.add(`done:${key}`);
     this.fire(`agent:${task.workerId}`, 'out', { runId: task.runId, task });
+  }
+
+  /**
+   * Hive Teams: a member's or reviewer's piece, or a leader's session that delegated, is not the
+   * team's result: the consolidation that follows it is. Checking or applying the piece would send
+   * the leader back to code what its members are coding, or apply half the work.
+   */
+  private partOfTeamWork(task: Task): boolean {
+    if (!task.team || task.team.role === 'consolidate') return false;
+    if (task.team.role !== 'lead') return true;
+    return this.options.repos.tasks
+      .list('run_id = ?', task.runId)
+      .some((item) => item.team?.role === 'consolidate' && item.team.leadTaskId === task.id);
   }
 
   /** A run changed: when it finished, what is linked after its Queen runs (a notification). */

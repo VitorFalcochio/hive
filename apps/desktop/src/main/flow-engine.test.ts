@@ -29,12 +29,12 @@ const task = (overrides: Partial<Task> = {}) =>
     ...overrides,
   }) as unknown as Task;
 
-function setup(layout: Partial<CanvasLayout>) {
+function setup(layout: Partial<CanvasLayout>, extra: Task[] = []) {
   const values = new Map<string, string>();
-  const tasks = new Map([['task_1', task()]]);
+  const tasks = new Map([['task_1', task()], ...extra.map((item) => [item.id, item] as const)]);
   const repos = {
     runs: { list: () => [run], get: () => run, require: () => run },
-    tasks: { get: (id: string) => tasks.get(id) },
+    tasks: { get: (id: string) => tasks.get(id), list: () => [...tasks.values()] },
     missions: { get: () => ({ title: 'Login' }) },
     workspaces: { require: () => ({ id: 'ws1', path: '/repo' }) },
     getValue: (key: string) => values.get(key) ?? null,
@@ -110,6 +110,43 @@ describe('FlowEngine', () => {
     });
     auto.engine.onTask(task());
     await vi.waitFor(() => expect(auto.options.approve).toHaveBeenCalledWith('task_1'));
+  });
+
+  it('Hive Teams: blocks judge the consolidated result, not the delegation or the pieces', async () => {
+    const team = (id: string, role: string, workerId = 'coder') =>
+      task({
+        id,
+        workerId,
+        team: { role, leadTaskId: 'lead', requestId: null } as Task['team'],
+      });
+    const lead = team('lead', 'lead');
+    const member = team('member', 'member');
+    const consolidation = team('fim', 'consolidate');
+    const flow = setup(
+      {
+        flow: [{ id: 'flow:a', x: 0, y: 0, kind: 'approval', auto: true }],
+        links: [{ id: 'link:1', source: 'agent:coder', target: 'flow:a', port: 'out' }],
+      },
+      [lead, member, consolidation],
+    );
+    flow.engine.onTask(lead);
+    flow.engine.onTask(member);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(flow.options.approve).not.toHaveBeenCalled();
+    flow.engine.onTask(consolidation);
+    await vi.waitFor(() => expect(flow.options.approve).toHaveBeenCalledWith('fim'));
+    expect(flow.options.approve).toHaveBeenCalledTimes(1);
+
+    // A leader that delegated nothing did the work itself: its result is judged as usual.
+    const alone = setup(
+      {
+        flow: [{ id: 'flow:a', x: 0, y: 0, kind: 'approval', auto: true }],
+        links: [{ id: 'link:1', source: 'agent:coder', target: 'flow:a', port: 'out' }],
+      },
+      [lead],
+    );
+    alone.engine.onTask(lead);
+    await vi.waitFor(() => expect(alone.options.approve).toHaveBeenCalledWith('lead'));
   });
 
   it('notifies when the Queen finishes the mission, once', () => {
