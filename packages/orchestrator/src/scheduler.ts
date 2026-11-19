@@ -59,6 +59,8 @@ export interface SchedulerOptions {
    * path registers it synchronously so that `holds` already answers true.
    */
   onTaskFailed?: (run: Run, task: Task) => void;
+  /** Called once a task's attempt has ended (completed, failed or cancelled) and been saved. */
+  onTaskFinished?: (run: Run, task: Task) => void;
   /**
    * True while a failed task waits for a replanning decision. Its dependents then stay pending
    * instead of being cancelled, and the run stays running until the decision is made.
@@ -427,7 +429,11 @@ export class Scheduler {
    * dependencies, no cycle, and an agent that can do the work. While the run is going it is
    * picked up as soon as its dependencies are done; otherwise it waits for the next start.
    */
-  addTask(runId: string, input: PlanTask): Task {
+  /**
+   * Adds a task to a run. `extra` carries what a plan task does not: where the task came from
+   * (Hive Teams sets the parent task and the task's place in a team).
+   */
+  addTask(runId: string, input: PlanTask, extra: Pick<Task, 'parentTaskId' | 'team'> = {}): Task {
     const run = this.repos.runs.require(runId, 'Execução');
     if (!EDITABLE.has(run.status))
       throw new HiveError('CONFLICT', 'Gere o plano antes de adicionar tarefas a esta missão.');
@@ -443,6 +449,7 @@ export class Scheduler {
     if (plan.workerId) this.requireWorker(plan.workerId);
     const task = this.repos.tasks.put({
       ...plan,
+      ...extra,
       id: newId('task'),
       runId,
       status: 'pending',
@@ -907,6 +914,14 @@ export class Scheduler {
       this.denyApprovalsOf(initial.id);
       // The branch is kept only when it holds work to review.
       if (worktree) await manager.remove(worktree, commit ? null : branch).catch(() => undefined);
+      // An attempt sent back to the queue (an unattended retry) has not ended yet.
+      const ended = this.repos.tasks.get(initial.id);
+      if (ended && ['completed', 'failed', 'cancelled'].includes(ended.status))
+        try {
+          this.options.onTaskFinished?.(run, ended);
+        } catch (error) {
+          this.log(run, initial.id, ended.workerId, 'error', 'warn', errorMessage(error));
+        }
       this.pumpAll();
       this.settle(run.id);
     }
@@ -1026,6 +1041,19 @@ export class Scheduler {
     const next = this.repos.tasks.put({ ...current, ...patch });
     this.options.onChange('task', taskId);
     return next;
+  }
+
+  /** An entry in a run's log from Hive Teams: an agent created, work delegated, a review. */
+  logTeam(
+    runId: string,
+    taskId: string | null,
+    workerId: string | null,
+    level: AgentEvent['level'],
+    message: string,
+    data?: Record<string, unknown>,
+  ): void {
+    const run = this.repos.runs.get(runId);
+    if (run) this.log(run, taskId, workerId, 'team', level, message, data);
   }
 
   private log(
