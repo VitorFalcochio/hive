@@ -5,6 +5,7 @@ import {
   honeyBoost,
   isBlockedByFailure,
   isSafeCommand,
+  shiftAllows,
   readyTasks,
   stateForTaskStatus,
   workerStateSchema,
@@ -965,7 +966,7 @@ export class Scheduler {
     }
     // Nobody is there to answer: the safe list decides at once and the decision is logged.
     if (this.options.unattended?.(run.id)) {
-      const allowed = isSafeCommand(command, settings.autopilot.safeCommands);
+      const allowed = shiftAllows(command, settings.autopilot);
       this.log(
         run,
         taskId,

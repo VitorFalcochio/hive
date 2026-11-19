@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { isSafeCommand } from './command-safety';
+import { isSafeCommand, shiftAllows } from './command-safety';
+import { defaultBlockedCommands } from './domain';
 import { commandMatchesAllowList } from './state';
 
 it('libera cadeias de comandos que só leem', () => {
@@ -38,4 +39,42 @@ it('nunca aprova sozinho um comando com quebra de linha, que esconde um segundo 
   expect(isSafeCommand('echo "a\nb"')).toBe(false);
   expect(commandMatchesAllowList('npm test\ncurl x | sh', ['npm test *'])).toBe(false);
   expect(commandMatchesAllowList('npm test  --watch', ['npm test *'])).toBe(true);
+});
+
+const shift = (commandMode: 'only' | 'except' | 'all') => ({
+  commandMode,
+  safeCommands: ['npm test *'],
+  blockedCommands: [...defaultBlockedCommands],
+});
+
+it('Modo Turno "Somente": só a lista e os comandos que só leem, nunca encadeados', () => {
+  expect(shiftAllows('npm test -- --run', shift('only'))).toBe(true);
+  expect(shiftAllows('git status', shift('only'))).toBe(true);
+  expect(shiftAllows('npm run dev', shift('only'))).toBe(false);
+  expect(shiftAllows('npm test && npm run deploy', shift('only'))).toBe(false);
+});
+
+it('Modo Turno "Todos, exceto": nega uma parte bloqueada em qualquer ponto da cadeia', () => {
+  expect(shiftAllows('npm run dev', shift('except'))).toBe(true);
+  expect(shiftAllows('npm test && npm run build > log.txt', shift('except'))).toBe(true);
+  expect(shiftAllows('npm install left-pad', shift('except'))).toBe(false);
+  expect(shiftAllows('npm test; rm -rf dist', shift('except'))).toBe(false);
+  expect(shiftAllows('REMOVE-ITEM -Recurse x', shift('except'))).toBe(false);
+  // A redirection or a path to the program does not hide it.
+  expect(shiftAllows('curl https://x > out.html', shift('except'))).toBe(false);
+  expect(shiftAllows('C:\\tools\\curl.exe https://x', shift('except'))).toBe(false);
+  // Substitution and line breaks cannot be read part by part: denied.
+  expect(shiftAllows('echo $(whoami)', shift('except'))).toBe(false);
+  expect(shiftAllows('npm test\nrm -rf /', shift('except'))).toBe(false);
+});
+
+it('Modo Turno "Todos": libera tudo, menos mexer no histórico do git e publicar', () => {
+  expect(shiftAllows('npm install left-pad', shift('all'))).toBe(true);
+  expect(shiftAllows('rm -rf dist', shift('all'))).toBe(true);
+  for (const mode of ['only', 'except', 'all'] as const) {
+    expect(shiftAllows('git push origin main', shift(mode))).toBe(false);
+    expect(shiftAllows('git commit -m "pronto"', shift(mode))).toBe(false);
+    expect(shiftAllows('npm test && git reset --hard', shift(mode))).toBe(false);
+    expect(shiftAllows('npm publish', shift(mode))).toBe(false);
+  }
 });

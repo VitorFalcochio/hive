@@ -4836,21 +4836,6 @@ button.mission-done-toggle:hover {
 .shift-rules {
   margin-bottom: 24px;
 }
-.shift-rules-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-  gap: 12px;
-  align-items: start;
-}
-@media (max-width: 1100px) {
-  .shift-rules-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-.shift-rules-column {
-  display: grid;
-  gap: 12px;
-}
 .shift-rule {
   display: flex;
   flex-direction: row;
@@ -4957,20 +4942,117 @@ button.mission-done-toggle:hover {
   box-shadow: 0 0 8px rgba(245, 181, 68, 0.6);
 }
 
-/* Allowed commands */
+/* Commands while the shift runs: a mode, its list, and what is always denied */
+.shift-rules-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1250px) {
+  .shift-rules-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.shift-rules-row > .shift-rule {
+  align-self: stretch;
+}
+.shift-rules-row > .shift-attempts-rule {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+}
 .shift-commands {
   display: grid;
-  align-items: start;
-  gap: 12px;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 2%);
+}
+.shift-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  .shift-modes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.shift-modes button {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 4px;
+  height: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+  text-align: left;
+  white-space: normal;
+}
+.shift-modes button:hover {
+  border-color: rgb(255 255 255 / 18%);
+  background: var(--background);
+}
+.shift-modes button strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.shift-modes button small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.shift-modes button.selected {
+  border-color: #f5b544;
+  background: rgba(245, 181, 68, 0.08);
+  box-shadow: 0 0 0 1px rgba(245, 181, 68, 0.35);
+}
+.shift-modes button.selected strong svg {
+  color: #f5b544;
+}
+.shift-modes button.selected.all {
+  border-color: #f0795b;
+  background: rgba(240, 121, 91, 0.08);
+  box-shadow: 0 0 0 1px rgba(240, 121, 91, 0.35);
+}
+.shift-modes button.selected.all strong svg {
+  color: #f0795b;
+}
+.shift-list {
+  display: grid;
+  gap: 10px;
+}
+.shift-list-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font: 600 11px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+.shift-list-label small {
+  font: 400 11.5px var(--font-sans, inherit);
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.8;
 }
 .shift-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  max-height: 168px;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
 }
 .shift-chips li {
@@ -4980,13 +5062,20 @@ button.mission-done-toggle:hover {
   padding: 2px 2px 2px 10px;
   border: 1px solid rgba(245, 181, 68, 0.22);
   border-radius: 999px;
-  background: rgba(245, 181, 68, 0.07);
+  background: rgba(245, 181, 68, 0.06);
 }
 .shift-chips code {
   color: #ffe2a8;
-  font: 500 12px var(--font-mono);
+  font: 400 12px var(--font-mono);
   background: none;
   padding: 0;
+}
+.shift-chips.blocked li {
+  border-color: rgba(240, 121, 91, 0.3);
+  background: rgba(240, 121, 91, 0.07);
+}
+.shift-chips.blocked code {
+  color: #ffb8a6;
 }
 .shift-chips .icon-button {
   width: 20px;
@@ -5001,9 +5090,40 @@ button.mission-done-toggle:hover {
   color: var(--muted-foreground);
   font-size: 12px;
 }
+.shift-all-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(240, 121, 91, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(240, 121, 91, 0.08);
+  color: #ffc4b4;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.shift-all-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.shift-never {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.shift-never svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
 .shift-add-command {
   display: flex;
   gap: 8px;
+  max-width: 560px;
 }
 .shift-add-command input {
   flex: 1;

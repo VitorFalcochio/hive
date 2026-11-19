@@ -482,6 +482,26 @@ export type SkillValidation = z.infer<typeof skillValidationSchema>;
 
 /* ---------------------------------------------------------------- Settings */
 
+/** What "Todos, exceto estes" blocks out of the box: installs, deletions and downloads. */
+export const defaultBlockedCommands = [
+  'npm install *',
+  'npm i *',
+  'pnpm add *',
+  'pnpm install *',
+  'yarn add *',
+  'pip install *',
+  'rm -rf *',
+  'rm -r *',
+  'Remove-Item *',
+  'del *',
+  'rmdir *',
+  'rd *',
+  'curl *',
+  'wget *',
+  'Invoke-WebRequest *',
+  'shutdown *',
+];
+
 /** Shift mode ("Modo Turno"): queued missions are planned and run without anyone watching. */
 export const autopilotSettingsSchema = z.object({
   enabled: z.boolean(),
@@ -490,6 +510,16 @@ export const autopilotSettingsSchema = z.object({
    * command is denied at once instead of waiting for someone to answer.
    */
   safeCommands: z.array(z.string().min(1).max(200)).max(100),
+  /**
+   * Which commands run unattended: `only` the safe list, `except` everything but the blocked
+   * list, `all` everything. In every mode git history writes and publishing stay denied.
+   */
+  commandMode: z.enum(['only', 'except', 'all']).default('only'),
+  /** Commands denied in `except` mode. */
+  blockedCommands: z
+    .array(z.string().min(1).max(200))
+    .max(100)
+    .default(() => [...defaultBlockedCommands]),
   /** Attempts per task while unattended, counting the first; failures are retried up to this. */
   maxAttempts: z.number().int().min(1).max(5),
   /** Keep the computer from sleeping while queued work runs. */
@@ -611,6 +641,8 @@ export const defaultSettings: Settings = {
       'node --version',
       'npm --version',
     ],
+    commandMode: 'only',
+    blockedCommands: [...defaultBlockedCommands],
     maxAttempts: 2,
     keepAwake: true,
     runInBackground: true,

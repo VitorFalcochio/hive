@@ -155,3 +155,71 @@ export function isSafeCommand(command: string, extra: readonly string[] = []): b
     return commandMatchesAllowList(shape, readOnlyCommands) && !leavesProject(segment);
   });
 }
+
+/**
+ * What the shift never runs, in any mode: rewriting git history or publishing the work. Hive
+ * keeps each task on its own branch and the user decides what is applied and published.
+ */
+export const shiftNeverCommands: readonly string[] = [
+  'git push *',
+  'git commit *',
+  'git reset *',
+  'git rebase *',
+  'git merge *',
+  'git checkout *',
+  'git switch *',
+  'git tag *',
+  'git branch *',
+  'npm publish *',
+  'pnpm publish *',
+  'yarn publish *',
+];
+
+/** How the shift picks commands: only a list, everything but a list, or everything. */
+export type ShiftCommandMode = 'only' | 'except' | 'all';
+
+/** One part of a chain as a rule sees it: no redirections, quotes as data, lower case. */
+function blockShape(part: string): string {
+  return part
+    .replace(/"[^"]*"|'[^']*'/g, '""')
+    .replace(/\s*\d?(?:>>?|<)\s*(?:&\d|\S+)/g, '')
+    .replace(/^(?:\S*[\\/])?(\S+?)(?:\.exe|\.cmd|\.bat)?(?=\s|$)/i, '$1')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function matchesRule(shape: string, rules: readonly string[]): boolean {
+  return rules.some((entry) => {
+    const rule = entry.trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!rule) return false;
+    if (rule.endsWith(' *')) {
+      const prefix = rule.slice(0, -2);
+      return shape === prefix || shape.startsWith(`${prefix} `);
+    }
+    return shape === rule;
+  });
+}
+
+/**
+ * Whether the shift runs `command` with nobody watching. `only` runs the safe commands and the
+ * listed ones, never chained (as `isSafeCommand`); `except` runs any command unless a part of
+ * it matches the blocked list; `all` runs any command. None runs what `shiftNeverCommands` lists.
+ */
+export function shiftAllows(
+  command: string,
+  rules: {
+    commandMode: ShiftCommandMode;
+    safeCommands: readonly string[];
+    blockedCommands: readonly string[];
+  },
+): boolean {
+  const parts = splitChain(command.trim());
+  if (!parts || parts.some((part) => !part.trim())) return false;
+  const shapes = parts.map(blockShape);
+  if (shapes.some((shape) => matchesRule(shape, shiftNeverCommands))) return false;
+  if (rules.commandMode === 'only') return isSafeCommand(command, rules.safeCommands);
+  if (rules.commandMode === 'except')
+    return !shapes.some((shape) => matchesRule(shape, rules.blockedCommands));
+  return true;
+}

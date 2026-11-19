@@ -6,6 +6,7 @@ import {
   Coffee,
   History,
   ListOrdered,
+  Lock,
   Moon,
   PanelBottom,
   Pause,
@@ -13,8 +14,12 @@ import {
   Plus,
   RotateCcw,
   Save,
+  ShieldCheck,
+  ShieldMinus,
+  ShieldOff,
   SlidersHorizontal,
   Terminal,
+  TriangleAlert,
   X,
 } from 'lucide-react';
 import type { AutopilotSettings, AutopilotStatus, Settings } from '@hive/core';
@@ -282,11 +287,14 @@ function ShiftSettings({
   const set = <K extends keyof AutopilotSettings>(key: K, value: AutopilotSettings[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
 
+  // "Somente" edits the allowed list, "Todos, exceto" the blocked one; "Todos" has no list.
+  const listKey = draft.commandMode === 'except' ? 'blockedCommands' : 'safeCommands';
+  const list = draft.commandMode === 'all' ? [] : draft[listKey];
+
   function addCommand() {
     const command = newCommand.trim();
     if (!command) return;
-    if (!draft.safeCommands.includes(command))
-      set('safeCommands', [...draft.safeCommands, command].slice(0, 100));
+    if (!list.includes(command)) set(listKey, [...list, command].slice(0, 100));
     setNewCommand('');
   }
 
@@ -309,98 +317,143 @@ function ShiftSettings({
         </div>
       </header>
 
-      <div className="shift-rules-grid">
-        <div className="shift-rules-column">
-          <div className="shift-rule">
-            <div className="shift-rule-text">
-              <strong>
-                <RotateCcw size={13} /> Tentativas por tarefa
-              </strong>
-              <small>Contando a primeira. A nova tentativa recebe o erro anterior.</small>
-            </div>
-            <div className="shift-attempts" role="radiogroup" aria-label="Tentativas por tarefa">
-              {[1, 2, 3, 4, 5].map((value) => (
-                <button
-                  key={value}
-                  role="radio"
-                  aria-checked={draft.maxAttempts === value}
-                  className={draft.maxAttempts === value ? 'selected' : undefined}
-                  onClick={() => set('maxAttempts', value)}
-                >
-                  {value}
-                </button>
-              ))}
-            </div>
-          </div>
-          <ShiftSwitch
-            icon={<Coffee size={13} />}
-            title="Manter o computador acordado"
-            hint="Impede a suspensão enquanto houver missões na fila."
-            checked={draft.keepAwake}
-            onChange={(value) => set('keepAwake', value)}
-          />
-          <ShiftSwitch
-            icon={<PanelBottom size={13} />}
-            title="Seguir na bandeja ao fechar a janela"
-            hint="O Hive continua trabalhando ao lado do relógio do Windows."
-            checked={draft.runInBackground}
-            onChange={(value) => set('runInBackground', value)}
-          />
-        </div>
-
-        <div className="shift-rule shift-commands">
+      <div className="shift-rules-row">
+        <div className="shift-rule shift-attempts-rule">
           <div className="shift-rule-text">
             <strong>
-              <Terminal size={13} /> Comandos liberados sem perguntar
+              <RotateCcw size={13} /> Tentativas por tarefa
             </strong>
-            <small>
-              Termine com * para aceitar argumentos (ex.: npm test *). Comandos encadeados com ; & |
-              ou redirecionamentos nunca são liberados. Os demais são negados e aparecem no
-              histórico da tarefa.
-            </small>
+            <small>Contando a primeira. A nova tentativa recebe o erro anterior.</small>
           </div>
-          <ul className="shift-chips">
-            {draft.safeCommands.map((command) => (
-              <li key={command}>
-                <code>{command}</code>
-                <button
-                  className="icon-button"
-                  title="Remover"
-                  aria-label={`Remover ${command}`}
-                  onClick={() =>
-                    set(
-                      'safeCommands',
-                      draft.safeCommands.filter((item) => item !== command),
-                    )
-                  }
-                >
-                  <X size={12} />
-                </button>
-              </li>
+          <div className="shift-attempts" role="radiogroup" aria-label="Tentativas por tarefa">
+            {[1, 2, 3, 4, 5].map((value) => (
+              <button
+                key={value}
+                role="radio"
+                aria-checked={draft.maxAttempts === value}
+                className={draft.maxAttempts === value ? 'selected' : undefined}
+                onClick={() => set('maxAttempts', value)}
+              >
+                {value}
+              </button>
             ))}
-            {!draft.safeCommands.length && (
-              <li className="shift-chips-empty">Nenhum comando: todos serão negados.</li>
-            )}
-          </ul>
-          <form
-            className="shift-add-command"
-            onSubmit={(event) => {
-              event.preventDefault();
-              addCommand();
-            }}
-          >
-            <input
-              value={newCommand}
-              maxLength={200}
-              spellCheck={false}
-              placeholder="Adicionar comando, ex.: pnpm test *"
-              onChange={(event) => setNewCommand(event.target.value)}
-            />
-            <button type="submit" className="secondary" disabled={!newCommand.trim()}>
-              <Plus size={13} /> Adicionar
-            </button>
-          </form>
+          </div>
         </div>
+        <ShiftSwitch
+          icon={<Coffee size={13} />}
+          title="Manter o computador acordado"
+          hint="Impede a suspensão enquanto houver missões na fila."
+          checked={draft.keepAwake}
+          onChange={(value) => set('keepAwake', value)}
+        />
+        <ShiftSwitch
+          icon={<PanelBottom size={13} />}
+          title="Seguir na bandeja ao fechar a janela"
+          hint="O Hive continua trabalhando ao lado do relógio do Windows."
+          checked={draft.runInBackground}
+          onChange={(value) => set('runInBackground', value)}
+        />
+      </div>
+
+      <div className="shift-commands">
+        <div className="shift-rule-text">
+          <strong>
+            <Terminal size={13} /> Comandos durante o turno
+          </strong>
+          <small>
+            Ninguém está olhando para aprovar: o que não for liberado é negado na hora e aparece no
+            histórico da tarefa.
+          </small>
+        </div>
+        <div className="shift-modes" role="radiogroup" aria-label="Comandos liberados">
+          {COMMAND_MODES.map((mode) => (
+            <button
+              key={mode.value}
+              role="radio"
+              aria-checked={draft.commandMode === mode.value}
+              className={draft.commandMode === mode.value ? `selected ${mode.value}` : mode.value}
+              onClick={() => {
+                set('commandMode', mode.value);
+                setNewCommand('');
+              }}
+            >
+              <strong>
+                {mode.icon} {mode.label}
+              </strong>
+              <small>{mode.hint}</small>
+            </button>
+          ))}
+        </div>
+
+        {draft.commandMode === 'all' ? (
+          <p className="shift-all-warning" role="note">
+            <TriangleAlert size={14} />
+            Os agentes poderão instalar pacotes, apagar arquivos e acessar a internet sem perguntar.
+            Use só em projetos de teste ou que você possa restaurar.
+          </p>
+        ) : (
+          <div className="shift-list">
+            <span className="shift-list-label">
+              {draft.commandMode === 'except' ? 'Bloqueados' : 'Liberados'} · {list.length}
+              <small>Termine com * para aceitar argumentos, ex.: npm test *</small>
+            </span>
+            <ul className={draft.commandMode === 'except' ? 'shift-chips blocked' : 'shift-chips'}>
+              {list.map((command) => (
+                <li key={command}>
+                  <code>{command}</code>
+                  <button
+                    className="icon-button"
+                    title="Remover"
+                    aria-label={`Remover ${command}`}
+                    onClick={() =>
+                      set(
+                        listKey,
+                        list.filter((item) => item !== command),
+                      )
+                    }
+                  >
+                    <X size={12} />
+                  </button>
+                </li>
+              ))}
+              {!list.length && (
+                <li className="shift-chips-empty">
+                  {draft.commandMode === 'except'
+                    ? 'Nada bloqueado: todos os comandos rodam.'
+                    : 'Nenhum comando: só os que apenas leem rodam.'}
+                </li>
+              )}
+            </ul>
+            <form
+              className="shift-add-command"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addCommand();
+              }}
+            >
+              <input
+                value={newCommand}
+                maxLength={200}
+                spellCheck={false}
+                placeholder={
+                  draft.commandMode === 'except'
+                    ? 'Bloquear comando, ex.: npm install *'
+                    : 'Liberar comando, ex.: pnpm test *'
+                }
+                onChange={(event) => setNewCommand(event.target.value)}
+              />
+              <button type="submit" className="secondary" disabled={!newCommand.trim()}>
+                <Plus size={13} /> Adicionar
+              </button>
+            </form>
+          </div>
+        )}
+
+        <p className="shift-never">
+          <Lock size={12} />
+          Sempre negados, em qualquer modo: git push, commit, reset, rebase, merge, checkout,
+          switch, tag e branch, e publicar pacotes. Isso fica com você.
+        </p>
       </div>
 
       <footer className="shift-savebar">
@@ -424,6 +477,33 @@ function ShiftSettings({
     </section>
   );
 }
+
+/** How the shift picks commands, as the user reads it. */
+const COMMAND_MODES: {
+  value: AutopilotSettings['commandMode'];
+  label: string;
+  hint: string;
+  icon: ReactNode;
+}[] = [
+  {
+    value: 'only',
+    label: 'Somente estes',
+    hint: 'Só os comandos da lista e os que apenas leem. Recomendado.',
+    icon: <ShieldCheck size={13} />,
+  },
+  {
+    value: 'except',
+    label: 'Todos, exceto estes',
+    hint: 'Qualquer comando roda, menos os da lista.',
+    icon: <ShieldMinus size={13} />,
+  },
+  {
+    value: 'all',
+    label: 'Todos',
+    hint: 'Qualquer comando roda sem perguntar.',
+    icon: <ShieldOff size={13} />,
+  },
+];
 
 /** A setting that is on or off, as a switch with its explanation beside it. */
 function ShiftSwitch({
