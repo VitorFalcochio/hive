@@ -4448,34 +4448,272 @@ button.mission-done-toggle:hover {
   color: var(--muted-foreground);
 }
 
-/* Modo Turno: shift status, queue and history */
-.shift-status {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+/* Modo Turno: a night sky across the top of the page, like the honeycomb behind the overview.
+   Full strength behind the header, fading into the page below, and it scrolls away with it. */
+.content.shift-mode {
+  position: relative;
+  background: var(--background);
 }
-.shift-status > div {
+.content.shift-mode > .page > :not(.shift-sky) {
+  position: relative;
+  z-index: 1;
+}
+.shift-sky {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 0;
+  height: 720px;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(520px 380px at 82% 150px, rgba(255, 222, 140, 0.13), transparent 70%),
+    linear-gradient(180deg, #060918 0%, #0e1438 40%, #1d1a4c 75%, #1d1a4c 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 50%, transparent 100%);
+}
+.shift-sky.paused {
+  background:
+    radial-gradient(520px 380px at 82% 150px, rgba(255, 222, 140, 0.08), transparent 70%),
+    linear-gradient(180deg, #04050f 0%, #0a0e2c 45%, #161540 100%);
+}
+.shift-hero {
+  margin-bottom: 36px;
+  padding-top: 24px;
+  color: #eef0ff;
+}
+.shift-hero-body {
   display: grid;
-  gap: 2px;
+  gap: 12px;
+  max-width: 580px;
 }
-.shift-status small,
-.shift-section > header small,
-.shift-queue small,
-.shift-history small {
-  color: var(--muted-foreground);
+.shift-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font: 500 10.5px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ffd98a;
+}
+.shift-hero h1 {
+  color: #fff;
+  font-size: clamp(2.1rem, 4vw, 3rem);
+}
+.shift-hero-text {
+  margin: 0;
+  color: #c3c7e8;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.shift-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.shift-hero .shift-toggle {
+  border: 1px solid #f5b544;
+  background: #f5b544;
+  color: #1c1405;
+  font-weight: 600;
+}
+.shift-hero .shift-toggle:hover:not(:disabled) {
+  background: #ffc75e;
+  box-shadow: 0 0 18px rgba(245, 181, 68, 0.45);
+}
+.shift-hero .shift-toggle.on {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef0ff;
+}
+.shift-hero .shift-toggle.on:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+}
+.shift-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(6, 9, 24, 0.55);
+  backdrop-filter: blur(4px);
+  font-size: 12.5px;
+}
+.shift-hero-note {
+  margin: 0;
+  color: #9aa0cc;
   font-size: 12px;
 }
+.shift-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.shift-stats > div {
+  min-width: 120px;
+  padding: 9px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  background: rgba(6, 9, 24, 0.5);
+  backdrop-filter: blur(4px);
+}
+.shift-stats dt {
+  color: #9aa0cc;
+  font-size: 11px;
+}
+.shift-stats dd {
+  margin: 2px 0 0;
+  color: #ffd98a;
+  font: 600 18px var(--font-mono);
+}
+
+/* Stars */
+.shift-star {
+  position: absolute;
+  background: #fff;
+  opacity: 0.75;
+}
+.shift-star.faint {
+  opacity: 0.28;
+}
+.shift-star.twinkle {
+  animation: shift-twinkle 4s steps(4) infinite;
+}
+.shift-star.faint.twinkle {
+  animation-name: shift-twinkle-faint;
+}
+.shift-star-bright {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  background: #fff;
+  box-shadow:
+    3px 0 #fff,
+    -3px 0 #fff,
+    0 3px #fff,
+    0 -3px #fff,
+    0 0 10px 2px rgba(255, 255, 255, 0.35);
+  animation: shift-twinkle 5s steps(5) infinite;
+}
+@keyframes shift-twinkle {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+@keyframes shift-twinkle-faint {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.08;
+  }
+}
+
+/* The moon, high on the right */
+.shift-scene {
+  position: absolute;
+  top: 56px;
+  right: 9%;
+  width: 240px;
+  height: 240px;
+}
+.shift-moon-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 233, 170, 0.32), transparent 65%);
+  animation: shift-glow 6s ease-in-out infinite;
+}
+@keyframes shift-glow {
+  50% {
+    transform: scale(1.08);
+    opacity: 0.75;
+  }
+}
+.shift-moon {
+  position: absolute;
+  top: 48px;
+  left: 48px;
+  width: 144px;
+  height: 144px;
+  filter: drop-shadow(0 0 18px rgba(255, 236, 180, 0.45));
+}
+.shift-sky.working .shift-moon {
+  filter: drop-shadow(0 0 26px rgba(255, 236, 180, 0.6));
+}
+.shift-sky.paused .shift-moon {
+  filter: drop-shadow(0 0 10px rgba(255, 236, 180, 0.3)) brightness(0.88);
+}
+.shift-sky.paused .shift-moon-glow {
+  opacity: 0.6;
+}
+
+/* Narrow windows: the moon steps back behind the text */
+@media (max-width: 1200px) {
+  .shift-scene {
+    right: -40px;
+    opacity: 0.5;
+  }
+}
+
+/* Queue and history */
 .shift-warning {
   margin: -8px 0 16px;
   font-size: 12.5px;
+}
+.shift-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+@media (max-width: 1100px) {
+  .shift-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.shift-columns > .card {
+  margin: 0;
 }
 .shift-section {
   display: grid;
   gap: 12px;
 }
 .shift-section > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.shift-section > header > div {
   display: grid;
   gap: 2px;
+}
+.shift-section-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: #161b45;
+  color: #ffd98a;
+}
+.shift-section > header small,
+.shift-queue small,
+.shift-history small {
+  color: var(--muted-foreground);
+  font-size: 12px;
 }
 .shift-queue,
 .shift-history {
@@ -4490,36 +4728,45 @@ button.mission-done-toggle:hover {
   align-items: center;
   gap: 12px;
   min-width: 0;
-  padding: 10px 4px;
-  border-bottom: 1px solid var(--border);
+  padding: 10px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s;
+}
+.shift-queue li:hover {
+  background: var(--secondary);
 }
 .shift-queue li.current {
-  box-shadow: inset 2px 0 0 var(--success);
-  padding-left: 12px;
+  border-color: rgba(245, 181, 68, 0.45);
+  background: linear-gradient(90deg, rgba(245, 181, 68, 0.12), transparent 70%);
 }
 .shift-position {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--secondary);
   color: var(--muted-foreground);
-  font-size: 11.5px;
-  font-weight: 600;
+  font: 600 11.5px var(--font-mono);
+}
+.shift-queue li.current .shift-position {
+  background: #fbefc4;
+  color: #5a3608;
+  box-shadow: 0 0 10px rgba(255, 236, 180, 0.6);
 }
 .shift-title {
   display: grid;
   flex: 1;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--foreground);
   text-align: left;
-  justify-content: start;
+  justify-content: stretch;
   justify-items: start;
   height: auto;
   font-weight: 500;
@@ -4527,8 +4774,29 @@ button.mission-done-toggle:hover {
 .shift-title small {
   font-weight: 400;
 }
+.shift-queue .shift-title:hover {
+  background: transparent;
+  color: var(--foreground);
+}
 .shift-title:hover strong {
   text-decoration: underline;
+}
+.shift-progress {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: 4px;
+  margin-top: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--secondary);
+}
+.shift-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #d98a0c, #f5b544);
+  transition: width 0.4s;
 }
 .shift-run-status {
   display: inline-flex;
@@ -4548,8 +4816,11 @@ button.mission-done-toggle:hover {
   align-items: flex-start;
   gap: 10px;
   min-width: 0;
-  padding: 6px 2px;
+  padding: 8px 4px;
   border-bottom: 1px solid var(--border);
+}
+.shift-history li:last-child {
+  border-bottom: 0;
 }
 .shift-history li > div {
   display: grid;
@@ -4559,6 +4830,218 @@ button.mission-done-toggle:hover {
 .shift-history li .dot,
 .shift-history li > span:first-child {
   margin-top: 5px;
+}
+
+/* Modo Turno rules: attempts, switches and the allowed commands as chips */
+.shift-rules {
+  margin-bottom: 24px;
+}
+.shift-rules-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .shift-rules-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.shift-rules-column {
+  display: grid;
+  gap: 12px;
+}
+.shift-rule {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 2%);
+}
+.shift-rule-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.shift-rule-text strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.shift-rule-text strong svg {
+  color: #ffd98a;
+}
+.shift-rule-text small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* 1 to 5, as a segmented control */
+.shift-attempts {
+  display: flex;
+  flex-shrink: 0;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background);
+}
+.shift-attempts button {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 600 12px var(--font-mono);
+  justify-content: center;
+}
+.shift-attempts button:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+.shift-attempts button.selected {
+  background: #f5b544;
+  color: #1c1405;
+  box-shadow: 0 0 12px rgba(245, 181, 68, 0.35);
+}
+
+/* On/off switches */
+.shift-switch-row {
+  cursor: pointer;
+  margin: 0;
+}
+.shift-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--secondary);
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
+}
+.shift-switch:hover {
+  background: var(--secondary);
+}
+.shift-switch > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  transition:
+    transform 0.2s,
+    background-color 0.2s;
+}
+.shift-switch.on,
+.shift-switch.on:hover {
+  border-color: #f5b544;
+  background: rgba(245, 181, 68, 0.25);
+}
+.shift-switch.on > span {
+  transform: translateX(18px);
+  background: #f5b544;
+  box-shadow: 0 0 8px rgba(245, 181, 68, 0.6);
+}
+
+/* Allowed commands */
+.shift-commands {
+  display: grid;
+  align-items: start;
+  gap: 12px;
+}
+.shift-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.shift-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 2px 10px;
+  border: 1px solid rgba(245, 181, 68, 0.22);
+  border-radius: 999px;
+  background: rgba(245, 181, 68, 0.07);
+}
+.shift-chips code {
+  color: #ffe2a8;
+  font: 500 12px var(--font-mono);
+  background: none;
+  padding: 0;
+}
+.shift-chips .icon-button {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+.shift-chips li.shift-chips-empty {
+  padding: 6px 10px;
+  border-style: dashed;
+  border-color: var(--border);
+  background: none;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.shift-add-command {
+  display: flex;
+  gap: 8px;
+}
+.shift-add-command input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* Save bar */
+.shift-savebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.shift-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #ffd98a;
+  font-size: 12.5px;
+}
+.shift-dirty.clean {
+  color: var(--muted-foreground);
+}
+.shift-dirty.clean svg {
+  color: var(--success);
+}
+.shift-save:not(:disabled) {
+  border-color: #f5b544;
+  background: #f5b544;
+  color: #1c1405;
+  font-weight: 600;
+}
+.shift-save:not(:disabled):hover {
+  background: #ffc75e;
 }
 
 /* Buscar: project-wide search of file names and contents */

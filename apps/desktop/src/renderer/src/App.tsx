@@ -635,7 +635,9 @@ export function App() {
                     ? 'content home-mode'
                     : page === 'mission'
                       ? 'content cover-mode'
-                      : 'content'
+                      : page === 'shift'
+                        ? 'content shift-mode'
+                        : 'content'
             }
           >
             {page === 'overview' && <HiveField key="home" />}
