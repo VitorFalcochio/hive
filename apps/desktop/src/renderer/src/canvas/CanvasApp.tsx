@@ -1,16 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
+import { ReactFlowProvider } from '@xyflow/react';
 import {
   Blocks,
+  Bot,
   Columns3,
-  Crosshair,
   ExternalLink,
   Hexagon,
-  LayoutDashboard,
   LayoutGrid,
-  Maximize,
-  Network,
-  PanelBottom,
   PanelRight,
   PanelRightClose,
   Play,
@@ -20,8 +16,6 @@ import {
   Sparkles,
   Square,
   Unplug,
-  ZoomIn,
-  ZoomOut,
   Search,
 } from 'lucide-react';
 import type { CanvasRunSummary, CanvasSnapshot } from '@hive/core';
@@ -256,7 +250,6 @@ function Toolbar({
   onPrefs: (patch: Partial<CanvasPrefs>) => void;
   onNewMission: () => void;
 }) {
-  const flow = useReactFlow();
   const action = useTask();
   const tasks = snapshot?.detail.tasks ?? [];
   const live = !!snapshot && (snapshot.detail.run.status === 'running' || tasks.some(isLive));
@@ -282,152 +275,107 @@ function Toolbar({
     group: item.status === 'running' || item.status === 'planning' ? 'Em andamento' : 'Recentes',
   }));
 
+  const status = planning ? 'Planejando' : run ? statusLabels[run.status] : '';
+  const elapsed = snapshot ? formatDuration(runElapsedMs(snapshot, now)) : '';
+
+  // Only what is used all the time stays here; zoom, fit, centre, reorganise, logs and
+  // "open in Hive" are in the Command Palette (and on F, the minimap and the console's own bar).
   return (
     <header className="nc-toolbar">
-      <div className="nc-brand">
-        <Hexagon size={15} strokeWidth={2.4} />
-        <span>hive</span>
-        <span className="sep">/</span>
-        <Network size={14} />
-        <span>Workspace</span>
-      </div>
-      <div className="nc-picker nodrag">
-        <Select
-          value={runId ?? ''}
-          options={options}
-          onChange={onRun}
-          placeholder="Escolha uma missão"
-        />
-      </div>
-      <button
-        className="icon-button"
-        title="Nova missão"
-        aria-label="Nova missão"
-        onClick={onNewMission}
-      >
-        <Plus size={15} />
-      </button>
-      {run && snapshot && (
-        <div className="nc-stats">
-          <span className="nc-stat" title="Estado da execução">
-            <Dot tone={planning ? 'busy' : runTone(run.status)} />
-            {planning ? 'Planejando' : statusLabels[run.status]}
-          </span>
-          <span className="nc-stat" title="Agentes trabalhando agora">
-            <strong>{activeAgents(snapshot)}</strong> ativos
-          </span>
-          <span className="nc-stat" title="Tarefas concluídas / total">
-            <strong>
-              {done}/{tasks.length}
-            </strong>{' '}
-            tarefas
-          </span>
-          <span className="nc-stat mono" title="Desde a primeira tarefa iniciada">
-            {formatDuration(runElapsedMs(snapshot, now))}
-          </span>
-          {connection !== 'live' && (
-            <span className={`nc-stat nc-conn ${connection}`}>
-              <Unplug size={12} /> {connection === 'connecting' ? 'Reconectando' : 'Desconectado'}
-            </span>
-          )}
+      <div className="nc-toolbar-side">
+        <Hexagon className="nc-logo" size={14} strokeWidth={2.4} aria-label="Hive" />
+        <div className="nc-picker">
+          <Select
+            value={runId ?? ''}
+            options={options}
+            onChange={onRun}
+            placeholder="Escolha uma missão"
+          />
         </div>
-      )}
-      <span className="spacer" />
-      <div className="nc-tools nodrag">
-        <div className="nc-segment" role="group" aria-label="Visualização">
+        <button
+          className="icon-button nc-icon"
+          title="Nova missão"
+          aria-label="Nova missão"
+          onClick={onNewMission}
+        >
+          <Plus size={14} />
+        </button>
+        {run && snapshot && (
+          <div className="nc-stats">
+            <span className="nc-stat" title="Tarefas concluídas / total">
+              <Dot tone={planning ? 'busy' : runTone(run.status)} />
+              <span className="sr-only">{status}: </span>
+              <strong>
+                {done}/{tasks.length}
+              </strong>
+            </span>
+            <span className="nc-stat" title="Agentes trabalhando agora">
+              <Bot size={12} />
+              <strong>{activeAgents(snapshot)}</strong>
+            </span>
+            {connection !== 'live' && (
+              <span
+                className={`nc-stat nc-conn ${connection}`}
+                title={connection === 'connecting' ? 'Reconectando' : 'Desconectado'}
+              >
+                <Unplug size={12} />
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <nav className="nc-dock" aria-label="Barra de ferramentas">
+        <div className="nc-dock-group" role="group" aria-label="Visualização">
           {modes.map(({ id, label, icon: Icon, title }) => (
             <button
               key={id}
               className={prefs.grouping === id ? 'on' : undefined}
               aria-pressed={prefs.grouping === id}
-              title={title}
+              aria-label={label}
+              title={`${label}: ${title}`}
               onClick={() => onPrefs({ grouping: id })}
             >
-              <Icon size={13} /> {label}
+              <Icon size={15} />
             </button>
           ))}
         </div>
-        <span className="nc-divider" />
         {run && snapshot && (
-          <button
-            className="secondary nc-small"
-            title="Blocos: notas, grupos e Nectar — arraste para o canvas"
-            onClick={() => window.dispatchEvent(new Event('nc:blocks'))}
-          >
-            <Blocks size={12} /> Blocos
-          </button>
+          <>
+            <span className="nc-dock-divider" />
+            <button
+              aria-label="Blocos"
+              title="Blocos: notas, grupos e Nectar — arraste para o canvas"
+              onClick={() => window.dispatchEvent(new Event('nc:blocks'))}
+            >
+              <Blocks size={15} />
+            </button>
+            <button
+              className="nc-autopilot-button"
+              aria-label="Autopilot"
+              title="Autopilot: criar fluxo visual com a Queen"
+              onClick={() => window.dispatchEvent(new Event('nc:autopilot'))}
+            >
+              <Sparkles size={15} />
+            </button>
+          </>
         )}
-        {run && snapshot && (
-          <button
-            className="secondary nc-small nc-autopilot-button"
-            title="Criar fluxo visual com a Queen"
-            onClick={() => window.dispatchEvent(new Event('nc:autopilot'))}
-          >
-            <Sparkles size={12} /> Autopilot
-          </button>
-        )}
+        <span className="nc-dock-divider" />
         <button
-          className="icon-button"
-          title="Command Palette (Ctrl + Espaço)"
+          title="Command Palette (Ctrl + Espaço): zoom, centralizar, logs e mais"
           aria-label="Abrir Command Palette"
           onClick={() => window.dispatchEvent(new Event('nc:commands'))}
         >
           <Search size={15} />
         </button>
-        <button
-          className="icon-button"
-          title="Aproximar"
-          aria-label="Aproximar"
-          onClick={() => void flow.zoomIn({ duration: 150 })}
-        >
-          <ZoomIn size={15} />
-        </button>
-        <button
-          className="icon-button"
-          title="Afastar"
-          aria-label="Afastar"
-          onClick={() => void flow.zoomOut({ duration: 150 })}
-        >
-          <ZoomOut size={15} />
-        </button>
-        <button
-          className="icon-button"
-          title="Ajustar à tela (F)"
-          aria-label="Ajustar à tela"
-          onClick={() => void flow.fitView({ padding: 0.12, duration: 250 })}
-        >
-          <Maximize size={14} />
-        </button>
-        <button
-          className="icon-button"
-          title="Centralizar no trabalho em andamento"
-          aria-label="Centralizar"
-          onClick={() => {
-            const busy = tasks
-              .filter(isLive)
-              .flatMap((task) => [
-                { id: `task:${task.id}` },
-                ...(task.workerId ? [{ id: `agent:${task.workerId}` }] : []),
-              ]);
-            void flow.fitView({
-              nodes: busy.length ? busy : undefined,
-              padding: 0.3,
-              maxZoom: 1.1,
-              duration: 300,
-            });
-          }}
-        >
-          <Crosshair size={14} />
-        </button>
-        <button
-          className="icon-button"
-          title="Reorganizar: o que foi movido volta à organização automática; o que está fixado fica"
-          aria-label="Reorganizar"
-          onClick={() => window.dispatchEvent(new Event('nc:relayout'))}
-        >
-          <LayoutDashboard size={14} />
-        </button>
-        <span className="nc-divider" />
+      </nav>
+
+      <div className="nc-toolbar-side end">
+        {run && snapshot && (
+          <span className="nc-stat mono" title={`${status} · desde a primeira tarefa iniciada`}>
+            {elapsed}
+          </span>
+        )}
         {run && run.status === 'running' && (
           <button
             className="secondary nc-small"
@@ -440,7 +388,7 @@ function Toolbar({
                 void action.run(async () => void (await window.hive.invoke('run.cancel', run.id)));
             }}
           >
-            <Square size={11} /> Cancelar
+            <Square size={10} /> Cancelar
           </button>
         )}
         {run && canExecute && (
@@ -451,31 +399,12 @@ function Toolbar({
               void action.run(async () => void (await window.hive.invoke('run.start', run.id)))
             }
           >
-            <Play size={12} />{' '}
+            <Play size={11} />{' '}
             {run.status === 'awaiting_plan_approval' ? 'Executar plano' : 'Retomar'}
           </button>
         )}
-        {run && (
-          <button
-            className="icon-button"
-            title="Abrir esta missão na janela principal"
-            aria-label="Abrir no Hive"
-            onClick={() => void window.hive.invoke('window.showRun', run.id).catch(() => undefined)}
-          >
-            <ExternalLink size={14} />
-          </button>
-        )}
         <button
-          className="icon-button"
-          title={prefs.consoleOpen ? 'Recolher console' : 'Mostrar console'}
-          aria-label="Console"
-          aria-pressed={prefs.consoleOpen}
-          onClick={() => onPrefs({ consoleOpen: !prefs.consoleOpen })}
-        >
-          <PanelBottom size={14} />
-        </button>
-        <button
-          className="icon-button"
+          className="icon-button nc-icon"
           title={prefs.inspectorOpen ? 'Esconder inspector' : 'Mostrar inspector'}
           aria-label="Inspector"
           aria-pressed={prefs.inspectorOpen}
