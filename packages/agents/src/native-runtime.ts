@@ -8,6 +8,7 @@ import {
   stateForTool,
   toolNameSchema,
   type CommandEvidence,
+  type ContextMode,
   type ExecutionLimits,
   type McpServer,
   type SoldierRole,
@@ -196,13 +197,25 @@ export interface NativeRuntimeOptions {
   mcpServers?: () => McpServer[];
   /** Opens local pages for view_page; the tool is left out without it. */
   viewPage?: PageViewer;
+  /**
+   * How tool outputs are cut down before they reach the prompt. 'legacy' (the default) is
+   * Hive's token saver as it has always worked; 'off' sends them as produced, under the same
+   * hard size cap, for comparison runs. 'shield' is refused until it exists.
+   */
+  contextMode?: ContextMode;
 }
 
 export class NativeAgentRuntime implements AgentRuntime {
   readonly id = 'native';
   private readonly sessions = new Map<string, ActiveSession>();
 
-  constructor(private readonly options: NativeRuntimeOptions = {}) {}
+  private readonly contextMode: ContextMode;
+
+  constructor(private readonly options: NativeRuntimeOptions = {}) {
+    this.contextMode = options.contextMode ?? 'legacy';
+    if (this.contextMode === 'shield')
+      throw new HiveError('VALIDATION', "O modo de contexto 'shield' ainda não foi implementado.");
+  }
 
   async start(input: AgentTaskInput): Promise<AgentSession> {
     if (this.sessions.has(input.sessionId))
@@ -243,7 +256,7 @@ export class NativeAgentRuntime implements AgentRuntime {
     };
     const usage = { promptTokens: 0, completionTokens: 0 };
     const commands: CommandEvidence[] = [];
-    const ledger = new ContextLedger('legacy');
+    const ledger = new ContextLedger(this.contextMode);
     const { limits, worker } = input;
     const timeout = AbortSignal.timeout(limits.taskTimeoutMin * 60_000);
     const signal = AbortSignal.any([session.controller.signal, timeout]);
@@ -266,7 +279,14 @@ export class NativeAgentRuntime implements AgentRuntime {
     const background = new BackgroundProcesses();
     try {
       const root = await realpath(input.worktreePath);
-      const env: LoopEnv = { chat: input.chat, limits, signal, usage, ledger };
+      const env: LoopEnv = {
+        chat: input.chat,
+        limits,
+        signal,
+        usage,
+        ledger,
+        contextMode: this.contextMode,
+      };
       const ctx: ToolContext = {
         root,
         worker,
@@ -276,6 +296,7 @@ export class NativeAgentRuntime implements AgentRuntime {
         commands,
         emit,
         vision: true,
+        contextMode: this.contextMode,
         background,
         ...(this.options.viewPage ? { viewPage: this.options.viewPage } : {}),
         requestApproval: async (request) => {
@@ -364,6 +385,7 @@ interface LoopEnv {
   usage: { promptTokens: number; completionTokens: number };
   /** Counts every loop of the session: the captain's and her soldiers'. */
   ledger: ContextLedger;
+  contextMode: ContextMode;
 }
 
 interface LoopOptions {
@@ -397,10 +419,13 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
   const record = (tool: string, result: { output: string; isError: boolean; rawChars?: number }) =>
     ledger.toolCall(loop.agent, tool, result);
   const { messages, allowed, progress } = loop;
-  // Each loop remembers only what its own messages show.
+  // Each loop remembers only what its own messages show. With the context mode 'off' nothing
+  // is cut down, so there is no kept output to read back and nothing to shorten later.
   const saver = new TokenSaver();
   const ctx: ToolContext = { ...loop.ctx, saver };
-  const tools = allowed.has('run_command') ? [...loop.tools, readOutputDefinition] : loop.tools;
+  const shrinks = env.contextMode !== 'off';
+  const keepsOutputs = shrinks && allowed.has('run_command');
+  const tools = keepsOutputs ? [...loop.tools, readOutputDefinition] : loop.tools;
   const emit = (event: RuntimeEvent) => ctx.emit(event);
   const done = (status: LoopResult['status'], summary: string, error: string | null) => ({
     status,
@@ -587,7 +612,7 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
           : done('failed', summary, 'The agent reported that it could not complete the task.');
         break;
       }
-      if (call.function.name === readOutputDefinition.function.name && allowed.has('run_command')) {
+      if (call.function.name === readOutputDefinition.function.name && keepsOutputs) {
         let content: string;
         let failed = false;
         try {
@@ -672,15 +697,16 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
         },
       });
       messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
-      if (result.read)
+      if (result.read && shrinks)
         saver.remember(result.read.key, result.read.lines, call.id, result.read.buildsOnEarlier);
       if (result.image) images.push(result.image);
     }
     if (finished) return finished;
-    compactToolOutputs(messages, KEEP_FULL_STEPS, (callId, charsRemoved) => {
-      saver.forgetCall(callId);
-      ledger.compacted(charsRemoved);
-    });
+    if (shrinks)
+      compactToolOutputs(messages, KEEP_FULL_STEPS, (callId, charsRemoved) => {
+        saver.forgetCall(callId);
+        ledger.compacted(charsRemoved);
+      });
     // Tool messages carry text only, so the images follow them in a user message.
     if (images.length) {
       messages.push({

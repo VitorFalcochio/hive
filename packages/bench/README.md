@@ -23,7 +23,7 @@ Mede o que os agentes do Hive conseguem fazer, com tarefas fixas e notas objetiv
     npm run bench -- --models modelo-a,modelo-b       # outros modelos do mesmo provedor
     npm run bench -- --label depois --compare latest  # compara com a rodada anterior
 
-Outras opções: `--provider <id>`, `--timeout-min 15`, `--max-steps 60`, `--keep` (mantém as cópias de trabalho em `%TEMP%/hive-bench`).
+Outras opções: `--context off|legacy` (como as saídas das ferramentas chegam ao prompt; `legacy` é o Hive como é hoje, `off` envia tudo como foi produzido, só com o teto de 24 mil caracteres; o padrão é `legacy`), `--provider <id>`, `--timeout-min 15`, `--max-steps 60`, `--keep` (mantém as cópias de trabalho em `%TEMP%/hive-bench`).
 
 Por padrão, o provedor, a chave e os modelos vêm do próprio Hive (`%APPDATA%/Hive`). O bench roda no Electron para ler a chave sem exibi-la. Para usar outro provedor, defina `HIVE_BENCH_BASE_URL`, `HIVE_BENCH_API_KEY` e, se precisar, `HIVE_BENCH_KIND`, e informe `--models`.
 

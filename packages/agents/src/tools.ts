@@ -4,6 +4,7 @@ import {
   commandMatchesAllowList,
   imageType,
   type CommandEvidence,
+  type ContextMode,
   type ToolName,
   type Worker,
 } from '@hive/core';
@@ -60,6 +61,8 @@ export interface ToolContext {
   background?: BackgroundProcesses;
   /** This loop's memory of reads and long outputs; without it every result is sent in full. */
   saver?: TokenSaver;
+  /** 'off' sends every output as produced (under the hard cap); absent means 'legacy'. */
+  contextMode?: ContextMode;
 }
 
 export interface ToolImage {
@@ -360,7 +363,7 @@ async function readTool(ctx: ToolContext, args: Record<string, unknown>): Promis
     .join('\n');
   const more = end < lines.length ? `; pass start_line=${end + 1} to read on` : '';
   const output = `${relative} (lines ${start}-${end} of ${lines.length}${more})\n${body}`;
-  const earlier = ctx.saver?.lastRead(key);
+  const earlier = ctx.contextMode === 'off' ? undefined : ctx.saver?.lastRead(key);
   if (earlier) {
     const header = { path: relative, start, end, total: lines.length };
     const short = rereadOutput(header, earlier.lines, window);
@@ -619,7 +622,8 @@ async function commandTool(ctx: ToolContext, args: Record<string, unknown>): Pro
 
 /** A long output condensed to its errors and summary, the full text kept for read_output. */
 function shownOutput(ctx: ToolContext, text: string): string {
-  if (!ctx.saver || text.length <= CONDENSE_OVER_CHARS) return truncate(text);
+  if (!ctx.saver || ctx.contextMode === 'off' || text.length <= CONDENSE_OVER_CHARS)
+    return truncate(text);
   const lines = text.replace(/\s+$/, '').split(/\r?\n/);
   return truncate(condenseOutput(lines, ctx.saver.storeOutput(lines)));
 }

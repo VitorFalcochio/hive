@@ -10,6 +10,7 @@ import {
   isSafeCommand,
   rolePresets,
   type ContextMetrics,
+  type ContextMode,
   type ExecutionLimits,
   type Worker,
 } from '@hive/core';
@@ -32,6 +33,8 @@ export interface BenchResult {
   taskId: string;
   level: number;
   model: string;
+  /** How tool outputs were cut down for the prompt; absent in results from before it was chosen. */
+  contextMode?: ContextMode;
   /** Hidden check passed. */
   passed: boolean;
   noRegressions: boolean;
@@ -70,6 +73,8 @@ export interface RunTaskOptions {
   model: string;
   chat: ChatClient;
   limits: ExecutionLimits;
+  /** 'legacy' (Hive as shipped) unless a comparison run asks for another. */
+  contextMode?: ContextMode;
   keepWorkdir?: boolean;
   onEvent?: (event: RuntimeEvent) => void;
 }
@@ -120,7 +125,8 @@ export async function runTask(options: RunTaskOptions): Promise<BenchResult> {
   const { task, model, chat, limits } = options;
   const dir = await prepareWorkdir(task.id);
   const worker = benchWorker(model, limits);
-  const runtime = new NativeAgentRuntime();
+  const contextMode = options.contextMode ?? 'legacy';
+  const runtime = new NativeAgentRuntime({ contextMode });
   const counters = {
     modelCalls: 0,
     toolCalls: 0,
@@ -184,6 +190,7 @@ export async function runTask(options: RunTaskOptions): Promise<BenchResult> {
     taskId: task.id,
     level: task.level,
     model,
+    contextMode,
     passed: graded.passed,
     noRegressions: graded.noRegressions,
     agentStatus: outcome?.status ?? 'error',
