@@ -673,7 +673,7 @@ describe('Scheduler ao fechar o Hive', { timeout: 60_000 }, () => {
 });
 
 describe('Agente com motor Claude Code e aprovações do Hive', { timeout: 60_000 }, () => {
-  it('roda sem provedor e o pedido de permissão vira aprovação do Hive', async () => {
+  it('o pedido de permissão do Claude Code vira aprovação do Hive', async () => {
     const { ClaudeCodePermissions, ClaudeCodeRuntime } = await import('@hive/agents');
     const { fileURLToPath } = await import('node:url');
     const fake = path.resolve(
@@ -689,10 +689,9 @@ describe('Agente com motor Claude Code e aprovações do Hive', { timeout: 60_00
     process.env.FAKE_CLAUDE_MODE = 'permission';
     try {
       const ctx = await setup(async () => ({}), [{ key: 'a' }], false, {
-        runtimeFor: (worker) => (worker.engine === 'claude-code' ? claude : null),
+        // The service sends agents on the Claude Code provider to this engine.
+        runtimeFor: () => claude,
       });
-      const worker = ctx.repos.workers.require('w1', 'Agente');
-      ctx.repos.workers.put({ ...worker, providerId: null, modelId: null, engine: 'claude-code' });
 
       ctx.scheduler.start(ctx.run.id);
       await until(

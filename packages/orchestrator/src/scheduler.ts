@@ -101,14 +101,6 @@ export interface SchedulerOptions {
 
 /** Prefix of the error given to tasks skipped because a dependency did not succeed. */
 const BLOCKED = 'Dependência não concluída';
-/** Claude Code talks to its own model; a provider call from such an agent is a defect. */
-const claudeCodeChat: ChatClient = {
-  chat: () =>
-    Promise.reject(
-      new HiveError('VALIDATION', 'Este agente roda no Claude Code e não usa provedor do Hive.'),
-    ),
-};
-
 const RESUMABLE: ReadonlySet<RunStatus> = new Set([
   'awaiting_plan_approval',
   'review',
@@ -892,17 +884,12 @@ export class Scheduler {
             : {}),
         },
         worker,
-        // Claude Code uses the model set in the user's own Claude Code; the agent's provider
-        // model is kept for when it goes back to Hive's engine.
-        model: worker.engine === 'claude-code' ? 'default' : (worker.modelId ?? 'default'),
-        chat:
-          worker.engine === 'claude-code' || !worker.providerId
-            ? claudeCodeChat
-            : this.options.chatForWorker
-              ? this.options.chatForWorker(worker, (message, data) =>
-                  this.log(run, initial.id, worker.id, 'info', 'warn', message, data),
-                )
-              : this.options.chatFor(worker.providerId),
+        model: worker.modelId!,
+        chat: this.options.chatForWorker
+          ? this.options.chatForWorker(worker, (message, data) =>
+              this.log(run, initial.id, worker.id, 'info', 'warn', message, data),
+            )
+          : this.options.chatFor(worker.providerId!),
         worktreePath: worktree,
         skills,
         limits: worker.limits,

@@ -38,3 +38,9 @@ export {
   type PermissionDecision,
   type PermissionHandler,
 } from './claude-code-permissions';
+export {
+  CLAUDE_CODE_MODELS,
+  ClaudeCodePlanClient,
+  conversationPrompt,
+  type ClaudeCodeChatOptions,
+} from './claude-code-chat';

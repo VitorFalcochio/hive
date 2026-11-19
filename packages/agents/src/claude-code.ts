@@ -87,7 +87,7 @@ export function findClaudeCode(env: NodeJS.ProcessEnv = process.env): string | n
   return null;
 }
 
-function cleanEnv(): NodeJS.ProcessEnv {
+export function cleanEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const name of [...BILLING_ENV, 'ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS']) delete env[name];
   return env;
@@ -96,6 +96,8 @@ function cleanEnv(): NodeJS.ProcessEnv {
 export interface ClaudeCodeAuth {
   loggedIn: boolean;
   authMethod: string | null;
+  /** The signed-in account, shown on the provider as ChatGPT's is. */
+  email?: string | null;
 }
 
 /** `claude auth status`, read as JSON. */
@@ -107,10 +109,15 @@ export function claudeCodeAuth(options: ClaudeCodeOptions): Promise<ClaudeCodeAu
       { env: cleanEnv(), windowsHide: true, timeout: (options.authTimeoutSec ?? 30) * 1000 },
       (error, stdout, stderr) => {
         try {
-          const value = JSON.parse(stdout) as { loggedIn?: unknown; authMethod?: unknown };
+          const value = JSON.parse(stdout) as {
+            loggedIn?: unknown;
+            authMethod?: unknown;
+            email?: unknown;
+          };
           resolve({
             loggedIn: value.loggedIn === true,
             authMethod: typeof value.authMethod === 'string' ? value.authMethod : null,
+            email: typeof value.email === 'string' ? value.email : null,
           });
         } catch {
           reject(

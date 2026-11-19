@@ -101,6 +101,7 @@ function ProviderModal() {
   const task = useTask();
   const keyOptional = !!preset.keyOptional;
   const signIn = preset.signIn === 'chatgpt';
+  const claudeCode = preset.signIn === 'claude-code';
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -132,9 +133,11 @@ function ProviderModal() {
             <strong>{connected.provider.name}</strong>
             <p>
               {connected.models} modelos disponíveis.{' '}
-              {providerPresets[connected.provider.kind].signIn
-                ? 'Usando o plano do ChatGPT: os pedidos dos agentes contam no limite do seu plano, sem cobrança à parte. O acesso fica criptografado no Windows.'
-                : 'A chave fica criptografada no Windows.'}
+              {providerPresets[connected.provider.kind].signIn === 'claude-code'
+                ? 'Usando o login do seu Claude Code: os pedidos contam na cota do seu plano Claude, sem cobrança à parte. O Hive não guarda nenhuma credencial do Claude.'
+                : providerPresets[connected.provider.kind].signIn
+                  ? 'Usando o plano do ChatGPT: os pedidos dos agentes contam no limite do seu plano, sem cobrança à parte. O acesso fica criptografado no Windows.'
+                  : 'A chave fica criptografada no Windows.'}
             </p>
           </div>
         </div>
@@ -236,13 +239,19 @@ function ProviderModal() {
                 className="ghost"
                 onClick={() => void window.hive.invoke('app.openExternal', preset.keyUrl)}
               >
-                <ExternalLink size={13} /> {signIn ? 'Gerenciar uso' : 'Criar chave'}
+                <ExternalLink size={13} /> {preset.signIn ? 'Gerenciar uso' : 'Criar chave'}
               </button>
             )}
           </div>
           <p>{preset.free.summary}</p>
         </div>
-        {signIn ? (
+        {claudeCode ? (
+          <p className="modal-description">
+            O Hive usa o Claude Code instalado neste computador, com o login dele. Se ainda não
+            entrou, rode <code>claude</code> no terminal uma vez e entre com a sua conta claude.ai.
+            Testar a conexão só lê o login; não gasta a cota.
+          </p>
+        ) : signIn ? (
           <p className="modal-description">
             O navegador abre na página da OpenAI. Entre com a sua conta e autorize o Hive a usar o
             seu plano; depois volte para cá.
@@ -295,7 +304,9 @@ function ProviderModal() {
                 : 'Conectando…'
               : signIn
                 ? 'Continuar com o ChatGPT'
-                : 'Adicionar e testar'}
+                : claudeCode
+                  ? 'Conectar o Claude Code'
+                  : 'Adicionar e testar'}
           </button>
         </div>
       </form>
@@ -309,6 +320,8 @@ function KeyModal({ provider }: { provider: ProviderConfig }) {
   const task = useTask();
   if (providerPresets[provider.kind].signIn === 'chatgpt')
     return <ChatGPTAccountModal provider={provider} />;
+  if (providerPresets[provider.kind].signIn === 'claude-code')
+    return <ClaudeCodeAccountModal provider={provider} />;
   return (
     <Modal
       title={`Chave de ${provider.name}`}
@@ -414,6 +427,58 @@ function ChatGPTAccountModal({ provider }: { provider: ProviderConfig }) {
           }
         >
           {task.running ? 'Aguardando o navegador…' : 'Continuar com o ChatGPT'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * The Claude Code account: whatever Claude Code is signed in with. Hive only reads it, so
+ * there is no sign-out here; that belongs to Claude Code itself ("claude auth logout").
+ */
+function ClaudeCodeAccountModal({ provider }: { provider: ProviderConfig }) {
+  const { closeModal, refresh, notify } = useHive();
+  const task = useTask();
+  const signedIn = provider.hasCredential;
+  return (
+    <Modal
+      title={`Conta de ${provider.name}`}
+      description={
+        signedIn
+          ? `Conectado como ${provider.credentialHint?.replace(/^Claude\.ai · /, '') ?? 'sua conta'}. Os pedidos usam a cota do seu plano Claude.`
+          : (provider.lastTest?.message ??
+            'Rode "claude" no terminal uma vez e entre com a sua conta claude.ai; depois verifique de novo.')
+      }
+      onClose={closeModal}
+    >
+      <FormError error={task.error} />
+      <div className="modal-actions">
+        <button
+          type="button"
+          className="ghost"
+          onClick={() =>
+            void window.hive.invoke('app.openExternal', providerPresets['claude-code'].keyUrl)
+          }
+        >
+          <ExternalLink size={13} /> Gerenciar uso
+        </button>
+        <button
+          type="button"
+          disabled={task.running}
+          onClick={() =>
+            void task.run(async () => {
+              try {
+                const models = await connect(provider, '');
+                notify(`${provider.name} conectado · ${models.length} modelos.`);
+                closeModal();
+              } finally {
+                await refresh();
+              }
+            })
+          }
+        >
+          {task.running ? 'Verificando…' : 'Verificar de novo'}
         </button>
       </div>
     </Modal>

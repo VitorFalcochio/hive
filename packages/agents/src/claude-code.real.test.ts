@@ -67,3 +67,19 @@ describe.runIf(process.env.HIVE_REAL_CLAUDE === '1')('Claude Code real', () => {
     },
   );
 });
+
+describe.runIf(process.env.HIVE_REAL_CLAUDE === '1')('Claude Code real como provedor', () => {
+  it('responde um pedido de texto pela conta claude.ai', { timeout: 120_000 }, async () => {
+    const { ClaudeCodePlanClient } = await import('./claude-code-chat');
+    const client = new ClaudeCodePlanClient({ providerId: 'p', executable: findClaudeCode()! });
+    const response = await client.chat({
+      model: 'default',
+      messages: [
+        { role: 'system', content: 'Answer in one word.' },
+        { role: 'user', content: 'Reply with exactly: ok' },
+      ],
+    });
+    expect(response.message.content?.toLowerCase()).toContain('ok');
+    expect(response.usage?.completionTokens).toBeGreaterThan(0);
+  });
+});

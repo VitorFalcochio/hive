@@ -29,9 +29,10 @@ export interface ProviderPreset {
   keyOptional?: boolean;
   /**
    * Signs in with an account instead of taking an API key. `chatgpt` is OpenAI's "Sign in with
-   * ChatGPT": calls spend the user's ChatGPT plan, not an API balance.
+   * ChatGPT": calls spend the user's ChatGPT plan, not an API balance. `claude-code` uses the
+   * sign-in of the Claude Code installed on this computer: its claude.ai plan quota.
    */
-  signIn?: 'chatgpt';
+  signIn?: 'chatgpt' | 'claude-code';
 }
 
 /**
@@ -164,6 +165,22 @@ export const providerPresets: Record<ProviderKind, ProviderPreset> = {
         'Usa a cota do seu plano ChatGPT (Go, Plus ou Pro): sem chave de API e sem cobrança extra. Os pedidos dividem o limite do plano com o Codex; dá para pôr um teto só para o Hive nas configurações de uso do ChatGPT.',
     },
     signIn: 'chatgpt',
+  },
+  'claude-code': {
+    kind: 'claude-code',
+    label: 'Claude Code',
+    // Not called: Hive talks to the Claude Code CLI installed here, never to an Anthropic API.
+    defaultBaseUrl: 'https://claude.ai',
+    docsUrl: 'https://docs.claude.com/en/docs/claude-code/cli-reference',
+    // Where the user sees what the plan has left.
+    keyUrl: 'https://claude.ai/settings/usage',
+    keyHint: 'Sem chave: usa o login do seu Claude Code',
+    free: {
+      available: false,
+      summary:
+        'Usa a cota do seu plano Claude (Pro ou Max) pelo Claude Code instalado neste computador: sem chave de API e sem cobrança por uso. Só funciona com login pela conta claude.ai; login por chave de API é recusado pela trava de custo.',
+    },
+    signIn: 'claude-code',
   },
   'openai-compatible': {
     kind: 'openai-compatible',

@@ -10,8 +10,6 @@ export function workerCompatibilityIssues(
   model: ModelInfo | null,
 ): string[] {
   const issues: string[] = [];
-  // Claude Code brings its own model and sign-in; Hive checks those when a task starts.
-  if (worker.engine === 'claude-code') return [];
   if (!worker.providerId || !provider) return ['No provider selected.'];
   if (!provider.enabled) issues.push(`Provider "${provider.name}" is disabled.`);
   if (!provider.hasCredential && !providerPresets[provider.kind].keyOptional) {

@@ -108,10 +108,8 @@ export class CanvasQueen {
         );
       const usable = (worker: Worker) =>
         worker.role !== 'queen' &&
-        (worker.engine === 'claude-code' ||
-          (!!worker.providerId &&
-            !!worker.modelId &&
-            !!this.options.repos.providers.get(worker.providerId)?.enabled));
+        canRunTasks(worker) &&
+        !!this.options.repos.providers.get(worker.providerId!)?.enabled;
       if (
         action.task.workerId
           ? !team.some((worker) => worker.id === action.task.workerId && usable(worker))

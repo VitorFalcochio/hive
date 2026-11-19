@@ -249,3 +249,97 @@ describe('aprovações do Hive para o Claude Code', { timeout: 30_000 }, () => {
     }
   });
 });
+
+describe('Claude Code como provedor (texto)', { timeout: 30_000 }, () => {
+  async function client(env: Record<string, string> = {}) {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'hive-claude-chat-'));
+    const record = path.join(dir, 'record.json');
+    Object.assign(process.env, { FAKE_CLAUDE_RECORD: record, ...env });
+    const { ClaudeCodePlanClient } = await import('./claude-code-chat');
+    return {
+      record,
+      chat: new ClaudeCodePlanClient({
+        providerId: 'p',
+        executable: process.execPath,
+        argsPrefix: [fake],
+      }),
+    };
+  }
+
+  it('responde texto sem ferramentas, com a conversa e o consumo', async () => {
+    const { record, chat } = await client({ ANTHROPIC_API_KEY: 'sk-nao-deve-vazar' });
+    const response = await chat.chat({
+      model: 'sonnet',
+      messages: [
+        { role: 'system', content: 'Você é a Queen.' },
+        { role: 'user', content: 'Planeje.' },
+        { role: 'assistant', content: 'Isso não era JSON.' },
+        { role: 'user', content: 'Responda só com o JSON.' },
+      ],
+      jsonMode: true,
+    });
+    expect(response.message.content).toContain('eco:');
+    expect(response.usage).toEqual({ promptTokens: 15, completionTokens: 5, cachedTokens: 3 });
+    const started = JSON.parse(await readFile(record, 'utf8'));
+    expect(started.apiKey).toBeNull();
+    expect(started.prompt).toContain('<instructions>\nVocê é a Queen.');
+    expect(started.prompt).toContain('[assistant]\nIsso não era JSON.');
+    expect(started.prompt).toContain('only one JSON object');
+    expect(started.args).toEqual(
+      expect.arrayContaining([
+        '-p',
+        '--output-format',
+        'json',
+        '--tools',
+        '',
+        '--strict-mcp-config',
+        '--max-turns',
+        '1',
+        '--model',
+        'sonnet',
+      ]),
+    );
+  });
+
+  it('recusa pedidos com ferramentas do Hive e explica para onde vão', async () => {
+    const { chat } = await client();
+    await expect(
+      chat.chat({
+        model: 'default',
+        messages: [{ role: 'user', content: 'x' }],
+        tools: [
+          { type: 'function', function: { name: 'read_file', description: '', parameters: {} } },
+        ],
+      }),
+    ).rejects.toThrow('motor Claude Code');
+  });
+
+  it('trava de custo e limite do plano viram erros que o failover entende', async () => {
+    const lock = await client({ FAKE_CLAUDE_AUTH: 'console' });
+    await expect(
+      lock.chat.chat({ model: 'default', messages: [{ role: 'user', content: 'x' }] }),
+    ).rejects.toMatchObject({
+      status: 401,
+      message: expect.stringContaining('Trava de custo'),
+    });
+    delete process.env.FAKE_CLAUDE_AUTH;
+    const limited = await client({ FAKE_CLAUDE_MODE: 'limit' });
+    await expect(
+      limited.chat.chat({ model: 'default', messages: [{ role: 'user', content: 'x' }] }),
+    ).rejects.toMatchObject({
+      status: 429,
+    });
+  });
+
+  it('catálogo e teste de conexão não gastam a cota', async () => {
+    const { record, chat } = await client();
+    const test = await chat.testConnection();
+    expect(test.modelCount).toBe(4);
+    const models = await chat.listModels();
+    expect(models.map((model) => model.id)).toEqual(['default', 'sonnet', 'opus', 'haiku']);
+    expect(models.every((model) => model.pricing?.inputPerMTok === 0)).toBe(true);
+    expect((await chat.account()).authMethod).toBe('claude.ai');
+    // Only `auth status` ran: no prompt was ever sent.
+    expect(existsSync(record)).toBe(false);
+  });
+});

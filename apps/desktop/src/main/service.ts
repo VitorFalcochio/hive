@@ -28,7 +28,6 @@ import {
   type RunDetail,
   type WorkerRole,
   type Workspace,
-  type ClaudeCodeStatus,
 } from '@hive/core';
 import { HiveDatabase, Repositories, SCHEMA_VERSION } from '@hive/persistence';
 import { FlowEngine } from './flow-engine';
@@ -63,9 +62,9 @@ import {
   type AutopilotHistoryItem,
 } from '@hive/orchestrator';
 import {
+  ClaudeCodePlanClient,
   ClaudeCodePermissions,
   ClaudeCodeRuntime,
-  claudeCodeAuth,
   findClaudeCode,
   NativeAgentRuntime,
   probeMcpServer,
@@ -115,6 +114,7 @@ export class DesktopService {
   /** Claude Code's permission prompts become Hive approvals through this local MCP server. */
   private readonly claudePermissions = new ClaudeCodePermissions();
   private claudeRuntime: ClaudeCodeRuntime | undefined;
+  private readonly claudeClients = new Map<string, ClaudeCodePlanClient>();
   readonly canvasQueen: CanvasQueen;
   readonly nexusAutopilot: NexusAutopilot;
   readonly cortex: CortexService;
@@ -263,7 +263,11 @@ export class DesktopService {
         ),
       teamTools: ({ task, worker }) => teamToolsFor(this.teams, this.repos, { task, worker }),
       onTaskFinished: (_run, task) => this.teams.taskFinished(task),
-      runtimeFor: (worker) => (worker.engine === 'claude-code' ? this.claudeCode() : null),
+      // An agent on the Claude Code provider runs its tasks on Claude Code itself.
+      runtimeFor: (worker) =>
+        worker.providerId && this.repos.providers.get(worker.providerId)?.kind === 'claude-code'
+          ? this.claudeCode()
+          : null,
     });
     this.teams = new HiveTeams({ repos: this.repos, scheduler: this.scheduler });
     this.flow = new FlowEngine({
@@ -597,6 +601,32 @@ export class DesktopService {
     this.backupTimer = setInterval(safeTick, 60 * 60 * 1000);
   }
 
+  /** Agents moved to the Claude Code provider get its default model, untested. */
+  private async assignClaudeCode(
+    providerId: string,
+    workerIds: string[] | null,
+  ): Promise<RecommendedSetup> {
+    if (!this.repos.listModels(providerId).length) {
+      this.repos.replaceModels(providerId, await this.client(providerId).listModels());
+      this.repos.providers.put({
+        ...this.repos.providers.require(providerId, 'Provedor'),
+        modelsFetchedAt: nowIso(),
+      });
+    }
+    const workers = this.repos.workers
+      .list()
+      .filter((worker) => !workerIds || workerIds.includes(worker.id));
+    if (workerIds && workers.length !== workerIds.length)
+      throw new HiveError('NOT_FOUND', 'Agente não encontrado.');
+    const result: RecommendedSetup = { assignments: [], unavailable: [] };
+    for (const worker of workers) {
+      this.repos.workers.put({ ...worker, providerId, modelId: 'default', updatedAt: nowIso() });
+      result.assignments.push({ workerId: worker.id, workerName: worker.name, modelId: 'default' });
+    }
+    this.changed('worker');
+    return result;
+  }
+
   /** The Claude Code engine, made on first use with the executable found then. */
   private claudeCode(): ClaudeCodeRuntime {
     this.claudeRuntime ??= new ClaudeCodeRuntime({
@@ -604,24 +634,6 @@ export class DesktopService {
       permissions: this.claudePermissions,
     });
     return this.claudeRuntime;
-  }
-
-  private async claudeCodeStatus(): Promise<ClaudeCodeStatus> {
-    const executable = findClaudeCode();
-    if (!executable)
-      return {
-        installed: false,
-        loggedIn: false,
-        authMethod: null,
-        error:
-          'O Claude Code não está instalado. Instale com "npm install -g @anthropic-ai/claude-code".',
-      };
-    try {
-      const auth = await claudeCodeAuth({ executable });
-      return { installed: true, ...auth, error: null };
-    } catch (error) {
-      return { installed: true, loggedIn: false, authMethod: null, error: errorMessage(error) };
-    }
   }
 
   dispose(): void {
@@ -1068,9 +1080,24 @@ export class DesktopService {
     return new GatedClient(this.client(providerId), gate);
   }
 
-  private client(providerId: string): OpenAICompatibleClient | ChatGPTPlanClient {
+  private client(
+    providerId: string,
+  ): OpenAICompatibleClient | ChatGPTPlanClient | ClaudeCodePlanClient {
     const provider = this.repos.providers.require(providerId, 'Provedor');
     if (!provider.enabled) throw new HiveError('PROVIDER', 'O provedor está desativado.');
+    if (provider.kind === 'claude-code') {
+      // One per provider, so the sign-in check is cached between calls.
+      let client = this.claudeClients.get(providerId);
+      if (!client)
+        this.claudeClients.set(
+          providerId,
+          (client = new ClaudeCodePlanClient({
+            providerId,
+            executable: findClaudeCode() ?? 'claude',
+          })),
+        );
+      return client;
+    }
     if (provider.kind === 'chatgpt')
       return new ChatGPTPlanClient(
         providerId,
@@ -1451,6 +1478,11 @@ export class DesktopService {
         const provider = this.repos.providers.require(providerId, 'Provedor');
         if (provider.kind === 'chatgpt')
           throw new HiveError('VALIDATION', 'O ChatGPT não usa chave: entre com a sua conta.');
+        if (provider.kind === 'claude-code')
+          throw new HiveError(
+            'VALIDATION',
+            'O Claude Code não usa chave: ele usa o login do Claude Code instalado.',
+          );
         secretRedactor.register(key);
         const hint = maskSecret(key);
         this.repos.putSecret(providerId, safeStorage.encryptString(key), hint);
@@ -1541,14 +1573,30 @@ export class DesktopService {
         const id = parse(channel);
         let result;
         try {
-          const test = await this.client(id).testConnection();
+          const client = this.client(id);
+          const test = await client.testConnection();
           result = {
             ok: true,
             message: `${test.modelCount} modelos disponíveis.`,
             at: nowIso(),
             latencyMs: test.latencyMs,
           };
+          // Claude Code has no key: the account it is signed in with is the credential.
+          if (client instanceof ClaudeCodePlanClient) {
+            const account = await client.account();
+            this.repos.providers.put({
+              ...this.repos.providers.require(id, 'Provedor'),
+              hasCredential: true,
+              credentialHint: `Claude.ai · ${account.email ?? 'sua conta'}`,
+            });
+          }
         } catch (error) {
+          if (this.repos.providers.get(id)?.kind === 'claude-code')
+            this.repos.providers.put({
+              ...this.repos.providers.require(id, 'Provedor'),
+              hasCredential: false,
+              credentialHint: null,
+            });
           result = {
             ok: false,
             message: secretRedactor.redact(errorMessage(error)),
@@ -1617,8 +1665,6 @@ export class DesktopService {
       }
       case 'worker.routes':
         return this.router.plan(this.repos.workers.require(parse(channel), 'Agente'));
-      case 'claudeCode.status':
-        return this.claudeCodeStatus();
       case 'worker.compatibility': {
         const worker = this.repos.workers.require(parse(channel), 'Agente');
         return workerCompatibilityIssues(
@@ -2375,6 +2421,8 @@ export class DesktopService {
   ): Promise<RecommendedSetup> {
     const provider = this.repos.providers.require(providerId, 'Provedor');
     const client = this.client(providerId);
+    // Claude Code runs the model set in it: nothing to try, and each try would spend the plan.
+    if (provider.kind === 'claude-code') return this.assignClaudeCode(providerId, workerIds);
     let catalog = this.repos.listModels(providerId);
     if (!catalog.length) {
       catalog = await client.listModels();

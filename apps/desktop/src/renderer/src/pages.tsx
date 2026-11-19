@@ -471,7 +471,9 @@ export function ProvidersPage() {
                   <button
                     className="ghost"
                     title={
-                      providerPresets[provider.kind].signIn ? 'Conta do ChatGPT' : 'Trocar chave'
+                      providerPresets[provider.kind].signIn
+                        ? `Conta do ${provider.name}`
+                        : 'Trocar chave'
                     }
                     onClick={() => openModal({ kind: 'key', provider })}
                   >

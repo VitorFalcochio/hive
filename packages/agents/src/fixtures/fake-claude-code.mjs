@@ -30,6 +30,23 @@ if (record)
     }),
   );
 
+// Provider mode: `-p --output-format json` prints one result object and exits.
+if (args[args.indexOf('--output-format') + 1] === 'json') {
+  const limited = mode === 'limit';
+  process.stdout.write(
+    `${JSON.stringify({
+      type: 'result',
+      subtype: limited ? 'error_during_execution' : 'success',
+      is_error: limited,
+      result: limited ? 'Claude AI usage limit reached|1763600000' : `eco: ${prompt.slice(-40)}`,
+      num_turns: 1,
+      usage: { input_tokens: 12, cache_read_input_tokens: 3, output_tokens: 5 },
+    })}
+`,
+  );
+  process.exit(0);
+}
+
 const session = args[args.indexOf('--session-id') + 1];
 const out = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 out({

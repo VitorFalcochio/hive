@@ -61,15 +61,6 @@ import {
  * process before any handler runs) and a TypeScript output type. The preload script only
  * forwards channel names listed here.
  */
-export interface ClaudeCodeStatus {
-  installed: boolean;
-  loggedIn: boolean;
-  /** 'claude.ai' uses the plan quota; anything else bills per use and is refused. */
-  authMethod: string | null;
-  /** Why the status could not be read, in words for the user. */
-  error: string | null;
-}
-
 function channel<O>() {
   return <I extends z.ZodType>(input: I) => ({ input, output: undefined as unknown as O });
 }
@@ -670,8 +661,6 @@ export const ipcContract = {
   'worker.compatibility': channel<string[]>()(id),
   /** Where the agent's calls go, in order, when its model runs out (see Settings.failover). */
   'worker.routes': channel<ModelRoutePlan[]>()(id),
-  /** Whether Claude Code is installed and signed in, for agents that run on it. */
-  'claudeCode.status': channel<ClaudeCodeStatus>()(none),
 
   'skill.pickCatalog': channel<Settings>()(none),
   'skill.list': channel<SkillSummary[]>()(none),
