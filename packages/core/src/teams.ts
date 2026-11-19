@@ -115,6 +115,12 @@ export const teamsSettingsSchema = z.object({
    * so missions run exactly as before until the user turns Hive Teams on.
    */
   enabled: z.boolean().default(false),
+  /**
+   * On by default: members are created only on models that cost nothing extra (free models,
+   * free tiers, a local server or the ChatGPT plan already paid). A paid model is refused even
+   * when a leader asks for it by name.
+   */
+  freeOnly: z.boolean().default(true),
   /** Agents Hive Teams may create in one mission, across all its teams. */
   maxAgentsPerRun: z.number().int().min(0).max(20),
   /** Members one leader may have. */
@@ -134,6 +140,7 @@ export type TeamsSettings = z.infer<typeof teamsSettingsSchema>;
 
 export const defaultTeamsSettings: TeamsSettings = {
   enabled: false,
+  freeOnly: true,
   maxAgentsPerRun: 6,
   maxTeamSize: 4,
   maxDepth: 1,

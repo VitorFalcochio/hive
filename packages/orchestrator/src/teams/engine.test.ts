@@ -305,11 +305,20 @@ describe('Hive Teams: criação de agentes', () => {
       ok: false,
       reason: expect.stringMatching(/Nenhum provedor/),
     });
-    expect(choose({ family: 'claude' })).toEqual({
-      ok: true,
-      providerId: 'openrouter',
-      modelId: 'anthropic/claude-x',
+    // A gateway model without a published price is not known to be free: refused by default.
+    expect(choose({ family: 'claude' })).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/sem custo extra/),
     });
+    expect(
+      chooseTeamModel(
+        { family: 'claude' },
+        repos.providers.list(),
+        (id) => repos.listModels(id),
+        'backend',
+        false,
+      ),
+    ).toEqual({ ok: true, providerId: 'openrouter', modelId: 'anthropic/claude-x' });
   });
 });
 
@@ -634,26 +643,64 @@ describe('Hive Teams: escolha de modelo com um catálogo como o real', () => {
       kilo: ['anthropic/claude-sonnet-5.5', 'openai/gpt-5.3-codex'].map((id) => model('kilo', id)),
       nvidia: [model('nvidia', 'nvidia/nemotron-3-ultra-550b-a55b')],
     };
-    const choose = (profile: Parameters<typeof chooseTeamModel>[0]) =>
-      chooseTeamModel(profile, providers, (id) => catalogs[id] ?? [], 'backend');
+    // As in the real catalog: the gateway publishes its prices; ChatGPT's plan is priced 0.
+    const priced = (list: ModelInfo[], price: number) =>
+      list.map((item) => ({ ...item, pricing: { inputPerMTok: price, outputPerMTok: price * 5 } }));
+    catalogs.chatgpt = priced(catalogs.chatgpt!, 0);
+    catalogs.kilo = [
+      ...priced(catalogs.kilo!, 2),
+      model('kilo', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
+    ];
+    const choose = (profile: Parameters<typeof chooseTeamModel>[0], freeOnly = true) =>
+      chooseTeamModel(profile, providers, (id) => catalogs[id] ?? [], 'backend', freeOnly);
     // The official ChatGPT sign-in comes first, with the model Hive picks for code on that plan.
     expect(choose({ family: 'codex' })).toMatchObject({ ok: true, providerId: 'chatgpt' });
     expect((choose({ family: 'codex' }) as { modelId: string }).modelId).toMatch(/^gpt-6/);
-    // Asked by exact model, the paid gateway model is used.
-    expect(choose({ family: 'codex', model: 'openai/gpt-5.3-codex' })).toEqual({
-      ok: true,
-      providerId: 'kilo',
-      modelId: 'openai/gpt-5.3-codex',
-    });
-    expect(choose({ family: 'claude' })).toEqual({
-      ok: true,
-      providerId: 'kilo',
-      modelId: 'anthropic/claude-sonnet-5.5',
-    });
     expect(choose({ family: 'nemotron' })).toEqual({
       ok: true,
       providerId: 'nvidia',
       modelId: 'nvidia/nemotron-3-ultra-550b-a55b',
     });
+    // Nothing that costs extra, even asked for by name or by provider.
+    const refused = { ok: false, reason: expect.stringMatching(/sem custo extra/) };
+    expect(choose({ family: 'claude' })).toMatchObject(refused);
+    expect(choose({ family: 'codex', model: 'openai/gpt-5.3-codex' })).toMatchObject(refused);
+    expect(choose({ providerId: 'kilo', model: 'anthropic/claude-sonnet-5.5' })).toMatchObject(
+      refused,
+    );
+    // A gateway's free model is fine.
+    expect(choose({ providerId: 'kilo', family: 'nemotron' })).toEqual({
+      ok: true,
+      providerId: 'kilo',
+      modelId: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+    });
+    // Only with the lock turned off by the user are paid models used.
+    expect(choose({ family: 'claude' }, false)).toEqual({
+      ok: true,
+      providerId: 'kilo',
+      modelId: 'anthropic/claude-sonnet-5.5',
+    });
+  });
+
+  it('a trava de custo vale também quando o líder pede um agente', () => {
+    const { repos, teams } = setup();
+    repos.replaceModels('openrouter', [
+      {
+        ...model('openrouter', 'anthropic/claude-x'),
+        pricing: { inputPerMTok: 3, outputPerMTok: 15 },
+      },
+    ]);
+    expect(
+      teams.spawnAgent('task_lead', {
+        key: 'caro',
+        name: 'Caro',
+        role: 'backend',
+        model: { providerId: 'openrouter', model: 'anthropic/claude-x' },
+      }),
+    ).toMatchObject({
+      status: 'rejected',
+      reason: expect.stringMatching(/sem custo extra/),
+    });
+    expect(repos.workers.list().filter((w) => w.team)).toEqual([]);
   });
 });

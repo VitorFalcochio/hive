@@ -395,6 +395,18 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
               Desligado, as missões correm como antes, sem líderes nem agentes criados por agentes.
             </span>
           </label>
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={draft.teams.freeOnly}
+              onChange={(event) => set('teams', { ...draft.teams, freeOnly: event.target.checked })}
+            />
+            Só modelos sem custo extra
+            <span className="hint">
+              Ligado, membros só nascem em modelos gratuitos, camadas grátis ou no plano do ChatGPT
+              que você já paga. Um modelo pago é recusado mesmo se o líder pedir.
+            </span>
+          </label>
           <div className="settings-grid">
             <NumberField
               label="Agentes por missão"

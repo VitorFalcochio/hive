@@ -34,6 +34,7 @@ Queen ── plano ──► [Líder: tarefa "lead"]     define o contrato, cria
 
 - Um membro **nunca recebe mais que o líder**: ferramentas, comandos aprovados automaticamente, servidores MCP e limites (passos, tokens, tempo). Pedir mais é recusado com o motivo, não cortado em silêncio.
 - **Globais e por equipe** (configuráveis): agentes por missão, membros por líder, profundidade (padrão 1: um membro não cria outros), delegações por líder, rodadas de revisão, retomadas do líder e orçamento de tokens da equipe. Continuam valendo o orçamento por missão e o diário.
+- **Sem custo extra, por padrão.** Com a trava ligada (o padrão), membros só nascem em modelos gratuitos (`:free` ou preço zero), em camadas grátis (NVIDIA e outras, a mesma regra do roteador de modelos do Hive), num servidor local ou no plano do ChatGPT que o usuário já paga. Um modelo pago é recusado mesmo pedido pelo nome; um modelo de gateway sem preço publicado também. Só o usuário desliga a trava, nas Configurações.
 - Membros usam só **provedores já configurados** no Hive. O Codex é procurado primeiro no login oficial do ChatGPT; o Nemotron, na NVIDIA e depois no OpenRouter.
 
 ## Claude Code
