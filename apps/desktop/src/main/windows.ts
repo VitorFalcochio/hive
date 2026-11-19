@@ -121,7 +121,7 @@ export class WindowManager {
       title: 'Hive · Workspace',
       icon: this.options.icon,
       backgroundColor: BACKGROUND,
-      ...this.titleBar(44),
+      ...this.titleBar(38),
       show: false,
       webPreferences: this.webPreferences(),
     });

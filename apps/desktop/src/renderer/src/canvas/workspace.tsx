@@ -1569,6 +1569,7 @@ export function Workspace({
       );
     },
     blocks: () => setBlocksOpen(true),
+    'open-hive': () => void window.hive.invoke('window.showRun', runId).catch(() => undefined),
   };
   const commandContext: CommandContext = {
     snapshot,

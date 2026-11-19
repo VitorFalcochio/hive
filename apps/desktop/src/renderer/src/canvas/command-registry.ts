@@ -53,7 +53,8 @@ export type PaletteOperation =
   | 'new-check'
   | 'new-approval'
   | 'new-notify'
-  | 'blocks';
+  | 'blocks'
+  | 'open-hive';
 export interface CommandContext {
   snapshot: CanvasSnapshot | null;
   ready: boolean;
@@ -441,6 +442,15 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
     'inspect',
   );
   command('mission.logs', 'Abrir logs', 'Exibir Live Logs do motor.', 'Execução', 'logs', 'logs');
+  command(
+    'mission.open-hive',
+    'Abrir no Hive',
+    'Mostrar esta missão na janela principal.',
+    'Execução',
+    'mission',
+    'open-hive',
+    ['janela principal', 'detalhes'],
+  );
   command(
     'mission.result',
     'Abrir resultados',

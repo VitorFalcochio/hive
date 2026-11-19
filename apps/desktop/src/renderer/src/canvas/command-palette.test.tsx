@@ -187,6 +187,39 @@ it('oferece o Nexus Autopilot na paleta existente e chama o fluxo dedicado', asy
   expect(autopilot).toHaveBeenCalledOnce();
 });
 
+it('leva para a paleta o que saiu da barra: zoom, ajustar, centralizar, reorganizar e Abrir no Hive', async () => {
+  const perform = vi.fn();
+  const context: CommandContext = {
+    snapshot: {
+      detail: { run: { status: 'running' }, tasks: [] },
+      workers: [],
+      planning: false,
+    } as unknown as CommandContext['snapshot'],
+    ready: true,
+    selectedNodeIds: [],
+    perform,
+    reveal: vi.fn(),
+    find: vi.fn(),
+    ask: vi.fn(),
+    autopilot: vi.fn(),
+  };
+  const registry = registerCanvasCommands(new CommandRegistry<CommandContext>());
+  for (const id of [
+    'view.zoom-in',
+    'view.zoom-out',
+    'view.fit',
+    'view.center',
+    'view.organize',
+    'mission.logs',
+  ])
+    expect(registry.search('', context).some((match) => match.command.id === id)).toBe(true);
+  const open = registry.search('abrir no hive', context)[0];
+  expect(open?.command.id).toBe('mission.open-hive');
+  expect(open?.available).toBe(true);
+  await open?.command.execute(context);
+  expect(perform).toHaveBeenCalledWith('open-hive');
+});
+
 it('oferece os blocos Tokens e Provedor no Ctrl+Espaço', () => {
   const registry = new CommandRegistry<CommandContext>();
   registerCanvasCommands(registry);
