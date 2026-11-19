@@ -129,6 +129,27 @@ const migrations: string[] = [
      OR (json_extract(data, '$.name') GLOB 'Cortex [1-9]*'
          AND substr(json_extract(data, '$.name'), 8) NOT GLOB '*[^0-9]*');
   `,
+  // Hive Teams: messages between a mission's agents and the leaders' requests. Ids come from
+  // idempotency keys, so the primary key itself keeps a repeated message or request from
+  // being stored twice.
+  `
+  CREATE TABLE IF NOT EXISTS team_messages (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS team_messages_run ON team_messages(run_id, created_at);
+  CREATE TABLE IF NOT EXISTS team_requests (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS team_requests_run ON team_requests(run_id);
+  `,
 ];
 
 /** The schema version this build creates; a database above it came from a newer Hive. */
@@ -181,8 +202,9 @@ export class HiveDatabase {
     return this.db.prepare(sql).get(...params) as T | undefined;
   }
 
-  run(sql: string, ...params: SQLInputValue[]): void {
-    this.db.prepare(sql).run(...params);
+  /** Runs a statement; returns how many rows it changed. */
+  run(sql: string, ...params: SQLInputValue[]): number {
+    return Number(this.db.prepare(sql).run(...params).changes);
   }
 
   close(): void {

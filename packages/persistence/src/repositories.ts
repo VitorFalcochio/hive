@@ -11,6 +11,8 @@ import {
   runSchema,
   settingsSchema,
   taskSchema,
+  teamMessageSchema,
+  teamRequestSchema,
   workerSchema,
   workspaceSchema,
   type AgentEvent,
@@ -23,6 +25,8 @@ import {
   type Run,
   type Settings,
   type Task,
+  type TeamMessage,
+  type TeamRequest,
   type Worker,
   type Workspace,
   type LiveResult,
@@ -48,6 +52,9 @@ export class Repositories {
   readonly chatTurns: JsonTable<ChatTurn>;
   readonly nexusAutopilotPlans: JsonTable<NexusAutopilotPlan>;
   readonly nexusAutopilotRecoveries: JsonTable<NexusAutopilotRecovery>;
+  /** Hive Teams: messages between a mission's agents, and the leaders' requests. */
+  readonly teamMessages: JsonTable<TeamMessage>;
+  readonly teamRequests: JsonTable<TeamRequest>;
   readonly cortex: CortexRepository;
 
   constructor(private readonly db: HiveDatabase) {
@@ -86,6 +93,24 @@ export class Repositories {
       nexusAutopilotRecoverySchema,
       (recovery) => ({ run_id: recovery.runId, task_id: recovery.taskId, state: recovery.state }),
     );
+    this.teamMessages = new JsonTable(db, 'team_messages', teamMessageSchema, (message) => ({
+      run_id: message.runId,
+      created_at: message.createdAt,
+    }));
+    this.teamRequests = new JsonTable(db, 'team_requests', teamRequestSchema, (request) => ({
+      run_id: request.runId,
+      kind: request.kind,
+    }));
+  }
+
+  /** A mission's Hive Teams messages in the order they were sent. */
+  teamMessagesOf(runId: string): TeamMessage[] {
+    return this.db
+      .all<{ data: string }>(
+        'SELECT data FROM team_messages WHERE run_id = ? ORDER BY created_at, rowid',
+        runId,
+      )
+      .map((row) => teamMessageSchema.parse(JSON.parse(row.data)));
   }
 
   transaction<T>(fn: () => T): T {

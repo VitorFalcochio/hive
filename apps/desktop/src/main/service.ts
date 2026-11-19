@@ -1547,6 +1547,8 @@ export class DesktopService {
           beeColor: value.beeColor ?? null,
           squad: value.squad ?? [],
           mcpServers: value.mcpServers ?? previous?.mcpServers ?? [],
+          // A Hive Teams agent stays one when the user edits it.
+          ...(previous?.team ? { team: previous.team } : {}),
           id: previous?.id ?? newId('worker'),
           createdAt: previous?.createdAt ?? nowIso(),
           updatedAt: nowIso(),

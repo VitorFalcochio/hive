@@ -24,8 +24,9 @@ it('renomeia para Nectar só os blocos com o nome padrão do antigo Cortex, sem 
       JSON.stringify({ id: `n${index}`, name, memories: 3 }),
     ),
   );
-  // Back to the version before the rename, as a database from Hive 0.2.2 would be.
-  before.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION - 1}`);
+  // Back to the version before the rename, as a database from Hive 0.2.2 would be. The rename
+  // is the second-to-last migration; Hive Teams' tables came after it.
+  before.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION - 2}`);
   before.close();
 
   const after = new HiveDatabase(file);

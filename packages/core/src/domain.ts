@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  defaultTeamsSettings,
+  taskTeamSchema,
+  teamsSettingsSchema,
+  workerTeamSchema,
+} from './teams';
 
 /* ---------------------------------------------------------------- Workspace */
 
@@ -208,13 +214,16 @@ export const workerSchema = z.object({
   autoApproveCommands: z.array(z.string().min(1).max(200)),
   systemPrompt: z.string().max(20_000),
   limits: executionLimitsSchema,
+  /** Set only on agents Hive Teams created for a mission; absent on agents the user made. */
+  team: workerTeamSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type Worker = z.infer<typeof workerSchema>;
 
+/** What the interface may send: an agent's Hive Teams origin is never set from outside. */
 export const workerInputSchema = workerSchema
-  .omit({ createdAt: true, updatedAt: true })
+  .omit({ createdAt: true, updatedAt: true, team: true })
   .extend({ id: z.string().optional() });
 export type WorkerInput = z.infer<typeof workerInputSchema>;
 
@@ -397,6 +406,10 @@ export const taskSchema = z.object({
   revision: taskRevisionSchema.optional(),
   /** Given honey: jumps the queue and runs with doubled limits and the whole squad. */
   boosted: z.boolean().optional(),
+  /** The task that gave rise to this one (a leader's task, for its team's work). */
+  parentTaskId: z.string().nullable().optional(),
+  /** Its place in a Hive Teams team; absent on tasks planned the usual way. */
+  team: taskTeamSchema.optional(),
 });
 export type Task = z.infer<typeof taskSchema>;
 
@@ -457,6 +470,8 @@ export const agentEventTypeSchema = z.enum([
   'info',
   /** Nectar: context handed to a task, searches, proposals and change notices. */
   'memory',
+  /** Hive Teams: agents created, work delegated, reviews and reports. */
+  'team',
 ]);
 export type AgentEventType = z.infer<typeof agentEventTypeSchema>;
 
@@ -638,6 +653,8 @@ export const settingsSchema = z.object({
   reduceMotion: z.enum(['system', 'on', 'off']),
   density: z.enum(['comfortable', 'compact']),
   autopilot: autopilotSettingsSchema,
+  /** Hive Teams limits; settings saved before Hive Teams get the defaults. */
+  teams: teamsSettingsSchema.default(defaultTeamsSettings),
   mcpServers: z.array(mcpServerSchema).max(30).default([]),
   failover: failoverSettingsSchema.default({ enabled: true, automatic: true, freeOnly: true }),
   backup: backupSettingsSchema.default({ auto: true, keep: 7 }),
@@ -704,4 +721,5 @@ export const defaultSettings: Settings = {
     keepAwake: true,
     runInBackground: true,
   },
+  teams: defaultTeamsSettings,
 };

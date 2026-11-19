@@ -34,6 +34,26 @@ export class JsonTable<T extends { id: string }> {
     return this.db.all<Row>(sql, ...params).map((row) => this.parse(row));
   }
 
+  /**
+   * Stores `entity` only if no row has its id yet, and returns what is stored: the new entity
+   * (created: true) or the one already there (created: false). Never overwrites.
+   */
+  insertOnce(entity: T): { entity: T; created: boolean } {
+    const valid = this.schema.parse(entity);
+    const extra = this.columns(valid);
+    const names = ['id', ...Object.keys(extra), 'updated_at', 'data'];
+    const changes = this.db.run(
+      `INSERT INTO ${this.table} (${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')})
+       ON CONFLICT(id) DO NOTHING`,
+      valid.id,
+      ...Object.values(extra),
+      new Date().toISOString(),
+      JSON.stringify(valid),
+    );
+    if (changes > 0) return { entity: valid, created: true };
+    return { entity: this.require(valid.id, this.table), created: false };
+  }
+
   put(entity: T): T {
     const valid = this.schema.parse(entity);
     const extra = this.columns(valid);
