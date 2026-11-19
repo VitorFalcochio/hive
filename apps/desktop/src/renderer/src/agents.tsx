@@ -956,7 +956,9 @@ function LimitsSection({
           hint="Prompt e resposta juntos, até 10 milhões."
           min={1_000}
           max={10_000_000}
-          step={100_000}
+          // The step counts from min: with 100 000 only 1 000, 101 000… were valid, so the
+          // default 3 000 000 failed the browser's check and no agent edit could be saved.
+          step={1_000}
           value={value.maxTokens}
           onChange={(next) => set('maxTokens', next)}
         />
