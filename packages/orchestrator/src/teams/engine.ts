@@ -243,6 +243,7 @@ export class HiveTeams {
         input.model ?? {},
         this.repos.providers.list(),
         (providerId) => this.repos.listModels(providerId),
+        role.data,
       );
       if (!choice.ok) return { reason: choice.reason };
 

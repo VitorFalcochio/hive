@@ -621,3 +621,39 @@ describe('Hive Teams: revisão e relatórios', () => {
     ]);
   });
 });
+
+describe('Hive Teams: escolha de modelo com um catálogo como o real', () => {
+  it('Codex pelo plano ChatGPT mesmo sem "codex" no nome; Claude por um gateway como o Kilo', () => {
+    const providers = [
+      provider('chatgpt', 'chatgpt'),
+      provider('kilo', 'kilo'),
+      provider('nvidia', 'nvidia'),
+    ];
+    const catalogs: Record<string, ModelInfo[]> = {
+      chatgpt: ['gpt-5.6-luna', 'gpt-6-sol', 'gpt-6.1-sol'].map((id) => model('chatgpt', id)),
+      kilo: ['anthropic/claude-sonnet-5.5', 'openai/gpt-5.3-codex'].map((id) => model('kilo', id)),
+      nvidia: [model('nvidia', 'nvidia/nemotron-3-ultra-550b-a55b')],
+    };
+    const choose = (profile: Parameters<typeof chooseTeamModel>[0]) =>
+      chooseTeamModel(profile, providers, (id) => catalogs[id] ?? [], 'backend');
+    // The official ChatGPT sign-in comes first, with the model Hive picks for code on that plan.
+    expect(choose({ family: 'codex' })).toMatchObject({ ok: true, providerId: 'chatgpt' });
+    expect((choose({ family: 'codex' }) as { modelId: string }).modelId).toMatch(/^gpt-6/);
+    // Asked by exact model, the paid gateway model is used.
+    expect(choose({ family: 'codex', model: 'openai/gpt-5.3-codex' })).toEqual({
+      ok: true,
+      providerId: 'kilo',
+      modelId: 'openai/gpt-5.3-codex',
+    });
+    expect(choose({ family: 'claude' })).toEqual({
+      ok: true,
+      providerId: 'kilo',
+      modelId: 'anthropic/claude-sonnet-5.5',
+    });
+    expect(choose({ family: 'nemotron' })).toEqual({
+      ok: true,
+      providerId: 'nvidia',
+      modelId: 'nvidia/nemotron-3-ultra-550b-a55b',
+    });
+  });
+});
