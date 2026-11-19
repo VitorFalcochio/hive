@@ -609,3 +609,65 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     expect(ctx.repos.tasks.require(added.id, 'Tarefa').status).toBe('completed');
   });
 });
+
+describe('Scheduler com o Claude Code como motor', { timeout: 60_000 }, () => {
+  it('a tarefa roda no adaptador, o trabalho vira commit e o resultado chega ao relatório', async () => {
+    const { ClaudeCodeRuntime } = await import('@hive/agents');
+    const { fileURLToPath } = await import('node:url');
+    const fake = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../agents/src/fixtures/fake-claude-code.mjs',
+    );
+    const claude = new ClaudeCodeRuntime({ executable: process.execPath, argsPrefix: [fake] });
+    const events: string[] = [];
+    const ctx = await setup(async () => ({}), [{ key: 'a' }], false, {
+      runtimeFor: () => claude,
+    });
+    const original = claude.subscribe.bind(claude);
+    claude.subscribe = (id, listener) =>
+      original(id, (event) => {
+        events.push(event.type);
+        listener(event);
+      });
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ['review', 'failed'].includes(ctx.status()), 'fim da execução');
+
+    const task = ctx.task('a');
+    expect(task.error).toBeNull();
+    expect(task.status).toBe('completed');
+    expect(task.result?.summary).toBe('Criei hello.txt e rodei npm test.');
+    expect(task.result?.filesChanged.map((file) => file.path)).toEqual(['hello.txt']);
+    expect(task.result?.usage).toEqual({ promptTokens: 150, completionTokens: 40 });
+    expect(task.result?.commands.map((command) => command.command)).toEqual(['npm test']);
+    expect(events).toEqual(
+      expect.arrayContaining(['session.started', 'file.changed', 'session.finished']),
+    );
+    const report = ctx.repos.runs.require(ctx.run.id, 'Execução').report ?? '';
+    expect(report).toContain('Criei hello.txt e rodei npm test.');
+  });
+});
+
+describe('Scheduler ao fechar o Hive', { timeout: 60_000 }, () => {
+  it('shutdown interrompe as sessões em andamento no motor de cada uma', async () => {
+    const cancelled: string[] = [];
+    let finish = () => {};
+    const stuck = new Promise<void>((resolve) => (finish = resolve));
+    let started = false;
+    const runtime = new FakeRuntime(async () => {
+      started = true;
+      await stuck;
+      return { status: 'cancelled', error: 'Cancelada.' };
+    });
+    (runtime as AgentRuntime).cancel = async (sessionId: string) => {
+      cancelled.push(sessionId);
+      finish();
+    };
+    const ctx = await setup(async () => ({}), [{ key: 'a' }], false, { runtimeFor: () => runtime });
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => started, 'motor iniciado');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(ctx.scheduler.shutdown()).toBe(1);
+    expect(cancelled).toEqual(['task_a-a1']);
+    await until(() => ctx.task('a').status === 'cancelled', 'tarefa cancelada');
+  });
+});

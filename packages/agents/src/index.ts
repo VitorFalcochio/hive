@@ -25,3 +25,10 @@ export {
   type BackgroundStart,
 } from './process';
 export { CAPTAIN, ContextLedger, metricsTotals } from './context-shield/ledger';
+export {
+  ClaudeCodeRuntime,
+  claudeCodeAuth,
+  findClaudeCode,
+  type ClaudeCodeAuth,
+  type ClaudeCodeOptions,
+} from './claude-code';
