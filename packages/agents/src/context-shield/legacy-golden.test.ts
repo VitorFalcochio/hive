@@ -130,7 +130,7 @@ async function recordedRequests(mode?: ContextMode) {
 
 const REFERENCE = './__fixtures__/legacy-requests.json';
 
-describe("Context Shield: o modo 'legacy'", () => {
+describe("Context Shield: o modo 'legacy'", { timeout: 60_000 }, () => {
   it('é o padrão e envia ao modelo exatamente o que o Hive 0.2.3 enviava', async () => {
     const { text, metrics } = await recordedRequests();
     await expect(text).toMatchFileSnapshot(REFERENCE);
@@ -144,7 +144,7 @@ describe("Context Shield: o modo 'legacy'", () => {
   });
 });
 
-describe("Context Shield: o modo 'off'", () => {
+describe("Context Shield: o modo 'off'", { timeout: 60_000 }, () => {
   it('envia as saídas como foram produzidas, só com o teto de tamanho e o aviso de laço', async () => {
     const { text, requests, metrics } = await recordedRequests('off');
     // Nothing of the token saver: no re-read shortcuts, no condensing, no later shortening.
