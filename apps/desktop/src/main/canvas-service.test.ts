@@ -257,18 +257,26 @@ describe('Nexus no processo principal', { timeout: 30_000 }, () => {
     expect(runtime.cancel).not.toHaveBeenCalled();
     expect(pushes.some((push) => push.kind === 'changed' && push.entity === 'result')).toBe(true);
   });
-  it('depois do plano, o canvas já traz o card de Tokens e o Nectar do projeto, uma vez só', async () => {
-    const { service, runId } = await setup();
+  it('depois do plano, o canvas já traz Tokens, os provedores da equipe e o Nectar, uma vez só', async () => {
+    const { service, runId, provider } = await setup();
     const scaffold = () =>
       (service as unknown as { scaffoldBlocks(id: string): void }).scaffoldBlocks(runId);
     const workspaceId = service.repos.runs.get(runId)!.workspaceId;
     scaffold();
     const layout = (await service.invoke('canvas.layout.get', runId)) as CanvasLayout;
     expect(layout.meters).toEqual([{ id: `tokens:auto-${runId}`, x: 326, y: -250 }]);
+    // The provider the team runs on gets its card, so its line to the agent shows up.
+    expect(layout.providers).toEqual([
+      { id: `provider:auto-${runId}-0`, x: -230, y: -60, providerId: provider.id },
+    ]);
     expect(service.cortex.nodesOf(workspaceId)).toHaveLength(1);
 
     // Planning again keeps the card where the user moved it, and adds no second one.
-    const moved = { ...layout, meters: [{ ...layout.meters[0]!, x: 900, y: 40 }] };
+    const moved = {
+      ...layout,
+      meters: [{ ...layout.meters[0]!, x: 900, y: 40 }],
+      providers: [{ ...layout.providers[0]!, x: -500, expanded: true }],
+    };
     await service.invoke('canvas.layout.save', { runId, layout: moved });
     scaffold();
     expect(await service.invoke('canvas.layout.get', runId)).toEqual(moved);

@@ -24,6 +24,7 @@ import {
   type IpcChannel,
   type IpcInput,
   type ProviderKind,
+  type Run,
   type RunDetail,
   type WorkerRole,
   type Workspace,
@@ -797,8 +798,10 @@ export class DesktopService {
 
   /**
    * After the Queen plans, the blocks every mission wants on its canvas without asking: the
-   * project's Nectar (created with the team if the project has none yet) and a Tokens card above
-   * the agent windows. A canvas that already has a Tokens card keeps its own.
+   * project's Nectar (created with the team if the project has none yet), a Tokens card above
+   * the agent windows, and a card for each provider the team uses, left of the Queen, so the
+   * lines show who runs on what. A canvas that already has a Tokens card or provider cards keeps
+   * its own.
    */
   private scaffoldBlocks(runId: string): void {
     try {
@@ -806,17 +809,54 @@ export class DesktopService {
       if (!run) return;
       this.cortex.ensureDefault(run.workspaceId);
       const layout = this.canvasLayout(runId);
-      if (layout.meters.length) return;
       // Over the first agent window: the Queen's column is 220 wide, then a 76 × 1.4 gap.
-      const meter = { id: `tokens:auto-${runId}`, x: 326, y: -250 };
+      const meters = layout.meters.length
+        ? layout.meters
+        : [{ id: `tokens:auto-${runId}`, x: 326, y: -250 }];
+      const providers = layout.providers.length ? layout.providers : this.teamProviders(run);
+      if (meters === layout.meters && providers === layout.providers) return;
       this.repos.setValue(
         `canvasLayout:${runId}`,
-        JSON.stringify({ ...layout, meters: [...layout.meters, meter] }),
+        JSON.stringify({ ...layout, meters, providers }),
       );
       this.push({ kind: 'changed', entity: 'layout', id: runId });
     } catch {
       // Only a convenience: the plan stands without it.
     }
+  }
+
+  /**
+   * One provider card per provider the run's Queen and agents use, the Queen's first and then
+   * the most used, folded to its logo in a staggered column left of the Queen.
+   */
+  private teamProviders(run: Run): CanvasLayout['providers'] {
+    const uses = new Map<string, number>();
+    const workerIds = [
+      ...(run.queenWorkerId ? [run.queenWorkerId] : []),
+      ...this.repos.tasks
+        .list('run_id = ?', run.id)
+        .map((task) => task.workerId)
+        .filter((id): id is string => !!id),
+    ];
+    for (const workerId of workerIds) {
+      const providerId = this.repos.workers.get(workerId)?.providerId;
+      if (providerId && this.repos.providers.get(providerId))
+        uses.set(providerId, (uses.get(providerId) ?? 0) + 1);
+    }
+    const queenProvider = run.queenWorkerId
+      ? this.repos.workers.get(run.queenWorkerId)?.providerId
+      : null;
+    return [...uses.entries()]
+      .sort(([a, countA], [b, countB]) =>
+        a === queenProvider ? -1 : b === queenProvider ? 1 : countB - countA,
+      )
+      .slice(0, 8)
+      .map(([providerId], index) => ({
+        id: `provider:auto-${run.id}-${index}`,
+        x: -230 - (index % 2) * 130,
+        y: -60 + index * 105,
+        providerId,
+      }));
   }
 
   /**
