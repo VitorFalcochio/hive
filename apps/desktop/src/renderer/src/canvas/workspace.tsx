@@ -2054,6 +2054,10 @@ function Legend() {
             <dd>Coordenação da Queen</dd>
           </div>
           <div>
+            <dt className="line team" />
+            <dd>Hive Teams: líder e os agentes que ele criou</dd>
+          </div>
+          <div>
             <dt className="line memory" />
             <dd>Acesso ao Nectar: arraste de um agente para o bloco</dd>
           </div>

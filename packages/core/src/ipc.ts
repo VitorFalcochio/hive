@@ -356,6 +356,8 @@ export interface CanvasSnapshot {
   recoveries: NexusAutopilotRecovery[];
   /** What each flow block did last, by block id. */
   flow?: Record<string, FlowBlockState>;
+  /** Hive Teams: the messages between this run's agents, oldest first. Absent without a team. */
+  teamMessages?: CanvasTeamMessage[];
   /** When the snapshot was read, for the "updated" hint and elapsed timers. */
   at: string;
 }
@@ -368,6 +370,22 @@ export interface CanvasWorker {
   providerId: string | null;
   providerName: string | null;
   modelId: string | null;
+  /** Hive Teams: who leads it, for agents a leader created in this run. */
+  team?: { parentAgentId: string | null; createdByAgentId: string | null; depth: number };
+}
+
+/** One Hive Teams message as the canvas shows it: a short excerpt, no payload beyond the verdict. */
+export interface CanvasTeamMessage {
+  id: string;
+  kind: 'spawn' | 'delegation' | 'review_request' | 'feedback' | 'report' | 'note';
+  fromAgentId: string | null;
+  toAgentId: string | null;
+  fromTaskId: string | null;
+  toTaskId: string | null;
+  subject: string;
+  body: string;
+  verdict: string | null;
+  createdAt: string;
 }
 
 /**

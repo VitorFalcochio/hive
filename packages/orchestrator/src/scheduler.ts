@@ -39,7 +39,14 @@ import { buildRunReport } from './report';
 
 export interface SchedulerOptions {
   repos: Repositories;
+  /** The engine that runs agents: Hive's own NativeAgentRuntime. */
   runtime: AgentRuntime;
+  /**
+   * The engine for one agent, when it is not the default: the place where another engine
+   * implementing AgentRuntime (a permitted programmatic integration, for instance) plugs in
+   * per agent. Without it, or when it returns null, every agent runs on `runtime`.
+   */
+  runtimeFor?: (worker: Worker) => AgentRuntime | null;
   chatFor: (providerId: string) => ChatClient;
   resolveSkills: (
     names: string[],
@@ -121,6 +128,8 @@ export const MAX_RUN_TASKS = 40;
 export class Scheduler {
   /** taskId → runtime session id, for tasks whose agent is running. */
   private readonly sessions = new Map<string, string>();
+  /** The engine each running task was started on, to cancel it on the same one. */
+  private readonly runtimes = new Map<string, AgentRuntime>();
   /** Tasks between "picked" and "agent started" (worktree setup). */
   private readonly launching = new Set<string>();
   private readonly cancelRequested = new Set<string>();
@@ -218,7 +227,7 @@ export class Scheduler {
     const task = this.repos.tasks.require(taskId, 'Tarefa');
     this.denyApprovalsOf(taskId);
     const session = this.sessions.get(taskId);
-    if (session) void this.options.runtime.cancel(session);
+    if (session) void (this.runtimes.get(taskId) ?? this.options.runtime).cancel(session);
     else if (this.launching.has(taskId)) this.cancelRequested.add(taskId);
     else if (task.status === 'pending' || task.status === 'blocked')
       this.update(taskId, {
@@ -829,7 +838,9 @@ export class Scheduler {
 
       const previousError = this.retryNotes.get(initial.id);
       this.retryNotes.delete(initial.id);
-      const session = await this.options.runtime.start({
+      const runtime = this.options.runtimeFor?.(worker) ?? this.options.runtime;
+      this.runtimes.set(initial.id, runtime);
+      const session = await runtime.start({
         sessionId,
         task: {
           title: initial.title,
@@ -867,10 +878,10 @@ export class Scheduler {
       });
       this.sessions.set(initial.id, sessionId);
       this.launching.delete(initial.id);
-      const unsubscribe = this.options.runtime.subscribe(sessionId, (event) =>
+      const unsubscribe = runtime.subscribe(sessionId, (event) =>
         this.onRuntimeEvent(run, initial.id, worker.id, event),
       );
-      if (this.cancelRequested.delete(initial.id)) void this.options.runtime.cancel(sessionId);
+      if (this.cancelRequested.delete(initial.id)) void runtime.cancel(sessionId);
       const outcome = await session.done;
       unsubscribe();
 
@@ -934,6 +945,7 @@ export class Scheduler {
     } finally {
       this.launching.delete(initial.id);
       this.sessions.delete(initial.id);
+      this.runtimes.delete(initial.id);
       this.cancelRequested.delete(initial.id);
       this.denyApprovalsOf(initial.id);
       // The branch is kept only when it holds work to review.

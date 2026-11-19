@@ -39,6 +39,7 @@ import type {
 } from '@hive/core';
 import { providerPresets, selectablePresets } from '@hive/core';
 import { AgentBee } from '../mascot';
+import { teamRoleLabels } from './team-panel';
 import { HoneyJar } from '../honey';
 import { ClaudeLogo, ProviderLogo, providerColor } from '../provider-logo';
 import { TerminalView } from '../terminal-view';
@@ -197,7 +198,10 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
       </div>
       <div className="nc-agent-body">
         <strong className="truncate">{worker.name}</strong>
-        <span className="nc-sub truncate">{roleLabel(worker.role)}</span>
+        <span className="nc-sub truncate">
+          {roleLabel(worker.role)}
+          {worker.team && <span className="nc-team-badge"> · Hive Teams</span>}
+        </span>
         <span className="nc-state">
           <span className="nc-dot" aria-hidden />
           {workerStateLabels[status.state]}
@@ -250,6 +254,11 @@ export const TaskNode = memo(function TaskNode({ id, data, selected }: NodeProps
         <strong className="truncate" title={task.title}>
           {task.title}
         </strong>
+        {task.team && (
+          <span className={`nc-team-role role-${task.team.role}`}>
+            {teamRoleLabels[task.team.role]}
+          </span>
+        )}
         {task.boosted && <HoneyJar size={12} label="Com mel: prioridade" />}
         {asking && <ShieldQuestion size={13} className="nc-asking" aria-label="Pede aprovação" />}
         <PinMark id={id} />

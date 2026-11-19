@@ -374,6 +374,65 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved(): Pr
       ),
     },
     {
+      id: 'teams',
+      category: 'missions',
+      title: 'Hive Teams',
+      keywords: 'equipe lider delegar subagente criar agente revisao hierarquia',
+      keys: ['teams'],
+      node: (
+        <Section
+          title="Hive Teams"
+          description="A Queen pode escolher um agente como líder técnico de uma tarefa. O líder cria membros em provedores já configurados, delega, pede revisões e consolida o resultado, tudo na mesma missão e com worktrees isoladas. Um membro nunca recebe mais ferramentas, comandos ou limites que o líder."
+        >
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={draft.teams.enabled}
+              onChange={(event) => set('teams', { ...draft.teams, enabled: event.target.checked })}
+            />
+            Permitir que líderes montem equipes
+            <span className="hint">
+              Desligado, as missões correm como antes, sem líderes nem agentes criados por agentes.
+            </span>
+          </label>
+          <div className="settings-grid">
+            <NumberField
+              label="Agentes por missão"
+              hint="De 0 a 20, somando todas as equipes."
+              min={0}
+              max={20}
+              value={draft.teams.maxAgentsPerRun}
+              onChange={(value) => set('teams', { ...draft.teams, maxAgentsPerRun: value })}
+            />
+            <NumberField
+              label="Membros por líder"
+              hint="De 0 a 10."
+              min={0}
+              max={10}
+              value={draft.teams.maxTeamSize}
+              onChange={(value) => set('teams', { ...draft.teams, maxTeamSize: value })}
+            />
+            <NumberField
+              label="Rodadas de revisão"
+              hint="Vezes que uma revisão devolve o mesmo trabalho, de 0 a 5."
+              min={0}
+              max={5}
+              value={draft.teams.maxReviewRounds}
+              onChange={(value) => set('teams', { ...draft.teams, maxReviewRounds: value })}
+            />
+            <NumberField
+              label="Orçamento de tokens da equipe"
+              hint="Soma dos limites dos membros de um líder."
+              min={10_000}
+              max={100_000_000}
+              value={draft.teams.teamTokenBudget}
+              onChange={(value) => set('teams', { ...draft.teams, teamTokenBudget: value })}
+            />
+          </div>
+        </Section>
+      ),
+    },
+    {
       id: 'budget',
       category: 'models',
       title: 'Orçamento de tokens',

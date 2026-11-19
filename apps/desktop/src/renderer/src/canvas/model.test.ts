@@ -299,3 +299,34 @@ describe('console de execução', () => {
     ).toBe(4 * 60_000);
   });
 });
+
+describe('Hive Teams no grafo', () => {
+  it('liga o membro ao líder que o criou, não à Queen', () => {
+    const member: CanvasWorker = {
+      ...worker('codex', 'backend'),
+      team: { parentAgentId: 'back', createdByAgentId: 'back', depth: 1 },
+    };
+    const plan = [
+      task('lider', {
+        workerId: 'back',
+        team: { role: 'lead', leadTaskId: 'lider', requestId: null },
+      }),
+      task('impl', {
+        workerId: 'codex',
+        dependsOn: ['lider'],
+        parentTaskId: 'lider',
+        team: { role: 'member', leadTaskId: 'lider', requestId: 'r' },
+      }),
+    ];
+    for (const grouping of ['agent', 'workspace'] as const) {
+      const { edges } = buildGraph(
+        snapshot(plan, { workers: [worker('queen', 'queen'), worker('back', 'backend'), member] }),
+        { grouping, collapsed: new Set() },
+      );
+      const into = (target: string) =>
+        edges.filter((edge) => edge.target === target).map((edge) => [edge.kind, edge.source]);
+      expect(into('agent:codex'), grouping).toEqual([['team', 'agent:back']]);
+      expect(into('agent:back'), grouping).toEqual([['coordination', 'agent:queen']]);
+    }
+  });
+});

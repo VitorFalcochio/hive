@@ -42,7 +42,7 @@ async function setup(
   behaviour: Behaviour,
   tasks: { key: string; dependsOn?: string[] }[],
   unattended = false,
-  hooks: Pick<SchedulerOptions, 'holds' | 'onTaskFailed'> = {},
+  hooks: Pick<SchedulerOptions, 'holds' | 'onTaskFailed' | 'runtimeFor'> = {},
 ) {
   const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-sched-'));
   const git = (...args: string[]) =>
@@ -187,6 +187,37 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     expect(await readFile(path.join(ctx.repo, 'Tarefa b.txt'), 'utf8')).toBe('Tarefa b');
     expect(ctx.status()).toBe('completed');
     expect(ctx.git('status', '--porcelain')).toBe('');
+  });
+
+  it('roda cada agente no motor escolhido para ele e cancela nesse mesmo motor', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const other = new FakeRuntime(async (input) => {
+      await gate;
+      await writeTaskFile(input);
+      return {};
+    });
+    const started: string[] = [];
+    const cancelled: string[] = [];
+    const start = other.start.bind(other);
+    other.start = async (input) => {
+      started.push(input.task.title);
+      return start(input);
+    };
+    other.cancel = async (id?: string) => {
+      cancelled.push(id ?? '');
+      release();
+    };
+    const ctx = await setup(async () => ({}), [{ key: 'a' }], false, {
+      runtimeFor: (worker) => (worker.id === 'w1' ? other : null),
+    });
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => started.length === 1, 'o motor escolhido começar');
+    ctx.scheduler.cancelTask('task_a');
+    await until(() => ctx.status() !== 'running', 'a missão parar');
+    expect(started).toEqual(['Tarefa a']);
+    expect(cancelled).toHaveLength(1);
+    await until(() => !ctx.scheduler.isActive(ctx.run.id), 'a tarefa terminar de vez');
   });
 
   it('uma falha cancela toda a cadeia que dependia dela, e a missão para', async () => {

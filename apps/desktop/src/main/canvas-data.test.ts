@@ -226,3 +226,89 @@ describe('dados do Nexus', () => {
     expect(canvasChannels.has('task.retry')).toBe(true);
   });
 });
+
+describe('Hive Teams no Nexus', () => {
+  it('mostra os agentes da equipe desta missão, quem os lidera e a conversa, sem segredos', async () => {
+    const { secretRedactor } = await import('@hive/shared');
+    const repos = seed();
+    const base = repos.workers.require('back', 'agente');
+    const team = (id: string, runId: string) =>
+      repos.workers.put({
+        ...base,
+        id,
+        name: id,
+        team: {
+          runId,
+          parentAgentId: 'back',
+          createdByAgentId: 'back',
+          spawnRequestId: `req-${id}`,
+          depth: 1,
+        },
+      });
+    team('codex', 'r1');
+    team('outra-missao', 'old');
+    const secret = 'sk-SegredoQueVazou123456';
+    secretRedactor.register(secret);
+    try {
+      repos.teamMessages.insertOnce({
+        id: 'tm1',
+        runId: 'r1',
+        idempotencyKey: 'k1',
+        kind: 'feedback',
+        fromAgentId: 'codex',
+        toAgentId: 'back',
+        fromTaskId: 'ui',
+        toTaskId: 'api',
+        subject: 'Mudanças pedidas',
+        body: `Use a chave ${secret} ${'x'.repeat(900)}`,
+        payload: { verdict: 'changes_requested', comments: [{ path: 'a.ts' }] },
+        createdAt: at,
+      });
+      const snapshot = canvasSnapshot(
+        repos,
+        {
+          run: repos.runs.require('r1', 'run'),
+          mission: repos.missions.require('m1', 'missão'),
+          tasks: repos.tasks.list('run_id = ?', 'r1'),
+          approvals: [],
+        },
+        { planning: false, queue: [], terminals: [] },
+      );
+      const ids = snapshot.workers.map((worker) => worker.id);
+      expect(ids).toContain('codex');
+      expect(ids).not.toContain('outra-missao');
+      expect(snapshot.workers.find((worker) => worker.id === 'codex')!.team).toEqual({
+        parentAgentId: 'back',
+        createdByAgentId: 'back',
+        depth: 1,
+      });
+      const [message] = snapshot.teamMessages!;
+      expect(message).toMatchObject({
+        kind: 'feedback',
+        verdict: 'changes_requested',
+        fromAgentId: 'codex',
+      });
+      expect(message!.body).not.toContain(secret);
+      expect(message!.body.length).toBeLessThanOrEqual(601);
+      expect(JSON.stringify(snapshot)).not.toContain('comments');
+    } finally {
+      secretRedactor.unregister(secret);
+    }
+  });
+
+  it('sem equipe, o snapshot fica como antes', () => {
+    const repos = seed();
+    const snapshot = canvasSnapshot(
+      repos,
+      {
+        run: repos.runs.require('r1', 'run'),
+        mission: repos.missions.require('m1', 'missão'),
+        tasks: repos.tasks.list('run_id = ?', 'r1'),
+        approvals: [],
+      },
+      { planning: false, queue: [], terminals: [] },
+    );
+    expect('teamMessages' in snapshot).toBe(false);
+    expect(snapshot.workers.every((worker) => !('team' in worker))).toBe(true);
+  });
+});

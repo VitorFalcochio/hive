@@ -15,6 +15,7 @@ import { HoneyJar } from '../honey';
 import { Markdown } from '../markdown';
 import { statusLabels, useTask } from '../ui';
 import type { CanvasView } from './nodes';
+import { TeamMessages, teamLeaderName, teamRoleLabels } from './team-panel';
 import {
   compactNumber,
   formatDuration,
@@ -47,6 +48,10 @@ const edgeMeaning: Record<EdgeKind, { title: string; text: string }> = {
   coordination: {
     title: 'Coordenação',
     text: 'A Queen planejou este trabalho e o distribuiu no plano da missão.',
+  },
+  team: {
+    title: 'Hive Teams',
+    text: 'O líder criou este agente para a missão e coordena o trabalho dele: delega, pede revisões e consolida o resultado.',
   },
   memory: {
     title: 'Acesso ao Nectar',
@@ -267,6 +272,11 @@ function RunOverview({ view }: { view: CanvasView }) {
           <p className="nc-text">{run.planNotes}</p>
         </Section>
       )}
+      {!!view.snapshot.teamMessages?.length && (
+        <Section title="Hive Teams">
+          <TeamMessages view={view} />
+        </Section>
+      )}
       <p className="nc-hint">
         Selecione um agente, uma tarefa ou uma conexão para ver os detalhes.
       </p>
@@ -316,6 +326,9 @@ function AgentInspector({
         <Field label="Função">{roleLabel(worker.role)}</Field>
         <Field label="Provedor">{worker.providerName ?? unavailable}</Field>
         <Field label="Modelo">{worker.modelId ? <code>{worker.modelId}</code> : unavailable}</Field>
+        {teamLeaderName(view, workerId) && (
+          <Field label="Hive Teams">Criado por {teamLeaderName(view, workerId)}</Field>
+        )}
         <Field label="Estado">
           <span className={`nc-chip tone-${status.tone}`}>{workerStateLabels[status.state]}</span>
         </Field>
@@ -376,6 +389,16 @@ function AgentInspector({
           </>
         )}
       </dl>
+      {(view.snapshot.teamMessages ?? []).some(
+        (message) => message.fromAgentId === workerId || message.toAgentId === workerId,
+      ) && (
+        <Section title="Hive Teams">
+          <TeamMessages
+            view={view}
+            filter={(message) => message.fromAgentId === workerId || message.toAgentId === workerId}
+          />
+        </Section>
+      )}
       <Section title="Logs recentes">
         <EventLines events={logs} />
       </Section>
@@ -544,6 +567,7 @@ function TaskInspector({
         <Field label="Custo">
           {!usage ? '—' : usage.costUsd === null ? unavailable : formatCost(usage.costUsd)}
         </Field>
+        {task.team && <Field label="Hive Teams">{teamRoleLabels[task.team.role]}</Field>}
         <Field label="Branch">
           {task.branch ? (
             <code>
@@ -668,6 +692,16 @@ function TaskInspector({
         </>
       )}
 
+      {(view.snapshot.teamMessages ?? []).some(
+        (message) => message.fromTaskId === task.id || message.toTaskId === task.id,
+      ) && (
+        <Section title="Hive Teams">
+          <TeamMessages
+            view={view}
+            filter={(message) => message.fromTaskId === task.id || message.toTaskId === task.id}
+          />
+        </Section>
+      )}
       <Section title="Logs recentes">
         <EventLines events={logs} />
       </Section>

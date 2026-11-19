@@ -9,7 +9,7 @@ import {
   type RunStatus,
 } from '@hive/core';
 import type { Repositories } from '@hive/persistence';
-import { nowIso } from '@hive/shared';
+import { nowIso, secretRedactor } from '@hive/shared';
 
 /** Runs offered in the Nexus picker; older ones stay in the main window's history. */
 const MAX_RUNS = 60;
@@ -67,6 +67,8 @@ export function canvasSnapshot(
   const workspace = repos.workspaces.get(run.workspaceId);
   const workers = repos.workers
     .list()
+    // Agents Hive Teams created for another mission are not part of this one.
+    .filter((worker) => !worker.team || worker.team.runId === run.id)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
     .map((worker) => canvasWorker(repos, worker));
   const usage: CanvasSnapshot['usage'] = {};
@@ -94,7 +96,31 @@ export function canvasSnapshot(
     queuePosition: position < 0 ? null : position,
     terminals: state.terminals,
     flow: state.flow ?? {},
+    ...teamMessages(repos, run.id),
     at: nowIso(),
+  };
+}
+
+/** The run's Hive Teams conversation, cut to what the canvas shows and redacted. */
+function teamMessages(repos: Repositories, runId: string): Pick<CanvasSnapshot, 'teamMessages'> {
+  const messages = repos.teamMessagesOf(runId);
+  if (!messages.length) return {};
+  return {
+    teamMessages: messages.map((message) => {
+      const body = secretRedactor.redact(message.body);
+      return {
+        id: message.id,
+        kind: message.kind,
+        fromAgentId: message.fromAgentId,
+        toAgentId: message.toAgentId,
+        fromTaskId: message.fromTaskId,
+        toTaskId: message.toTaskId,
+        subject: secretRedactor.redact(message.subject),
+        body: body.length > 600 ? `${body.slice(0, 600)}…` : body,
+        verdict: typeof message.payload.verdict === 'string' ? message.payload.verdict : null,
+        createdAt: message.createdAt,
+      };
+    }),
   };
 }
 
@@ -108,5 +134,14 @@ export function canvasWorker(repos: Repositories, worker: Worker): CanvasWorker 
     providerId: worker.providerId,
     providerName: worker.providerId ? (repos.providers.get(worker.providerId)?.name ?? null) : null,
     modelId: worker.modelId,
+    ...(worker.team
+      ? {
+          team: {
+            parentAgentId: worker.team.parentAgentId,
+            createdByAgentId: worker.team.createdByAgentId,
+            depth: worker.team.depth,
+          },
+        }
+      : {}),
   };
 }

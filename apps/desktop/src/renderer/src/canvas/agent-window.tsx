@@ -63,6 +63,7 @@ export function AgentWindow({
           <span className="truncate">
             {roleLabel(worker.role)} · {worker.modelId ?? 'sem modelo'}
             {worker.providerName && ` · ${worker.providerName}`}
+            {worker.team && ' · Hive Teams'}
           </span>
         </div>
         <span className={`nc-chip tone-${status.tone}`}>{workerStateLabels[status.state]}</span>

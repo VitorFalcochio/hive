@@ -154,7 +154,14 @@ export function sortTasks(tasks: Task[]): Task[] {
  * underneath; `agent` puts each agent's tasks in a lane; `none` shows only the task flow.
  */
 export type Grouping = 'workspace' | 'agent' | 'none';
-export type EdgeKind = 'dependency' | 'assignment' | 'coordination' | 'aggregation' | 'memory';
+export type EdgeKind =
+  | 'dependency'
+  | 'assignment'
+  | 'coordination'
+  | 'aggregation'
+  | 'memory'
+  /** Hive Teams: a leader to a member it created. */
+  | 'team';
 
 export interface GraphNode {
   id: string;
@@ -548,7 +555,27 @@ export function buildGraph(
       if (agent) edges.push(edge(agent, id, 'memory', 'running'));
     }
   });
-  return { nodes, edges };
+  return { nodes, edges: teamEdges(snapshot, nodes, edges) };
+}
+
+/**
+ * Hive Teams: a member answers to its leader, not to the Queen. Its coordination line from the
+ * Queen is replaced by one from the leader, when both are on the canvas.
+ */
+function teamEdges(snapshot: CanvasSnapshot, nodes: GraphNode[], edges: GraphEdge[]): GraphEdge[] {
+  const shown = new Set(nodes.filter((node) => node.type === 'agent').map((node) => node.id));
+  const leaders = new Map<string, string>();
+  for (const worker of snapshot.workers) {
+    const parent = worker.team?.parentAgentId;
+    if (!parent) continue;
+    const member = nodeId.agent(worker.id);
+    const leader = nodeId.agent(parent);
+    if (shown.has(member) && shown.has(leader)) leaders.set(member, leader);
+  }
+  if (!leaders.size) return edges;
+  const kept = edges.filter((item) => !(item.kind === 'coordination' && leaders.has(item.target)));
+  for (const [member, leader] of leaders) kept.push(edge(leader, member, 'team', 'pending'));
+  return kept;
 }
 
 function edge(source: string, target: string, kind: EdgeKind, tone: Tone): GraphEdge {

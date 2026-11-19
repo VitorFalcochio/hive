@@ -4315,3 +4315,75 @@ button.nc-flow-action.primary {
     animation: none;
   }
 }
+
+/* ------------------------------------------------------------------ Hive Teams */
+/* A leader to the members it created: a violet dash, apart from the Queen's gold. */
+.nc-edge.kind-team {
+  --edge: rgb(167 139 250 / 60%);
+}
+.nc-edge.kind-team .react-flow__edge-path {
+  stroke-dasharray: 4 4;
+}
+.nc-legend dt.line.team {
+  border-top: 1.5px dashed rgb(167 139 250 / 70%);
+}
+.nc-team-badge {
+  color: rgb(167 139 250);
+}
+.nc-team-role {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid rgb(167 139 250 / 35%);
+  border-radius: 999px;
+  color: rgb(196 181 253);
+  font-size: 10px;
+  line-height: 16px;
+}
+.nc-team-messages {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.nc-team-messages li {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 2px solid rgb(167 139 250 / 55%);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.nc-team-messages li.kind-feedback {
+  border-left-color: var(--warning);
+}
+.nc-team-messages li.kind-report {
+  border-left-color: var(--success);
+}
+.nc-team-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 11.5px;
+}
+.nc-team-route {
+  margin-left: auto;
+  color: var(--subtle-foreground);
+}
+.nc-team-subject {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.nc-team-body {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+.nc-chip.verdict-approved {
+  --tone: var(--success);
+}
+.nc-chip.verdict-changes_requested {
+  --tone: var(--warning);
+}
