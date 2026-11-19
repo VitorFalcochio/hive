@@ -12,6 +12,12 @@ export type HiveErrorCode =
   | 'TIMEOUT'
   | 'LIMIT'
   | 'SKILL'
+  /** An operation that needs the user's approval was not approved. */
+  | 'DENIED'
+  /** A remote could not be reached: no network, DNS, TLS, timeout. */
+  | 'NETWORK'
+  /** A remote refused the credentials, or none were available. */
+  | 'AUTH'
   | 'INTERNAL';
 
 /** Error type that is safe to show to the user: its message never contains secrets. */

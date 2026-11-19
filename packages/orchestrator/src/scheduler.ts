@@ -30,6 +30,7 @@ import {
   git,
   hiveCommitFlags,
   inspectRepository,
+  isHiveBranch,
   statusPorcelain,
   taskBranchName,
   type DiffResult,
@@ -381,8 +382,9 @@ export class Scheduler {
       throw new HiveError('CONFLICT', 'Só tarefas concluídas podem ser descartadas.');
     const run = this.repos.runs.require(task.runId, 'Execução');
     const workspace = this.repos.workspaces.require(run.workspaceId, 'Workspace');
-    if (task.branch)
-      await git(workspace.path, ['branch', '-D', task.branch], { allowFailure: true });
+    // Only Hive's own task branches are ever deleted here, whatever the task record says.
+    if (task.branch && isHiveBranch(task.branch))
+      await git(workspace.path, ['branch', '-D', '--', task.branch], { allowFailure: true });
     const updated = this.update(taskId, { status: 'rejected', workerState: 'failed' });
     this.log(run, task.id, task.workerId, 'git', 'info', 'Alterações descartadas.');
     this.settle(run.id);
