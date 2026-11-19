@@ -171,6 +171,12 @@ importers:
       '@hive/core':
         specifier: workspace:*
         version: link:../core
+      '@hive/orchestrator':
+        specifier: workspace:*
+        version: link:../orchestrator
+      '@hive/persistence':
+        specifier: workspace:*
+        version: link:../persistence
       '@hive/providers':
         specifier: workspace:*
         version: link:../providers
@@ -180,6 +186,9 @@ importers:
       '@hive/skills':
         specifier: workspace:*
         version: link:../skills
+      '@hive/workspace':
+        specifier: workspace:*
+        version: link:../workspace
 
   packages/core:
     dependencies:

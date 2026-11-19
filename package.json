@@ -23,7 +23,8 @@
     "test": "node scripts/run.mjs exec vitest run",
     "test:watch": "node scripts/run.mjs exec vitest",
     "check": "npm run lint && npm run format:check && npm run typecheck && npm test",
-    "bench": "node scripts/bench.mjs"
+    "bench": "node scripts/bench.mjs",
+    "teams:poc": "node scripts/teams-poc.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

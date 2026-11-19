@@ -13,5 +13,10 @@ export {
   type SpawnInput,
   type TeamScheduler,
 } from './teams/engine';
-export { chooseTeamModel, usableProvider, type TeamModelProfile } from './teams/models';
+export {
+  chooseTeamModel,
+  costsNothingExtra,
+  usableProvider,
+  type TeamModelProfile,
+} from './teams/models';
 export { teamToolsFor } from './teams/tools';

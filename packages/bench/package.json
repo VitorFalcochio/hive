@@ -11,8 +11,11 @@
   "dependencies": {
     "@hive/agents": "workspace:*",
     "@hive/core": "workspace:*",
+    "@hive/orchestrator": "workspace:*",
+    "@hive/persistence": "workspace:*",
     "@hive/providers": "workspace:*",
     "@hive/shared": "workspace:*",
-    "@hive/skills": "workspace:*"
+    "@hive/skills": "workspace:*",
+    "@hive/workspace": "workspace:*"
   }
 }
