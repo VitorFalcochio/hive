@@ -1,7 +1,7 @@
 import { lstat, mkdir, rm, stat, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { HiveError } from '@hive/shared';
-import { git, hiveCommitFlags } from './git';
+import { git, gitCapped, hiveCommitFlags } from './git';
 
 export interface RepoInfo {
   root: string;
@@ -195,7 +195,14 @@ export class WorktreeManager {
    */
   async commitAll(worktree: string, message: string): Promise<string | null> {
     this.assertOwned(worktree);
-    await git(worktree, ['add', '-A']);
+    // Installed dependencies are never part of the work, even in a project that has no
+    // .gitignore yet: thousands of node_modules files in a snapshot made its diff unusable.
+    // The bare name also covers the link `linkDependencies` puts in the checkout.
+    const excluded = DEPENDENCY_DIRS.flatMap((dir) => [
+      `:(exclude,glob)**/${dir}`,
+      `:(exclude,glob)**/${dir}/**`,
+    ]);
+    await git(worktree, ['add', '-A', '--', '.', ...excluded]);
     const staged = await git(worktree, ['diff', '--cached', '--quiet'], { allowFailure: true });
     if (staged.code === 0) return null;
     await git(worktree, [...hiveCommitFlags, 'commit', '--no-verify', '-m', message]);
@@ -266,12 +273,17 @@ export async function diffRefs(
       deletions: removed === '-' ? 0 : Number(removed),
     });
   }
-  const patch = await git(cwd, ['diff', '--find-renames', '--no-color', ...range]);
-  const truncated = patch.stdout.length > maxPatchBytes;
+  // Only the first part of the patch is ever shown, so only that part is read: a full patch
+  // can be hundreds of megabytes (generated files, dependencies) and used to break the diff.
+  const patch = await gitCapped(
+    cwd,
+    ['diff', '--find-renames', '--no-color', ...range],
+    maxPatchBytes,
+  );
   return {
     files,
-    patch: truncated ? patch.stdout.slice(0, maxPatchBytes) : patch.stdout,
-    truncated,
+    patch: patch.stdout,
+    truncated: patch.truncated,
     insertions: files.reduce((sum, file) => sum + file.insertions, 0),
     deletions: files.reduce((sum, file) => sum + file.deletions, 0),
   };

@@ -589,6 +589,8 @@ export class DesktopService {
   }
 
   dispose(): void {
+    const stopped = this.scheduler.shutdown();
+    if (stopped) console.warn(`Encerrando: ${stopped} sessão(ões) de agente interrompida(s).`);
     this.flow.dispose();
     this.canvasQueen.dispose();
     this.nexusAutopilot.dispose();

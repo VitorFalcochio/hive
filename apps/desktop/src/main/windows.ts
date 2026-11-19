@@ -1,7 +1,9 @@
-import { BrowserWindow, screen, type WebContents } from 'electron';
+import { BrowserWindow, dialog, screen, type WebContents } from 'electron';
 import path from 'node:path';
 import { PUSH_CHANNEL, type HivePush } from '@hive/core';
 import { parsePlacement, restoreBounds, type WindowPlacement } from './window-bounds';
+import { boundForIpc } from './ipc-guard';
+import { log } from './logger';
 
 /** The windows that talk to the main process. Hidden helper windows (view_page) are not one. */
 export type WindowRole = 'main' | 'canvas';
@@ -61,6 +63,72 @@ export class WindowManager {
   private lockDown(window: BrowserWindow): void {
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', (event) => event.preventDefault());
+    this.watch(window);
+  }
+
+  /**
+   * A window that stops answering, crashes or logs an error leaves a trace in the log, and a
+   * frozen one can be reloaded from a dialog instead of having to kill Hive from the Task
+   * Manager. Reloading only restarts the page; missions run in the main process and go on.
+   */
+  private watch(window: BrowserWindow): void {
+    const name = () => (window.isDestroyed() ? 'janela' : window.getTitle() || 'janela');
+    let asking = false;
+    window.webContents.on('console-message', (details) => {
+      if (details.level !== 'error') return;
+      log(
+        'error',
+        'renderer',
+        `${name()}: ${details.message} (${details.sourceId}:${details.lineNumber})`,
+      );
+    });
+    window.webContents.on('render-process-gone', (_event, details) => {
+      log(
+        'error',
+        'renderer',
+        `${name()}: processo da interface terminou (${details.reason}, código ${details.exitCode}).`,
+      );
+      if (window.isDestroyed() || details.reason === 'clean-exit') return;
+      void dialog
+        .showMessageBox(window, {
+          type: 'error',
+          buttons: ['Recarregar a interface', 'Fechar'],
+          defaultId: 0,
+          title: 'A interface do Hive parou',
+          message: 'A interface do Hive parou de funcionar.',
+          detail: `Motivo: ${details.reason}. As missões continuam no processo principal. Detalhes ficam no log (pasta logs dos dados do Hive).`,
+        })
+        .then(({ response }) => {
+          if (window.isDestroyed()) return;
+          if (response === 0) window.webContents.reload();
+          else window.close();
+        });
+    });
+    window.on('unresponsive', () => {
+      log('warn', 'renderer', `${name()}: a interface não responde.`);
+      if (asking || window.isDestroyed()) return;
+      asking = true;
+      void dialog
+        .showMessageBox({
+          type: 'warning',
+          buttons: ['Esperar', 'Recarregar a interface'],
+          defaultId: 0,
+          cancelId: 0,
+          title: 'O Hive não responde',
+          message: 'A interface do Hive não está respondendo.',
+          detail:
+            'As missões continuam no processo principal. Recarregar reinicia só a tela; nada é perdido além de texto ainda não salvo.',
+        })
+        .then(({ response }) => {
+          asking = false;
+          if (response === 1 && !window.isDestroyed()) {
+            log('warn', 'renderer', `${name()}: recarregada pelo usuário.`);
+            window.webContents.forcefullyCrashRenderer();
+            window.webContents.reload();
+          }
+        });
+    });
+    window.on('responsive', () => log('info', 'renderer', `${name()}: voltou a responder.`));
   }
 
   registerMain(window: BrowserWindow): void {
@@ -88,7 +156,10 @@ export class WindowManager {
   }
 
   /** Pushes reach every Hive window; `navigate` is meant for the main one only. */
-  broadcast(push: HivePush): void {
+  broadcast(input: HivePush): void {
+    const { value: push, clipped } = boundForIpc(input);
+    if (clipped)
+      log('warn', 'ipc', `Aviso ${input.kind}: ${clipped} texto(s) grande(s) demais cortado(s).`);
     this.mainWindow()?.webContents.send(PUSH_CHANNEL, push);
     const canvas = this.canvasWindow();
     if (canvas && push.kind !== 'navigate' && this.options.canvasReceives(push))

@@ -1,5 +1,11 @@
 import { collectResultFacts, resultEventTypes, resultUpdate, type LiveResult } from '@hive/core';
 import type { Repositories } from '@hive/persistence';
+import { clipText } from '@hive/shared';
+
+/** One line of the projection; errors stored before any limit existed can be megabytes long. */
+const MAX_LINE = 2_000;
+const clipUpdate = <T extends { text: string }>(update: T): T =>
+  update.text.length > MAX_LINE ? { ...update, text: clipText(update.text, MAX_LINE) } : update;
 
 /** Main-process projection. It runs without a canvas window and never calls the scheduler/model. */
 export class LiveResults {
@@ -33,7 +39,7 @@ export class LiveResults {
     let cursor = previous?.cursor ?? 0;
     let eventCount = previous?.eventCount ?? 0;
     let changeCount = previous?.changeCount ?? 0;
-    let updates = previous?.updates ?? [];
+    let updates = (previous?.updates ?? []).map(clipUpdate);
     let facts = { files: previous?.files ?? [], tests: previous?.tests ?? [] };
     let more = true;
     while (more) {
@@ -45,7 +51,7 @@ export class LiveResults {
             resultEventTypes.has(event.type) || event.level === 'error' || event.level === 'warn',
         );
       facts = collectResultFacts(tasks, relevant, facts, false);
-      updates = updates.concat(relevant.map(resultUpdate)).slice(-50);
+      updates = updates.concat(relevant.map((event) => clipUpdate(resultUpdate(event)))).slice(-50);
       eventCount += page.events.length;
       changeCount += relevant.length;
       cursor = page.events.at(-1)?.cursor ?? cursor;
@@ -78,7 +84,7 @@ export class LiveResults {
       ...facts.tests
         .filter((test) => test.status === 'failed')
         .map((test) => `Teste falhou: ${test.command} [${test.evidence}]`),
-    ];
+    ].map((risk) => clipText(risk, MAX_LINE));
     const next = tasks
       .filter((task) => ['pending', 'blocked'].includes(task.status))
       .map(

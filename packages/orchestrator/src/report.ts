@@ -1,4 +1,5 @@
 import type { Mission, Run, Task, Worker } from '@hive/core';
+import { clipText } from '@hive/shared';
 
 /**
  * Consolidated run report built only from recorded facts (task results, commands, diffs).
@@ -30,7 +31,8 @@ export function buildRunReport(
     lines.push(
       `Worker: ${task.workerId ? (names.get(task.workerId) ?? task.workerId) : 'unassigned'} · attempt ${task.attempt}${task.branch ? ` · branch \`${task.branch}\`` : ''}`,
     );
-    if (task.error) lines.push('', `Error: ${task.error}`);
+    // Bounded here too: errors stored before the limit existed can be any size.
+    if (task.error) lines.push('', `Error: ${clipText(task.error)}`);
     if (result) {
       if (result.summary) lines.push('', result.summary);
       if (result.filesChanged.length) {

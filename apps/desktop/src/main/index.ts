@@ -25,7 +25,10 @@ import { DesktopService } from './service';
 import { attachDesignInspector } from './design-inspector';
 import { viewLocalPage } from './page-viewer';
 import { WindowManager } from './windows';
-import { applyPendingRestore, createBackup } from './backup';
+import { applyPendingRestore, backupName, backupsDir, createBackup } from './backup';
+import { boundForIpc } from './ipc-guard';
+import { log, logFile, startLog } from './logger';
+import { describeOversized, findOversized, repairOversized } from './oversized';
 import { Updater } from './updater';
 import appIcon from '../../resources/icon.png?asset';
 import trayIcon from '../../resources/tray.png?asset';
@@ -35,6 +38,65 @@ const directory = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(process.env.HIVE_DATA_DIR || app.getPath('userData'));
 app.setPath('userData', dataDir);
 app.setPath('sessionData', path.join(dataDir, 'session'));
+try {
+  startLog(dataDir);
+} catch (error) {
+  console.error('Não foi possível abrir o log do Hive:', error);
+}
+app.on('child-process-gone', (_event, details) => {
+  if (details.reason !== 'clean-exit')
+    log(
+      'error',
+      'electron',
+      `Processo ${details.type} terminou: ${details.reason} (código ${details.exitCode}).`,
+    );
+});
+
+/**
+ * Records big enough to freeze the app (see oversized.ts) are reported before anything loads
+ * them, and shrunk only after a backup and the user's yes. Saying no still opens Hive: every
+ * text sent to a window is bounded anyway, the screens just stay slower on those records.
+ */
+/** False when the user chose to quit. */
+async function checkOversized(current: HiveDatabase): Promise<boolean> {
+  const records = findOversized(current);
+  if (!records.length) return true;
+  const summary = describeOversized(records);
+  log(
+    'warn',
+    'dados',
+    `Registros grandes demais encontrados.
+${summary}`,
+  );
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['Fazer backup e reduzir', 'Abrir sem reduzir', 'Sair'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+    title: 'Hive · dados grandes demais',
+    message: 'Alguns registros do Hive estão grandes demais e podem travar a interface.',
+    detail: `${summary}
+
+Costumam ser saídas de comandos guardadas por inteiro numa falha. “Fazer backup e reduzir” guarda uma cópia completa em Backups e encurta só esses textos, mantendo o começo e o fim. Nada mais muda.
+
+“Abrir sem reduzir” mantém esses textos, e as telas os mostram cortados. O relatório e o resumo das execuções continuam sendo recalculados pelo Hive como sempre, já no tamanho limitado.`,
+  });
+  if (response === 2) {
+    log('info', 'dados', 'O usuário saiu sem alterar os registros.');
+    return false;
+  }
+  if (response === 1) {
+    log('info', 'dados', 'O usuário abriu o Hive sem reduzir os registros.');
+    return true;
+  }
+  const target = path.join(backupsDir(dataDir), backupName('manual'));
+  await createBackup(current, dataDir, target, app.getVersion());
+  log('info', 'dados', `Backup criado antes da redução: ${target}`);
+  repairOversized(current, records);
+  log('info', 'dados', `${records.length} registro(s) reduzido(s).`);
+  return true;
+}
 let database: HiveDatabase | undefined;
 let desktopService: DesktopService | undefined;
 let tray: Tray | undefined;
@@ -223,6 +285,21 @@ app
       return false;
     });
     database = new HiveDatabase(path.join(dataDir, 'hive.sqlite'));
+    const proceed = await checkOversized(database).catch((error: unknown) => {
+      log('error', 'dados', 'Verificação de registros grandes falhou:', error);
+      dialog.showErrorBox(
+        'Não foi possível reduzir os registros',
+        `${errorMessage(error)}
+
+O Hive abre com os dados como estavam. Detalhes no log: ${logFile() ?? 'indisponível'}`,
+      );
+      return true;
+    });
+    if (!proceed) {
+      quitting = true;
+      app.quit();
+      return;
+    }
     const service = new DesktopService(database, dataDir, (push) => {
       windows.broadcast(push);
       if (push.kind === 'changed' && ['autopilot', 'settings', 'run'].includes(push.entity))
@@ -298,8 +375,15 @@ app
             if (!service.isCanvasTerminal(target))
               throw new Error('Este terminal não foi aberto pelo Workspace.');
           }
-          return { ok: true, value: await service.invoke(known, valid) };
+          const result = boundForIpc(await service.invoke(known, valid));
+          if (result.clipped)
+            log('warn', 'ipc', `${known}: ${result.clipped} texto(s) grande(s) demais cortado(s).`);
+          return { ok: true, value: result.value };
         } catch (error) {
+          // Expected refusals (validation, conflicts) are the user's to read; anything else is
+          // a defect and goes to the log with its stack.
+          if (!(error instanceof HiveError) || error.code === 'INTERNAL')
+            log('error', 'ipc', `${channel}:`, error);
           return {
             ok: false,
             error: {
@@ -321,8 +405,13 @@ app
     });
   })
   .catch((error) => {
-    console.error(error);
-    dialog.showErrorBox('Não foi possível iniciar o Hive', errorMessage(error));
+    log('error', 'app', 'Falha ao iniciar:', error);
+    dialog.showErrorBox(
+      'Não foi possível iniciar o Hive',
+      `${errorMessage(error)}
+
+Detalhes no log: ${logFile() ?? 'indisponível'}`,
+    );
     app.quit();
   });
 app.on('window-all-closed', () => {
@@ -332,6 +421,7 @@ app.on('before-quit', () => {
   quitting = true;
 });
 app.on('will-quit', () => {
+  log('info', 'app', 'Hive encerrando.');
   if (awakeBlocker !== null) powerSaveBlocker.stop(awakeBlocker);
   tray?.destroy();
   desktopService?.dispose();

@@ -36,7 +36,7 @@ import {
   type ResultEventPage,
 } from '@hive/core';
 import type { SQLInputValue } from 'node:sqlite';
-import { HiveError } from '@hive/shared';
+import { HiveError, clipText } from '@hive/shared';
 import type { HiveDatabase } from './database';
 import { CortexRepository } from './cortex';
 import { JsonTable, type Row } from './json-table';
@@ -218,7 +218,8 @@ export class Repositories {
   /* ------------------------------------------------------------ events */
 
   appendEvent(event: AgentEvent): void {
-    const valid = agentEventSchema.parse(event);
+    // The last line of defence for every writer: a log entry is never a data dump.
+    const valid = agentEventSchema.parse({ ...event, message: clipText(event.message, 16_000) });
     this.db.run(
       `INSERT INTO events (id, ts, workspace_id, run_id, task_id, worker_id, type, level, message, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,

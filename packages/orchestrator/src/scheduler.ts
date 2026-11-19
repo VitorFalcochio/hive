@@ -23,7 +23,7 @@ import {
 import type { AgentMemory, AgentRuntime, AgentTaskInput, RuntimeEvent } from '@hive/agents';
 import type { Repositories } from '@hive/persistence';
 import type { ChatClient } from '@hive/providers';
-import { HiveError, errorMessage, newId, nowIso, secretRedactor } from '@hive/shared';
+import { HiveError, clipText, errorMessage, newId, nowIso, secretRedactor } from '@hive/shared';
 import {
   WorktreeManager,
   diffRefs,
@@ -221,6 +221,25 @@ export class Scheduler {
     this.log(run, null, null, 'run.status', 'warn', 'Execução cancelada.');
     this.options.onChange('run', runId);
     this.settle(runId);
+  }
+
+  /**
+   * Stops every agent session when Hive quits, which kills the commands they started (dev
+   * servers, watchers) instead of leaving them running with no owner. The tasks are marked as
+   * interrupted by `recover` at the next start, where the user can run them again.
+   */
+  shutdown(): number {
+    let stopped = 0;
+    for (const [taskId, session] of this.sessions) {
+      stopped++;
+      void (this.runtimes.get(taskId) ?? this.options.runtime)
+        .cancel(session)
+        .catch((error: unknown) =>
+          console.error(`Não foi possível parar a sessão ${session}:`, error),
+        );
+    }
+    for (const taskId of this.launching) this.cancelRequested.add(taskId);
+    return stopped;
   }
 
   cancelTask(taskId: string): void {
@@ -931,7 +950,7 @@ export class Scheduler {
         await git(workspace.path, ['branch', '-D', previousBranch], { allowFailure: true });
     } catch (error) {
       const cancelled = error instanceof HiveError && error.code === 'CANCELLED';
-      const message = secretRedactor.redact(errorMessage(error));
+      const message = secretRedactor.redact(clipText(errorMessage(error)));
       if (!cancelled && this.retryUnattended(run, initial.id, attempt, message)) return;
       this.update(initial.id, {
         status: cancelled ? 'cancelled' : 'failed',
@@ -1074,6 +1093,8 @@ export class Scheduler {
 
   private update(taskId: string, patch: Partial<Task>): Task {
     const current = this.repos.tasks.require(taskId, 'Tarefa');
+    // An error comes from outside (a process, a provider): it is stored and shown bounded.
+    if (typeof patch.error === 'string') patch = { ...patch, error: clipText(patch.error) };
     const next = this.repos.tasks.put({ ...current, ...patch });
     this.options.onChange('task', taskId);
     return next;
@@ -1110,7 +1131,7 @@ export class Scheduler {
       workerId,
       type,
       level,
-      message: secretRedactor.redact(message),
+      message: secretRedactor.redact(clipText(message)),
       data:
         type === 'task.status' && taskId
           ? {

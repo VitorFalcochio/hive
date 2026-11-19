@@ -37,6 +37,22 @@ export function errorMessage(error: unknown): string {
   return String(error);
 }
 
+/** Longest error text Hive stores or shows: enough for a stack or a compiler error, never a dump. */
+export const MAX_ERROR_TEXT = 8_000;
+
+/**
+ * Bounds a text that came from outside (a process, a model, an error), keeping its start and
+ * end. The cut is stated in the text itself, so nothing is hidden: a 60 MB git output once
+ * landed in an error message and froze the whole app.
+ */
+export function clipText(text: string, max = MAX_ERROR_TEXT): string {
+  if (text.length <= max) return text;
+  const tail = Math.floor(max / 4);
+  const head = Math.max(0, max - tail - 80);
+  const omitted = text.length - head - tail;
+  return `${text.slice(0, head)}\n[… ${omitted.toLocaleString('pt-BR')} caracteres omitidos …]\n${text.slice(text.length - tail)}`;
+}
+
 export function isAbortError(error: unknown): boolean {
   return (
     (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) ||
