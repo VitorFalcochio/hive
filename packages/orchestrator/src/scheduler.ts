@@ -83,6 +83,12 @@ export interface SchedulerOptions {
     task: Task;
     worker: Worker;
   }) => Promise<{ memory: AgentMemory; summary: string } | null>;
+  /**
+   * Hive Teams: the tools and guidance a task's agent gets from its place in a team (a leader's
+   * delegation tools, a reviewer's verdict). Handed over next to the Nectar's, through the same
+   * memory channel of the runtime; null when the task is not part of a team.
+   */
+  teamTools?: (context: { run: Run; task: Task; worker: Worker }) => AgentMemory | null;
 }
 
 /** Prefix of the error given to tasks skipped because a dependency did not succeed. */
@@ -437,7 +443,7 @@ export class Scheduler {
     const run = this.repos.runs.require(runId, 'Execução');
     if (!EDITABLE.has(run.status))
       throw new HiveError('CONFLICT', 'Gere o plano antes de adicionar tarefas a esta missão.');
-    const plan = planTaskSchema.parse(input);
+    const { lead, ...plan } = planTaskSchema.parse(input);
     const tasks = this.repos.tasks.list('run_id = ?', runId);
     if (tasks.length >= MAX_RUN_TASKS)
       throw new HiveError('VALIDATION', `Uma missão tem no máximo ${MAX_RUN_TASKS} tarefas.`);
@@ -447,10 +453,15 @@ export class Scheduler {
       if (!tasks.some((task) => task.key === dep))
         throw new HiveError('VALIDATION', `Dependência desconhecida: "${dep}".`);
     if (plan.workerId) this.requireWorker(plan.workerId);
+    const id = newId('task');
     const task = this.repos.tasks.put({
       ...plan,
       ...extra,
-      id: newId('task'),
+      // A plan task marked as a lead starts a Hive Teams team of its own.
+      ...(lead && !extra.team
+        ? { team: { role: 'lead' as const, leadTaskId: id, requestId: null } }
+        : {}),
+      id,
       runId,
       status: 'pending',
       workerState: 'idle',
@@ -646,20 +657,26 @@ export class Scheduler {
     const run = this.repos.runs.get(runId);
     if (!run || run.status !== 'running') return;
     let tasks = this.repos.tasks.list('run_id = ?', runId);
-    for (const task of tasks) {
-      if (
-        (task.status === 'pending' || task.status === 'blocked') &&
-        isBlockedByFailure(task, tasks) &&
-        !this.waitsOnHold(task, tasks)
-      )
-        this.update(task.id, {
-          status: 'cancelled',
-          workerState: 'cancelled',
-          error: `${BLOCKED}: ${task.dependsOn.join(', ')}.`,
-          finishedAt: nowIso(),
-        });
+    // Until nothing changes: a task cancelled here blocks the ones that wait on it in turn.
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const task of tasks) {
+        if (
+          (task.status === 'pending' || task.status === 'blocked') &&
+          isBlockedByFailure(task, tasks) &&
+          !this.waitsOnHold(task, tasks)
+        ) {
+          this.update(task.id, {
+            status: 'cancelled',
+            workerState: 'cancelled',
+            error: `${BLOCKED}: ${task.dependsOn.join(', ')}.`,
+            finishedAt: nowIso(),
+          });
+          changed = true;
+        }
+      }
+      tasks = this.repos.tasks.list('run_id = ?', runId);
     }
-    tasks = this.repos.tasks.list('run_id = ?', runId);
     const limit = this.repos.getSettings().maxConcurrentTasks;
     // Tasks given honey go first, and may take one slot over the limit so they never wait.
     const ready = readyTasks(tasks).sort((a, b) => Number(!!b.boosted) - Number(!!a.boosted));
@@ -763,11 +780,10 @@ export class Scheduler {
         .map((key) => tasks.find((task) => task.key === key))
         .filter((task): task is Task => !!task);
       if (!revision)
-        for (const dependency of upstream)
-          if (dependency.branch && dependency.result?.commit) {
-            await manager.mergeBranch(worktree, dependency.result.commit);
-            this.log(run, initial.id, worker.id, 'git', 'debug', `Incluído: ${dependency.title}`);
-          }
+        for (const dependency of integrationSources(upstream, tasks)) {
+          await manager.mergeBranch(worktree, dependency.result!.commit!);
+          this.log(run, initial.id, worker.id, 'git', 'debug', `Incluído: ${dependency.title}`);
+        }
       const startCommit =
         revision?.startCommit ?? (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
       this.update(initial.id, { worktreePath: worktree, startCommit, workerState: 'thinking' });
@@ -801,6 +817,14 @@ export class Scheduler {
             `Nectar indisponível para esta tarefa; seguindo sem memória compartilhada: ${errorMessage(error)}`,
           );
         }
+      if (this.options.teamTools) {
+        const team = this.options.teamTools({
+          run,
+          task: this.repos.tasks.require(initial.id, 'Tarefa'),
+          worker,
+        });
+        if (team) memory = memory ? mergeMemory(memory, team) : team;
+      }
       checkCancelled();
 
       const previousError = this.retryNotes.get(initial.id);
@@ -1089,4 +1113,41 @@ export class Scheduler {
     this.repos.appendEvent(event);
     this.options.onEvent(event);
   }
+}
+
+/** Two memories handed to one session: texts side by side, tools together (first one wins a name). */
+function mergeMemory(first: AgentMemory, second: AgentMemory): AgentMemory {
+  const names = new Set(first.tools.map((tool) => tool.definition.function.name));
+  return {
+    context: [first.context, second.context].filter(Boolean).join('\n\n'),
+    guidance: [first.guidance, second.guidance].filter(Boolean).join('\n\n'),
+    tools: [
+      ...first.tools,
+      ...second.tools.filter((tool) => !names.has(tool.definition.function.name)),
+    ],
+  };
+}
+
+/**
+ * The tasks whose results a new task starts from: each dependency's own commit, or, for a
+ * dependency that changed nothing (so has no commit of its own), the results it started from.
+ * Without this, work would be lost behind a task that only checked or coordinated.
+ */
+export function integrationSources(upstream: Task[], tasks: Task[]): Task[] {
+  const sources = new Map<string, Task>();
+  const seen = new Set<string>();
+  const visit = (task: Task) => {
+    if (seen.has(task.id)) return;
+    seen.add(task.id);
+    if (task.branch && task.result?.commit) {
+      sources.set(task.id, task);
+      return;
+    }
+    for (const key of task.dependsOn) {
+      const dependency = tasks.find((item) => item.key === key);
+      if (dependency) visit(dependency);
+    }
+  };
+  for (const task of upstream) visit(task);
+  return [...sources.values()];
 }

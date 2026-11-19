@@ -425,6 +425,8 @@ export const planTaskSchema = z.object({
   workerId: z.string().nullable(),
   dependsOn: z.array(z.string()).max(10),
   acceptanceCriteria: z.array(z.string().min(1).max(400)).min(1).max(10),
+  /** Hive Teams: the task's agent leads a team for it (creates members, delegates, reviews). */
+  lead: z.boolean().optional(),
 });
 export type PlanTask = z.infer<typeof planTaskSchema>;
 

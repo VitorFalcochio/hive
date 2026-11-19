@@ -12,6 +12,8 @@ export interface PlanRequest {
   queen: Worker;
   /** The Queen's skills, followed while planning. */
   skills?: { name: string; body: string }[];
+  /** Hive Teams is on: the Queen may make one task's agent the leader of a team. */
+  teams?: boolean;
   signal?: AbortSignal;
   maxAttempts?: number;
   onAttempt?: (attempt: number, error: string | null) => void;
@@ -58,6 +60,11 @@ export function buildPlanPrompt(request: PlanRequest): ChatMessage[] {
         '- Every task needs 1-5 concrete, verifiable acceptance criteria.',
         '- Assign workerId only from the provided list; match the worker role to the work.',
         "- Ground the plan in the project context: name the real folders and files involved, follow its README and agent notes, and use the project's own test, lint and build commands in acceptance criteria.",
+        ...(request.teams
+          ? [
+              '- Hive Teams is on. For work too big for one session, add "lead": true to the task whose worker should lead it as technical lead: that worker defines the approach, creates its own team members (on other providers too), delegates, asks for reviews and reports back. At most one lead task per plan; leave "lead" out on the others. Tasks that check the final result (QA) depend on the lead task.',
+            ]
+          : []),
         ...(request.skills?.length
           ? [
               '',

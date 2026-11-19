@@ -54,8 +54,10 @@ import {
 } from '@hive/workspace';
 import {
   Autopilot,
+  HiveTeams,
   Scheduler,
   planMission,
+  teamToolsFor,
   validatePlan,
   type AutopilotHistoryItem,
 } from '@hive/orchestrator';
@@ -110,6 +112,8 @@ export class DesktopService {
   readonly cortex: CortexService;
   readonly router: ModelRouter;
   readonly scheduler: Scheduler;
+  /** Hive Teams: leaders' requests for agents, delegations and reviews (off unless enabled). */
+  readonly teams: HiveTeams;
   private readonly flow: FlowEngine;
   readonly autopilot: Autopilot;
   readonly terminals: TerminalManager;
@@ -249,7 +253,10 @@ export class DesktopService {
         this.router.clientFor(worker, (change) =>
           notify(describeSwitch(change), switchData(change)),
         ),
+      teamTools: ({ task, worker }) => teamToolsFor(this.teams, this.repos, { task, worker }),
+      onTaskFinished: (_run, task) => this.teams.taskFinished(task),
     });
+    this.teams = new HiveTeams({ repos: this.repos, scheduler: this.scheduler });
     this.flow = new FlowEngine({
       repos: this.repos,
       layout: (runId) => this.canvasLayout(runId),
@@ -763,7 +770,9 @@ export class DesktopService {
       const result = await planMission({
         title: mission.title,
         objective: mission.objective,
-        workers: this.repos.workers.list(),
+        // Agents Hive Teams created belong to their own mission; the Queen plans with the team.
+        workers: this.repos.workers.list().filter((worker) => !worker.team),
+        teams: this.repos.getSettings().teams.enabled,
         projectContext:
           (await describeProject(workspace.path, {
             name: workspace.name,
@@ -1149,10 +1158,13 @@ export class DesktopService {
     if (!plan) throw new HiveError('VALIDATION', errors.join('\n'));
     this.repos.transaction(() => {
       for (const task of detail.tasks) this.repos.tasks.delete(task.id);
-      for (const task of plan.tasks)
+      for (const { lead, ...task } of plan.tasks) {
+        const id = newId('task');
         this.repos.tasks.put({
           ...task,
-          id: newId('task'),
+          // Hive Teams: the Queen made this task's agent the leader of a team.
+          ...(lead ? { team: { role: 'lead' as const, leadTaskId: id, requestId: null } } : {}),
+          id,
           runId,
           status: 'pending',
           workerState: 'idle',
@@ -1166,6 +1178,7 @@ export class DesktopService {
           startedAt: null,
           finishedAt: null,
         });
+      }
       this.repos.runs.put({
         ...detail.run,
         status: 'awaiting_plan_approval',

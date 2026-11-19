@@ -110,6 +110,11 @@ export type TeamRequest = z.infer<typeof teamRequestSchema>;
  * leader: these only narrow that further.
  */
 export const teamsSettingsSchema = z.object({
+  /**
+   * Off by default: the Queen is not told about team leaders and no agent gets the team tools,
+   * so missions run exactly as before until the user turns Hive Teams on.
+   */
+  enabled: z.boolean().default(false),
   /** Agents Hive Teams may create in one mission, across all its teams. */
   maxAgentsPerRun: z.number().int().min(0).max(20),
   /** Members one leader may have. */
@@ -128,6 +133,7 @@ export const teamsSettingsSchema = z.object({
 export type TeamsSettings = z.infer<typeof teamsSettingsSchema>;
 
 export const defaultTeamsSettings: TeamsSettings = {
+  enabled: false,
   maxAgentsPerRun: 6,
   maxTeamSize: 4,
   maxDepth: 1,

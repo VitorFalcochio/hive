@@ -189,6 +189,45 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     expect(ctx.git('status', '--porcelain')).toBe('');
   });
 
+  it('uma falha cancela toda a cadeia que dependia dela, e a missão para', async () => {
+    const ctx = await setup(
+      async (input) =>
+        input.task.title === 'Tarefa a' ? { status: 'failed', error: 'quebrou' } : {},
+      [
+        { key: 'a' },
+        { key: 'b', dependsOn: ['a'] },
+        { key: 'c', dependsOn: ['b'] },
+        { key: 'd', dependsOn: ['c'] },
+      ],
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() !== 'running', 'a missão parar');
+    expect(ctx.status()).toBe('failed');
+    expect(['b', 'c', 'd'].map((key) => ctx.task(key).status)).toEqual([
+      'cancelled',
+      'cancelled',
+      'cancelled',
+    ]);
+  });
+
+  it('o trabalho passa adiante mesmo atrás de uma tarefa que não alterou nada', async () => {
+    const sawA: boolean[] = [];
+    const ctx = await setup(
+      async (input) => {
+        if (input.task.title === 'Tarefa a') await writeTaskFile(input);
+        if (input.task.title === 'Tarefa c')
+          sawA.push(existsSync(path.join(input.worktreePath, 'Tarefa a.txt')));
+        return {};
+      },
+      // b only checks: it changes no file, so it has no commit of its own.
+      [{ key: 'a' }, { key: 'b', dependsOn: ['a'] }, { key: 'c', dependsOn: ['b'] }],
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'review');
+    expect(ctx.task('b').result?.commit).toBeNull();
+    expect(sawA).toEqual([true]);
+  });
+
   it('descartar uma tarefa só apaga a branch do Hive, nunca uma branch do usuário', async () => {
     const ctx = await setup(
       async (input) => {
