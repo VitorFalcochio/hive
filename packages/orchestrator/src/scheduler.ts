@@ -1,4 +1,5 @@
 import {
+  canRunTasks,
   activeStatuses,
   findCycle,
   planTaskSchema,
@@ -100,6 +101,14 @@ export interface SchedulerOptions {
 
 /** Prefix of the error given to tasks skipped because a dependency did not succeed. */
 const BLOCKED = 'Dependência não concluída';
+/** Claude Code talks to its own model; a provider call from such an agent is a defect. */
+const claudeCodeChat: ChatClient = {
+  chat: () =>
+    Promise.reject(
+      new HiveError('VALIDATION', 'Este agente roda no Claude Code e não usa provedor do Hive.'),
+    ),
+};
+
 const RESUMABLE: ReadonlySet<RunStatus> = new Set([
   'awaiting_plan_approval',
   'review',
@@ -174,7 +183,7 @@ export class Scheduler {
     if (!tasks.length) throw new HiveError('VALIDATION', 'Gere um plano antes de executar.');
     const workers = this.repos.workers.list();
     const configured = (worker: Worker | undefined) =>
-      !!worker && worker.role !== 'queen' && !!worker.providerId && !!worker.modelId;
+      !!worker && worker.role !== 'queen' && canRunTasks(worker);
     // The Queen may leave a task unassigned; give it to a configured generalist.
     const fallback =
       workers.find((w) => configured(w) && ['backend', 'frontend', 'architect'].includes(w.role)) ??
@@ -570,7 +579,7 @@ export class Scheduler {
     const worker = this.repos.workers.require(workerId, 'Agente');
     if (worker.role === 'queen')
       throw new HiveError('VALIDATION', 'A Queen planeja; tarefas vão para os outros agentes.');
-    if (!worker.providerId || !worker.modelId)
+    if (!canRunTasks(worker))
       throw new HiveError('VALIDATION', `${worker.name} ainda não tem provedor e modelo.`);
     return worker;
   }
@@ -779,7 +788,7 @@ export class Scheduler {
     try {
       const assigned = this.repos.workers.require(initial.workerId ?? '', 'Agente');
       const worker = initial.boosted ? honeyBoost(assigned) : assigned;
-      if (!worker.providerId || !worker.modelId)
+      if (!canRunTasks(worker))
         throw new HiveError('VALIDATION', `${worker.name} não tem provedor e modelo configurados.`);
       this.update(initial.id, {
         status: 'running',
@@ -883,12 +892,17 @@ export class Scheduler {
             : {}),
         },
         worker,
-        model: worker.modelId,
-        chat: this.options.chatForWorker
-          ? this.options.chatForWorker(worker, (message, data) =>
-              this.log(run, initial.id, worker.id, 'info', 'warn', message, data),
-            )
-          : this.options.chatFor(worker.providerId),
+        // Claude Code uses the model set in the user's own Claude Code; the agent's provider
+        // model is kept for when it goes back to Hive's engine.
+        model: worker.engine === 'claude-code' ? 'default' : (worker.modelId ?? 'default'),
+        chat:
+          worker.engine === 'claude-code' || !worker.providerId
+            ? claudeCodeChat
+            : this.options.chatForWorker
+              ? this.options.chatForWorker(worker, (message, data) =>
+                  this.log(run, initial.id, worker.id, 'info', 'warn', message, data),
+                )
+              : this.options.chatFor(worker.providerId),
         worktreePath: worktree,
         skills,
         limits: worker.limits,

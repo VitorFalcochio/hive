@@ -193,6 +193,13 @@ export const modelRouteSchema = z.object({
 });
 export type ModelRoute = z.infer<typeof modelRouteSchema>;
 
+/**
+ * What runs an agent's tasks: Hive's own engine over the chosen provider and model, or the
+ * user's Claude Code (its claude.ai sign-in and plan quota, never an API key).
+ */
+export const agentEngineSchema = z.enum(['native', 'claude-code']);
+export type AgentEngine = z.infer<typeof agentEngineSchema>;
+
 export const workerSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(60),
@@ -214,12 +221,19 @@ export const workerSchema = z.object({
   autoApproveCommands: z.array(z.string().min(1).max(200)),
   systemPrompt: z.string().max(20_000),
   limits: executionLimitsSchema,
+  /** Absent on agents saved before engines existed: they run on Hive's own engine. */
+  engine: agentEngineSchema.optional(),
   /** Set only on agents Hive Teams created for a mission; absent on agents the user made. */
   team: workerTeamSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type Worker = z.infer<typeof workerSchema>;
+
+/** An agent that can run tasks: Claude Code needs no provider; Hive's engine needs both. */
+export function canRunTasks(worker: Pick<Worker, 'engine' | 'providerId' | 'modelId'>): boolean {
+  return worker.engine === 'claude-code' || (!!worker.providerId && !!worker.modelId);
+}
 
 /** What the interface may send: an agent's Hive Teams origin is never set from outside. */
 export const workerInputSchema = workerSchema

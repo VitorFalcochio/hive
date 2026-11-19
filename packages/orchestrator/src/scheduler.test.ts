@@ -671,3 +671,48 @@ describe('Scheduler ao fechar o Hive', { timeout: 60_000 }, () => {
     await until(() => ctx.task('a').status === 'cancelled', 'tarefa cancelada');
   });
 });
+
+describe('Agente com motor Claude Code e aprovações do Hive', { timeout: 60_000 }, () => {
+  it('roda sem provedor e o pedido de permissão vira aprovação do Hive', async () => {
+    const { ClaudeCodePermissions, ClaudeCodeRuntime } = await import('@hive/agents');
+    const { fileURLToPath } = await import('node:url');
+    const fake = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../agents/src/fixtures/fake-claude-code.mjs',
+    );
+    const permissions = new ClaudeCodePermissions();
+    const claude = new ClaudeCodeRuntime({
+      executable: process.execPath,
+      argsPrefix: [fake],
+      permissions,
+    });
+    process.env.FAKE_CLAUDE_MODE = 'permission';
+    try {
+      const ctx = await setup(async () => ({}), [{ key: 'a' }], false, {
+        runtimeFor: (worker) => (worker.engine === 'claude-code' ? claude : null),
+      });
+      const worker = ctx.repos.workers.require('w1', 'Agente');
+      ctx.repos.workers.put({ ...worker, providerId: null, modelId: null, engine: 'claude-code' });
+
+      ctx.scheduler.start(ctx.run.id);
+      await until(
+        () => ctx.repos.approvals.list("status = 'pending'").length === 1,
+        'pedido de aprovação',
+      );
+      const [approval] = ctx.repos.approvals.list("status = 'pending'");
+      expect(approval!.detail).toContain('npm test');
+      ctx.scheduler.resolveApproval(approval!.id, true, false);
+      await until(() => ['review', 'failed'].includes(ctx.status()), 'fim da execução');
+
+      const task = ctx.task('a');
+      expect(task.error).toBeNull();
+      expect(JSON.parse(task.result!.summary).decision).toEqual({
+        behavior: 'allow',
+        updatedInput: { command: 'npm test' },
+      });
+    } finally {
+      delete process.env.FAKE_CLAUDE_MODE;
+      await permissions.close();
+    }
+  });
+});

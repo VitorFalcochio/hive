@@ -5,6 +5,7 @@ import {
   beeColorOf,
   beeColors,
   beeColorSchema,
+  canRunTasks,
   compareByPrice,
   isFreeModel,
   nextBeeColor,
@@ -12,6 +13,7 @@ import {
   soldierPresets,
   squadOf,
   type BeeColor,
+  type ClaudeCodeStatus,
   type RecommendedSetup,
   type Soldier,
   type SoldierRole,
@@ -132,7 +134,7 @@ export function AgentsPage() {
             }}
           >
             <span role="cell" className="agent-role-cell">
-              <Dot tone={worker.modelId ? 'ok' : 'idle'} />
+              <Dot tone={canRunTasks(worker) ? 'ok' : 'idle'} />
               {roleLabels[worker.role]}
             </span>
             <span role="cell" className="agent-name-cell">
@@ -142,7 +144,7 @@ export function AgentsPage() {
                 <small>{worker.description || 'Sem descrição'}</small>
               </span>
             </span>
-            <AgentModel worker={worker} />
+            {worker.engine === 'claude-code' ? <ClaudeCodeCells /> : <AgentModel worker={worker} />}
             <span role="cell">
               <button
                 className="icon-button"
@@ -291,6 +293,9 @@ function NewAgent({
         />
         <ProfileFields value={draft} onChange={patch} />
       </section>
+      {draft.role !== 'queen' && (
+        <EngineSection value={draft.engine ?? 'native'} onChange={(engine) => patch({ engine })} />
+      )}
       <SkillsSection value={draft.skills} onChange={(next) => patch({ skills: next })} />
       <ToolsSection tools={draft.tools} commands={draft.autoApproveCommands} onChange={patch} />
       <AgentMcpSection
@@ -331,6 +336,7 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
     JSON.stringify(draft.limits) !== JSON.stringify(worker.limits) ||
     JSON.stringify(draft.squad) !== JSON.stringify(worker.squad) ||
     JSON.stringify(draft.fallbacks ?? []) !== JSON.stringify(worker.fallbacks ?? []) ||
+    (draft.engine ?? 'native') !== (worker.engine ?? 'native') ||
     draft.autoApproveCommands.join('\n') !== worker.autoApproveCommands.join('\n');
   const patch = (next: Partial<Worker>) => setDraft((value) => ({ ...value, ...next }));
 
@@ -390,6 +396,9 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
         />
         <ProfileFields value={draft} onChange={patch} />
       </section>
+      {worker.role !== 'queen' && (
+        <EngineSection value={draft.engine ?? 'native'} onChange={(engine) => patch({ engine })} />
+      )}
       <FailoverSection
         worker={worker}
         value={draft.fallbacks ?? []}
@@ -411,6 +420,96 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
         </p>
       )}
     </Drawer>
+  );
+}
+
+/** The provider and model cells of an agent that runs on Claude Code. */
+function ClaudeCodeCells() {
+  return (
+    <>
+      <span role="cell">Claude Code</span>
+      <span role="cell" className="agent-model-cell">
+        <code>modelo do seu Claude Code</code>
+      </span>
+    </>
+  );
+}
+
+/**
+ * Which engine runs the agent's tasks. Claude Code runs with the user's own sign-in; Hive
+ * shows whether it is installed and how it is signed in, since only claude.ai is allowed.
+ */
+function EngineSection({
+  value,
+  onChange,
+}: {
+  value: NonNullable<Worker['engine']>;
+  onChange: (engine: NonNullable<Worker['engine']>) => void;
+}) {
+  const [status, setStatus] = useState<ClaudeCodeStatus | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  useEffect(() => {
+    if (value !== 'claude-code') return;
+    let alive = true;
+    setStatus(null);
+    setFailure(null);
+    window.hive
+      .invoke('claudeCode.status')
+      .then((next) => {
+        if (alive) setStatus(next);
+      })
+      .catch((error: unknown) => {
+        if (alive) setFailure(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [value]);
+  const usable = status?.installed && status.loggedIn && status.authMethod === 'claude.ai';
+  return (
+    <section className="agent-section">
+      <h3>Motor</h3>
+      <label className="field">
+        <span>Quem executa as tarefas deste agente</span>
+        <Select
+          value={value}
+          onChange={(next) => onChange(next === 'claude-code' ? 'claude-code' : 'native')}
+          options={[
+            { value: 'native', label: 'Hive (provedor e modelo da tabela)' },
+            { value: 'claude-code', label: 'Claude Code (sua conta claude.ai)' },
+          ]}
+        />
+      </label>
+      {value === 'claude-code' && (
+        <div className="hint">
+          {failure ? (
+            <p role="alert" className="form-error">
+              {failure}
+            </p>
+          ) : !status ? (
+            <p className="progress">Verificando o Claude Code…</p>
+          ) : usable ? (
+            <p className="success-text">
+              <Check size={13} /> Conectado com a conta claude.ai. As tarefas usam a cota do seu
+              plano, sem cobrança por uso.
+            </p>
+          ) : (
+            <p role="alert" className="form-error">
+              {status.error ??
+                (!status.loggedIn
+                  ? 'O Claude Code não está conectado. Rode "claude" no terminal e entre com a sua conta claude.ai.'
+                  : `Trava de custo: o Claude Code está conectado por "${status.authMethod ?? 'desconhecido'}", que cobra por uso. Entre com a conta claude.ai ("claude auth login").`)}
+            </p>
+          )}
+          <p>
+            O Claude Code usa o modelo e as ferramentas dele. Cada pedido de permissão dele (rodar
+            um comando, por exemplo) passa pelas aprovações do Hive, com as mesmas regras dos outros
+            agentes. Provedor e modelo da tabela ficam guardados para quando voltar ao motor do
+            Hive.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 

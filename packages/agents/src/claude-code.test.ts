@@ -181,3 +181,71 @@ describe('Claude Code como motor do Hive', { timeout: 30_000 }, () => {
     expect(outcome.error).toContain('Tempo limite');
   });
 });
+
+describe('aprovações do Hive para o Claude Code', { timeout: 30_000 }, () => {
+  it('cada pedido de permissão vira uma aprovação do Hive, liberada ou negada', async () => {
+    const { ClaudeCodePermissions, PERMISSION_TOOL } = await import('./claude-code-permissions');
+    const permissions = new ClaudeCodePermissions();
+    try {
+      for (const allow of [true, false]) {
+        const { record, input } = await setup({ FAKE_CLAUDE_MODE: 'permission' });
+        const runtime = new ClaudeCodeRuntime({
+          executable: process.execPath,
+          argsPrefix: [fake],
+          permissions,
+        });
+        const asked: string[] = [];
+        const outcome = await (
+          await runtime.start({
+            ...input,
+            requestApproval: async ({ command }) => {
+              asked.push(command);
+              return allow;
+            },
+          })
+        ).done;
+        expect(outcome.status).toBe('completed');
+        expect(asked).toEqual(['npm test']);
+        const reply = JSON.parse(outcome.summary);
+        expect(reply.tools).toEqual(['approve']);
+        expect(reply.decision).toEqual(
+          allow
+            ? { behavior: 'allow', updatedInput: { command: 'npm test' } }
+            : { behavior: 'deny', message: 'O usuário do Hive não liberou esta ação.' },
+        );
+        const { args } = JSON.parse(await readFile(record, 'utf8'));
+        expect(args).toEqual(
+          expect.arrayContaining([
+            '--permission-prompt-tool',
+            PERMISSION_TOOL,
+            '--strict-mcp-config',
+          ]),
+        );
+        expect(args).not.toContain('--permission-prompts');
+      }
+    } finally {
+      await permissions.close();
+    }
+  });
+
+  it('sem token válido, o servidor recusa', async () => {
+    const { ClaudeCodePermissions } = await import('./claude-code-permissions');
+    const permissions = new ClaudeCodePermissions();
+    try {
+      const { config, release } = await permissions.register(async () => ({
+        behavior: 'deny',
+        message: 'x',
+      }));
+      const { url } = JSON.parse(config).mcpServers.hive;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer errado', 'content-type': 'application/json' },
+        body: '{}',
+      });
+      expect(response.status).toBe(401);
+      release();
+    } finally {
+      await permissions.close();
+    }
+  });
+});

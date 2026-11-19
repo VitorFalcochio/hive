@@ -40,7 +40,36 @@ out({
   tools: ['Write', 'Bash'],
 });
 
-if (mode === 'hang') {
+if (mode === 'permission') {
+  // What Claude Code does with --permission-prompt-tool: ask the MCP tool before acting.
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StreamableHTTPClientTransport } =
+    await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const config = JSON.parse(args[args.indexOf('--mcp-config') + 1]).mcpServers.hive;
+  const tool = args[args.indexOf('--permission-prompt-tool') + 1];
+  const client = new Client({ name: 'fake-claude', version: '1.0.0' });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(config.url), {
+      requestInit: { headers: config.headers },
+    }),
+  );
+  const listed = await client.listTools();
+  const answer = await client.callTool({
+    name: tool.replace('mcp__hive__', ''),
+    arguments: { tool_name: 'Bash', input: { command: 'npm test' }, tool_use_id: 'tu_9' },
+  });
+  await client.close();
+  const decision = JSON.parse(answer.content[0].text);
+  out({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: JSON.stringify({ tools: listed.tools.map((t) => t.name), decision }),
+    num_turns: 1,
+    session_id: session,
+    usage: { input_tokens: 1, output_tokens: 1 },
+  });
+} else if (mode === 'hang') {
   appendFileSync(record ?? path.join(process.cwd(), 'hang.pid'), '');
   setInterval(() => undefined, 1_000);
 } else if (mode === 'crash') {

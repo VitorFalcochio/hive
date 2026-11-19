@@ -14,7 +14,11 @@ const exclude = [
  * End-to-end scenarios with real git worktrees and many node processes. They run after the
  * rest, not beside it: run together, they took the CPU from tests that wait on timers.
  */
-const integration = ['packages/orchestrator/src/teams/teams.flow.test.ts'];
+const integration = [
+  'packages/orchestrator/src/teams/teams.flow.test.ts',
+  // Starts many node processes, local HTTP servers and taskkill for the Claude Code adapter.
+  'packages/agents/src/claude-code.test.ts',
+];
 
 export default defineConfig({
   test: {

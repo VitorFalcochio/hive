@@ -5,6 +5,8 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import type { CommandEvidence } from '@hive/core';
 import { Emitter, clipText, errorMessage } from '@hive/shared';
+import type { ClaudeCodePermissions, PermissionHandler } from './claude-code-permissions';
+import { PERMISSION_TOOL } from './claude-code-permissions';
 import { buildTaskPrompt } from './native-runtime';
 import { killTree } from './process';
 import type {
@@ -31,9 +33,13 @@ export interface ClaudeCodeOptions {
   /** Arguments placed before Hive's own, e.g. a script path when `executable` is node. */
   argsPrefix?: string[];
   /**
-   * Whether the agent may run shell commands. Claude Code cannot ask Hive for approval here,
-   * so commands either run freely (only when the user's setting already allows all commands)
-   * or are refused; anything else that would prompt is refused too, never left waiting.
+   * Where Claude Code's permission prompts go: each one becomes a Hive approval, decided by the
+   * same rules and screens as Hive's own agents (see ClaudeCodePermissions).
+   */
+  permissions?: ClaudeCodePermissions;
+  /**
+   * Without `permissions` (tests, scripts), whether shell commands run freely. Anything that
+   * would prompt is refused then, never left waiting.
    */
   allowCommands?: () => boolean;
   /** Lifts the cost lock for API-key sign-ins. Off unless the user chose it explicitly. */
@@ -189,7 +195,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       .join('\n\n');
   }
 
-  private args(input: AgentTaskInput, claudeSession: string): string[] {
+  private args(input: AgentTaskInput, claudeSession: string, mcpConfig: string | null): string[] {
     const args = [
       ...(this.options.argsPrefix ?? []),
       '-p',
@@ -200,16 +206,46 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       claudeSession,
       '--permission-mode',
       'acceptEdits',
-      // Nothing waits for an answer nobody can give: what would prompt is refused.
-      '--permission-prompts',
-      'none',
       '--max-turns',
       String(Math.max(1, input.limits.maxSteps)),
     ];
     if (input.model && input.model !== 'default') args.push('--model', input.model);
-    if (this.options.allowCommands?.()) args.push('--allowedTools', 'Bash', 'PowerShell');
-    else args.push('--disallowedTools', 'Bash', 'PowerShell');
+    if (mcpConfig)
+      // Only Hive's server: the user's own MCP servers are not part of a Hive task.
+      args.push(
+        '--mcp-config',
+        mcpConfig,
+        '--strict-mcp-config',
+        '--permission-prompt-tool',
+        PERMISSION_TOOL,
+      );
+    else {
+      // Nothing waits for an answer nobody can give: what would prompt is refused.
+      args.push('--permission-prompts', 'none');
+      if (this.options.allowCommands?.()) args.push('--allowedTools', 'Bash', 'PowerShell');
+      else args.push('--disallowedTools', 'Bash', 'PowerShell');
+    }
     return args;
+  }
+
+  /** Each permission prompt becomes a Hive approval; a command is shown as the command. */
+  private approver(input: AgentTaskInput, emit: (event: RuntimeEvent) => void): PermissionHandler {
+    return async (tool, toolInput) => {
+      const command =
+        COMMAND_TOOLS.has(tool) && typeof toolInput.command === 'string'
+          ? toolInput.command
+          : `${tool}: ${clipText(JSON.stringify(toolInput), 300)}`;
+      const allowed = await input.requestApproval({ command });
+      emit({
+        type: 'info',
+        level: allowed ? 'info' : 'warn',
+        message: `Claude Code pediu permissão (${tool}): ${allowed ? 'liberada' : 'negada'}.`,
+        data: { tool, allowed },
+      });
+      return allowed
+        ? { behavior: 'allow', updatedInput: toolInput }
+        : { behavior: 'deny', message: 'O usuário do Hive não liberou esta ação.' };
+    };
   }
 
   private async run(
@@ -248,12 +284,25 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     if (running.cancelled) return fail('Cancelada antes de começar.', 'cancelled');
 
     const claudeSession = randomUUID();
-    const child = spawn(this.options.executable, this.args(input, claudeSession), {
-      cwd: input.worktreePath,
-      env: cleanEnv(),
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    let permission: { config: string; release: () => void } | null;
+    try {
+      permission = (await this.options.permissions?.register(this.approver(input, emit))) ?? null;
+    } catch (error) {
+      return fail(`Não foi possível preparar as aprovações do Hive: ${errorMessage(error)}`);
+    }
+    const env = cleanEnv();
+    // A prompt waits for the user like Hive's own approvals do, not for the MCP default.
+    if (permission) env.MCP_TOOL_TIMEOUT = String(24 * 60 * 60 * 1000);
+    const child = spawn(
+      this.options.executable,
+      this.args(input, claudeSession, permission?.config ?? null),
+      {
+        cwd: input.worktreePath,
+        env,
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
     running.pid = child.pid ?? null;
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
@@ -374,6 +423,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     }
     const { code, error } = await exited;
     clearTimeout(timer);
+    permission?.release();
 
     if (isObject(result?.usage)) {
       const u = result.usage;

@@ -32,3 +32,9 @@ export {
   type ClaudeCodeAuth,
   type ClaudeCodeOptions,
 } from './claude-code';
+export {
+  ClaudeCodePermissions,
+  PERMISSION_TOOL,
+  type PermissionDecision,
+  type PermissionHandler,
+} from './claude-code-permissions';

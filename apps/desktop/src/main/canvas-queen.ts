@@ -1,4 +1,5 @@
 import {
+  canRunTasks,
   canvasLayoutSchema,
   canvasQueenPlanSchema,
   queenActionLabel,
@@ -107,9 +108,10 @@ export class CanvasQueen {
         );
       const usable = (worker: Worker) =>
         worker.role !== 'queen' &&
-        worker.providerId &&
-        worker.modelId &&
-        this.options.repos.providers.get(worker.providerId)?.enabled;
+        (worker.engine === 'claude-code' ||
+          (!!worker.providerId &&
+            !!worker.modelId &&
+            !!this.options.repos.providers.get(worker.providerId)?.enabled));
       if (
         action.task.workerId
           ? !team.some((worker) => worker.id === action.task.workerId && usable(worker))
@@ -168,7 +170,7 @@ export class CanvasQueen {
           id: worker.id,
           name: worker.name,
           role: worker.role,
-          configured: !!worker.providerId && !!worker.modelId,
+          configured: canRunTasks(worker),
         })),
         tasks: state.tasks.map((task) => ({
           id: task.id,

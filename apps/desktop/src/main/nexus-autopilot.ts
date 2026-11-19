@@ -1,4 +1,5 @@
 import {
+  canRunTasks,
   canvasLayoutSchema,
   failureSignature,
   nexusAutopilotDraftSchema,
@@ -149,7 +150,7 @@ export class NexusAutopilot {
         if (!options.useExistingAgents)
           throw new HiveError('VALIDATION', 'O plano usou um agente existente sem autorização.');
         const worker = workers.find((item) => item.id === agent.workerId);
-        if (!worker || worker.role === 'queen' || !worker.providerId || !worker.modelId)
+        if (!worker || worker.role === 'queen' || !canRunTasks(worker))
           throw new HiveError(
             'VALIDATION',
             `O agente existente “${agent.workerId}” não está disponível para execução.`,
@@ -248,7 +249,7 @@ export class NexusAutopilot {
           modelId: worker.modelId,
           tools: worker.tools,
           skills: worker.skills,
-          configured: !!worker.providerId && !!worker.modelId,
+          configured: canRunTasks(worker),
         })),
         providers,
         tasks: state.tasks.map((task) => ({
@@ -1004,7 +1005,7 @@ export class NexusAutopilot {
           role: item.role,
           providerId: item.providerId,
           modelId: item.modelId,
-          configured: !!item.providerId && !!item.modelId,
+          configured: canRunTasks(item),
         })),
         providers,
         executionEvidence: this.options.resultContext(recovery.runId),

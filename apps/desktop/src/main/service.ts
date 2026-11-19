@@ -28,6 +28,7 @@ import {
   type RunDetail,
   type WorkerRole,
   type Workspace,
+  type ClaudeCodeStatus,
 } from '@hive/core';
 import { HiveDatabase, Repositories, SCHEMA_VERSION } from '@hive/persistence';
 import { FlowEngine } from './flow-engine';
@@ -62,6 +63,10 @@ import {
   type AutopilotHistoryItem,
 } from '@hive/orchestrator';
 import {
+  ClaudeCodePermissions,
+  ClaudeCodeRuntime,
+  claudeCodeAuth,
+  findClaudeCode,
   NativeAgentRuntime,
   probeMcpServer,
   type AgentRuntime,
@@ -107,6 +112,9 @@ function startOfToday(): string {
 export class DesktopService {
   readonly repos: Repositories;
   readonly liveResults: LiveResults;
+  /** Claude Code's permission prompts become Hive approvals through this local MCP server. */
+  private readonly claudePermissions = new ClaudeCodePermissions();
+  private claudeRuntime: ClaudeCodeRuntime | undefined;
   readonly canvasQueen: CanvasQueen;
   readonly nexusAutopilot: NexusAutopilot;
   readonly cortex: CortexService;
@@ -255,6 +263,7 @@ export class DesktopService {
         ),
       teamTools: ({ task, worker }) => teamToolsFor(this.teams, this.repos, { task, worker }),
       onTaskFinished: (_run, task) => this.teams.taskFinished(task),
+      runtimeFor: (worker) => (worker.engine === 'claude-code' ? this.claudeCode() : null),
     });
     this.teams = new HiveTeams({ repos: this.repos, scheduler: this.scheduler });
     this.flow = new FlowEngine({
@@ -588,9 +597,37 @@ export class DesktopService {
     this.backupTimer = setInterval(safeTick, 60 * 60 * 1000);
   }
 
+  /** The Claude Code engine, made on first use with the executable found then. */
+  private claudeCode(): ClaudeCodeRuntime {
+    this.claudeRuntime ??= new ClaudeCodeRuntime({
+      executable: findClaudeCode() ?? 'claude',
+      permissions: this.claudePermissions,
+    });
+    return this.claudeRuntime;
+  }
+
+  private async claudeCodeStatus(): Promise<ClaudeCodeStatus> {
+    const executable = findClaudeCode();
+    if (!executable)
+      return {
+        installed: false,
+        loggedIn: false,
+        authMethod: null,
+        error:
+          'O Claude Code não está instalado. Instale com "npm install -g @anthropic-ai/claude-code".',
+      };
+    try {
+      const auth = await claudeCodeAuth({ executable });
+      return { installed: true, ...auth, error: null };
+    } catch (error) {
+      return { installed: true, loggedIn: false, authMethod: null, error: errorMessage(error) };
+    }
+  }
+
   dispose(): void {
     const stopped = this.scheduler.shutdown();
     if (stopped) console.warn(`Encerrando: ${stopped} sessão(ões) de agente interrompida(s).`);
+    void this.claudePermissions.close();
     this.flow.dispose();
     this.canvasQueen.dispose();
     this.nexusAutopilot.dispose();
@@ -1580,6 +1617,8 @@ export class DesktopService {
       }
       case 'worker.routes':
         return this.router.plan(this.repos.workers.require(parse(channel), 'Agente'));
+      case 'claudeCode.status':
+        return this.claudeCodeStatus();
       case 'worker.compatibility': {
         const worker = this.repos.workers.require(parse(channel), 'Agente');
         return workerCompatibilityIssues(
