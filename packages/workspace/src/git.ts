@@ -14,9 +14,23 @@ export interface GitResult {
 export function git(
   cwd: string,
   args: string[],
-  options: { timeoutMs?: number; allowFailure?: boolean } = {},
+  options: {
+    timeoutMs?: number;
+    allowFailure?: boolean;
+    /** Stops the process; the promise then rejects with CANCELLED. */
+    signal?: AbortSignal;
+    /**
+     * Extra environment for this one process only, e.g. credentials for a push. Never put on
+     * the command line, where other processes and error messages could show it.
+     */
+    env?: Record<string, string>;
+  } = {},
 ): Promise<GitResult> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(new HiveError('CANCELLED', 'Operação Git cancelada.'));
+      return;
+    }
     execFile(
       'git',
       args,
@@ -25,6 +39,7 @@ export function git(
         timeout: options.timeoutMs ?? 60_000,
         maxBuffer: 64 * 1024 * 1024,
         windowsHide: true,
+        ...(options.signal ? { signal: options.signal } : {}),
         env: {
           ...process.env,
           GIT_TERMINAL_PROMPT: '0',
@@ -32,12 +47,17 @@ export function git(
           GIT_PAGER: 'cat',
           GCM_INTERACTIVE: 'never',
           LC_ALL: 'C',
+          ...options.env,
         },
       },
       (error, stdout, stderr) => {
         const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
         if (error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
           reject(new HiveError('GIT', 'Git is not installed or not on PATH.'));
+          return;
+        }
+        if (error && (error.name === 'AbortError' || options.signal?.aborted)) {
+          reject(new HiveError('CANCELLED', 'Operação Git cancelada.'));
           return;
         }
         if (code !== 0 && !options.allowFailure) {

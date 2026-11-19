@@ -189,6 +189,30 @@ describe('Scheduler', { timeout: 60_000 }, () => {
     expect(ctx.git('status', '--porcelain')).toBe('');
   });
 
+  it('descartar uma tarefa só apaga a branch do Hive, nunca uma branch do usuário', async () => {
+    const ctx = await setup(
+      async (input) => {
+        await writeTaskFile(input);
+        return {};
+      },
+      [{ key: 'a' }, { key: 'b' }],
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'review');
+    const own = ctx.task('a').branch!;
+    expect(own.startsWith('hive/')).toBe(true);
+    await ctx.scheduler.reject('task_a');
+    expect(ctx.git('branch', '--list', own).trim()).toBe('');
+
+    // A record pointing at one of the user's branches (by a bug or a damaged database).
+    ctx.git('branch', 'trabalho-do-usuario');
+    ctx.repos.tasks.put({ ...ctx.task('b'), branch: 'trabalho-do-usuario' });
+    await ctx.scheduler.reject('task_b');
+    expect(ctx.git('branch', '--list', 'trabalho-do-usuario').trim()).toContain(
+      'trabalho-do-usuario',
+    );
+  });
+
   it('pausa em comandos até o usuário responder', async () => {
     const answers: boolean[] = [];
     const ctx = await setup(
