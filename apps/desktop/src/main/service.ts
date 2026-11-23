@@ -1340,9 +1340,7 @@ export class DesktopService {
       case 'settings.update': {
         const current = this.repos.getSettings();
         const update = parse(channel);
-        const result = this.repos.saveSettings(
-          settingsSchema.parse({ ...current, ...update }),
-        );
+        const result = this.repos.saveSettings(settingsSchema.parse({ ...current, ...update }));
         this.updater?.setAutomatic(result.updates.auto);
         this.changed('settings');
         return result;

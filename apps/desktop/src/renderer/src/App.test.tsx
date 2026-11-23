@@ -115,7 +115,8 @@ it('ao escolher o provedor de um agente, escolhe e testa o modelo automaticament
     },
   });
   await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
-  fireEvent.click(screen.getByRole('button', { name: 'Agentes' }));
+  // "Agentes" opens a group in the sidebar; the team page is its "Gerenciar agentes".
+  fireEvent.click(screen.getByRole('button', { name: /Gerenciar agentes/ }));
   fireEvent.click(screen.getByRole('combobox', { name: /Provedor/ }));
   fireEvent.click(screen.getByRole('option', { name: 'NVIDIA' }));
   await waitFor(() => expect(screen.getByText('testado')).toBeTruthy());
@@ -138,7 +139,8 @@ it('cria um agente novo a partir de uma função base', async () => {
     'worker.save': (input) => ({ ...(input as object), id: 'w2', createdAt: '', updatedAt: '' }),
   });
   await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
-  fireEvent.click(screen.getByRole('button', { name: 'Agentes' }));
+  // "Agentes" opens a group in the sidebar; the team page is its "Gerenciar agentes".
+  fireEvent.click(screen.getByRole('button', { name: /Gerenciar agentes/ }));
   fireEvent.click(screen.getByRole('button', { name: /Novo agente/ }));
   fireEvent.click(await screen.findByRole('combobox', { name: /Função base/ }));
   fireEvent.click(screen.getByRole('option', { name: 'Revisão' }));

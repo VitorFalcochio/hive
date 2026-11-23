@@ -94,8 +94,7 @@ function setup(runtime: AgentRuntime, extra: { gitStatus?: () => Promise<never[]
   // Workspace paths are unique in the database; each test setup needs its own
   // temporary project path because several workspaces are created below.
   const folder = path.join(os.tmpdir(), `hive-agent-chat-${Math.random().toString(36).slice(2)}`);
-  for (const id of ['slash', 'hive'])
-    mkdirSync(path.join(folder, id), { recursive: true });
+  for (const id of ['slash', 'hive']) mkdirSync(path.join(folder, id), { recursive: true });
   for (const id of ['slash', 'hive'])
     repos.workspaces.put({
       id,
@@ -161,7 +160,11 @@ describe('Direct Agent Chat', () => {
     const chat = chats.create('slash', 'w1');
     const { user, agent } = await chats.send(chat.id, 'Explique a autenticação', 'conversation');
     expect(agent.status).toBe('running');
-    expect(agent.model).toMatchObject({ providerName: 'OpenRouter', modelId: 'm', runtime: 'fake' });
+    expect(agent.model).toMatchObject({
+      providerName: 'OpenRouter',
+      modelId: 'm',
+      runtime: 'fake',
+    });
     await settled(chats, chat.id);
 
     const input = seen[0]!;
@@ -176,7 +179,11 @@ describe('Direct Agent Chat', () => {
     const reply = page.messages[1]!;
     expect(reply.status).toBe('completed');
     expect(reply.content).toContain('src/auth.ts');
-    expect(reply.steps[0]).toMatchObject({ kind: 'tool', label: 'Lendo src/auth.ts', status: 'ok' });
+    expect(reply.steps[0]).toMatchObject({
+      kind: 'tool',
+      label: 'Lendo src/auth.ts',
+      status: 'ok',
+    });
     expect(pushes.at(-1)?.message.status).toBe('completed');
     // The first request names the conversation, and its tokens count in the daily meter.
     expect(repos.agentChats.require(chat.id, 'Conversa').title).toBe('Explique a autenticação');
