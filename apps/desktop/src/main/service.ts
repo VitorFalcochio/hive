@@ -266,6 +266,14 @@ export class DesktopService {
           notify(describeSwitch(change), switchData(change)),
         ),
       teamTools: ({ task, worker }) => teamToolsFor(this.teams, this.repos, { task, worker }),
+      // "Várias tentativas": a different free model per attempt, compared by the project's checks.
+      candidateModels: (worker, count) => this.router.alternatives(worker, count),
+      checkCandidate: async ({ run, task }) => {
+        const workspace = this.repos.workspaces.require(run.workspaceId, 'Projeto');
+        if (!task.result?.commit) return [];
+        const commands = await this.flow.verificationCommands(workspace.path);
+        return this.flow.checkCommit(workspace, task.result.commit, commands);
+      },
       onTaskFinished: (_run, task) => this.teams.taskFinished(task),
       // An agent on the Claude Code provider runs its tasks on Claude Code itself.
       runtimeFor: (worker) =>

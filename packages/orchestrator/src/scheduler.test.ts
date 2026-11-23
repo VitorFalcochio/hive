@@ -42,7 +42,10 @@ async function setup(
   behaviour: Behaviour,
   tasks: { key: string; dependsOn?: string[] }[],
   unattended = false,
-  hooks: Pick<SchedulerOptions, 'holds' | 'onTaskFailed' | 'runtimeFor'> = {},
+  hooks: Pick<
+    SchedulerOptions,
+    'holds' | 'onTaskFailed' | 'runtimeFor' | 'candidateModels' | 'checkCandidate'
+  > = {},
 ) {
   const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-sched-'));
   const git = (...args: string[]) =>
@@ -150,7 +153,7 @@ async function setup(
   return { repo, repos, scheduler, run, task, status, git, worktreeRoot, reopen };
 }
 
-async function until(check: () => boolean, what: string, timeoutMs = 20_000) {
+async function until(check: () => boolean, what: string, timeoutMs = 60_000) {
   const started = Date.now();
   while (!check()) {
     if (Date.now() - started > timeoutMs) throw new Error(`Timed out waiting for ${what}`);
@@ -840,5 +843,184 @@ describe('Agente com motor Claude Code e aprovações do Hive', { timeout: 60_00
       delete process.env.FAKE_CLAUDE_MODE;
       await permissions.close();
     }
+  });
+});
+
+describe('Scheduler com várias tentativas', { timeout: 120_000 }, () => {
+  const three = () => [
+    { providerId: 'p1', modelId: 'm1' },
+    { providerId: 'p1', modelId: 'm2' },
+    { providerId: 'p1', modelId: 'm3' },
+  ];
+  const candidatesOf = (repos: Repositories, key: string) =>
+    repos.tasks
+      .list()
+      .filter((task) => task.candidateOf?.parentTaskId === `task_${key}`)
+      .sort((a, b) => a.key.localeCompare(b.key));
+  const writeModelFile = (input: AgentTaskInput) =>
+    writeFile(path.join(input.worktreePath, `${input.model}.txt`), input.model);
+
+  it('roda uma tentativa por modelo e fica com a que passa nas verificações do projeto', async () => {
+    const sawInB: string[] = [];
+    const ctx = await setup(
+      async (input) => {
+        if (input.task.title === 'Tarefa b') {
+          for (const model of ['m1', 'm2', 'm3'])
+            if (existsSync(path.join(input.worktreePath, `${model}.txt`))) sawInB.push(model);
+          await writeTaskFile(input);
+        } else await writeModelFile(input);
+        return {};
+      },
+      [{ key: 'a' }, { key: 'b', dependsOn: ['a'] }],
+      false,
+      {
+        candidateModels: three,
+        checkCandidate: async ({ task }) => [
+          { command: 'npm test', ok: task.candidateOf?.modelId === 'm2' },
+          { command: 'npm run lint', ok: true },
+        ],
+      },
+    );
+    ctx.scheduler.setBestOf('task_a', 3);
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'a missão chegar à revisão', 90_000).catch(
+      (error: unknown) => {
+        throw new Error(
+          `${String(error)} ${JSON.stringify(ctx.repos.tasks.list().map((t) => [t.key, t.status, t.workerState, t.candidateOf?.outcome]))}`,
+        );
+      },
+    );
+
+    const a = ctx.task('a');
+    const candidates = candidatesOf(ctx.repos, 'a');
+    expect(candidates.map((task) => task.candidateOf?.modelId)).toEqual(['m1', 'm2', 'm3']);
+    const winner = candidates.find((task) => task.candidateOf?.outcome === 'won')!;
+    expect(winner.candidateOf?.modelId).toBe('m2');
+    expect(candidates.filter((task) => task.candidateOf?.outcome === 'lost')).toHaveLength(2);
+    expect(a.status).toBe('completed');
+    expect(a.bestOf?.choice?.winnerTaskId).toBe(winner.id);
+    expect(a.bestOf?.choice?.reason).toContain('passou em 2 de 2');
+    expect(a.result?.filesChanged.map((file) => file.path)).toEqual(['m2.txt']);
+    // What depended on the task started from the result that won, and only from it.
+    expect(sawInB).toEqual(['m2']);
+    // The losers' branches are gone: the winner's (now the task's) and b's are left.
+    expect(ctx.git('branch', '--list', 'hive/*').trim().split('\n')).toHaveLength(2);
+
+    await ctx.scheduler.approve('task_a');
+    expect(await readFile(path.join(ctx.repo, 'm2.txt'), 'utf8')).toBe('m2');
+  });
+
+  it('quando nenhuma tentativa dá certo a tarefa falha com o resumo, e repetir abre outra rodada', async () => {
+    let round = 1;
+    const ctx = await setup(
+      async (input) => {
+        if (round === 1) return { status: 'failed', error: `quebrou em ${input.model}` };
+        await writeModelFile(input);
+        return {};
+      },
+      [{ key: 'a' }],
+      false,
+      { candidateModels: () => three().slice(0, 2) },
+    );
+    ctx.scheduler.setBestOf('task_a', 2);
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'failed', 'a missão falhar');
+    expect(ctx.task('a').status).toBe('failed');
+    expect(ctx.task('a').error).toContain('Nenhuma das 2 tentativas deu certo');
+    expect(ctx.task('a').error).toContain('quebrou em m2');
+
+    round = 2;
+    ctx.scheduler.retry('task_a');
+    await until(() => ctx.status() === 'review', 'a nova rodada terminar');
+    expect(ctx.task('a').status).toBe('completed');
+    expect(ctx.task('a').attempt).toBe(2);
+    const candidates = candidatesOf(ctx.repos, 'a');
+    expect(candidates).toHaveLength(4);
+    expect(candidates.filter((task) => task.candidateOf?.round === 2)).toHaveLength(2);
+    // With no checks, the first to finish with changes is kept.
+    expect(ctx.task('a').bestOf?.choice?.reason).toContain('Sem verificações');
+  });
+
+  it('com um modelo só, a tarefa roda uma vez, como uma tarefa comum', async () => {
+    const models: string[] = [];
+    const ctx = await setup(
+      async (input) => {
+        models.push(input.model);
+        await writeModelFile(input);
+        return {};
+      },
+      [{ key: 'a' }],
+      false,
+      { candidateModels: () => [{ providerId: 'p1', modelId: 'm1' }] },
+    );
+    ctx.scheduler.setBestOf('task_a', 3);
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => ctx.status() === 'review', 'a missão chegar à revisão');
+    expect(models).toEqual(['m1']);
+    expect(candidatesOf(ctx.repos, 'a')).toHaveLength(0);
+    expect(ctx.task('a').status).toBe('completed');
+  });
+
+  it('cancelar a tarefa para todas as tentativas', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let started = 0;
+    const ctx = await setup(
+      async () => {
+        started++;
+        await gate;
+        return { status: 'cancelled', error: 'Cancelada.' };
+      },
+      [{ key: 'a' }],
+      false,
+      { candidateModels: () => three().slice(0, 2) },
+    );
+    ctx.scheduler.setBestOf('task_a', 2);
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => started === 2, 'as duas tentativas começarem');
+    ctx.scheduler.cancelTask('task_a');
+    release();
+    await until(
+      () => ctx.status() !== 'running' && !ctx.scheduler.isActive(ctx.run.id),
+      'a missão parar',
+    );
+    expect(ctx.task('a').status).toBe('cancelled');
+    expect(candidatesOf(ctx.repos, 'a').every((task) => task.candidateOf?.outcome === 'lost')).toBe(
+      true,
+    );
+  });
+
+  it('o Hive fecha no meio da rodada; ao abrir, as mesmas tentativas continuam e uma é escolhida', async () => {
+    let release = () => {};
+    const hung = new Promise<void>((resolve) => (release = resolve));
+    let started = 0;
+    const ctx = await setup(
+      async () => {
+        started++;
+        await hung;
+        return {};
+      },
+      [{ key: 'a' }],
+      false,
+      { candidateModels: () => three().slice(0, 2) },
+    );
+    ctx.scheduler.setBestOf('task_a', 2);
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => started === 2, 'as duas tentativas começarem');
+    ctx.scheduler.shutdown();
+
+    const reopened = ctx.reopen(async (input) => {
+      await writeModelFile(input);
+      return {};
+    });
+    await reopened.recover();
+    await until(() => ctx.status() === 'review', 'a rodada terminar depois de reabrir');
+    // The round that was going was picked up: no new candidates, one of them chosen.
+    expect(candidatesOf(ctx.repos, 'a')).toHaveLength(2);
+    expect(ctx.task('a').status).toBe('completed');
+    expect(ctx.task('a').bestOf?.choice?.winnerTaskId).toBeTruthy();
+
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 });

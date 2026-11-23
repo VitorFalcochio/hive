@@ -90,6 +90,48 @@ export class ModelRouter {
     return chain;
   }
 
+  /**
+   * Models for "Várias tentativas": the agent's own first, then free models of the configured
+   * providers that suit its role, other providers before a second model of the same one (separate
+   * quotas, different strengths). Never a paid model the user did not choose; resting ones last.
+   */
+  alternatives(worker: Worker, count: number): { providerId: string; modelId: string }[] {
+    const { repos } = this.options;
+    const usable = repos.providers
+      .list()
+      .filter(
+        (provider) =>
+          provider.enabled &&
+          (provider.hasCredential || !!providerPresets[provider.kind].keyOptional),
+      );
+    const chosen: { providerId: string; modelId: string }[] = [];
+    const add = (providerId: string, modelId: string) => {
+      if (chosen.some((item) => item.providerId === providerId && item.modelId === modelId)) return;
+      chosen.push({ providerId, modelId });
+    };
+    if (worker.providerId && worker.modelId) add(worker.providerId, worker.modelId);
+    const free = usable
+      .filter((provider) => providerPresets[provider.kind].free.available)
+      .sort(
+        (a, b) =>
+          Number(a.id === worker.providerId) - Number(b.id === worker.providerId) ||
+          a.createdAt.localeCompare(b.createdAt),
+      )
+      .map((provider) =>
+        this.candidates(provider, worker, true).sort(
+          (a, b) =>
+            this.health.resting({ providerId: provider.id, model: a.id }) -
+            this.health.resting({ providerId: provider.id, model: b.id }),
+        ),
+      );
+    for (let round = 0; round <= PER_PROVIDER && chosen.length < count; round++)
+      for (const list of free) {
+        const model = list[round];
+        if (model && chosen.length < count) add(model.providerId, model.id);
+      }
+    return chosen.slice(0, count);
+  }
+
   /** A client for the agent whose calls fail over along its chain. */
   clientFor(worker: Worker, onSwitch: (change: RouteSwitch) => void): ChatClient {
     const toRoute = (planned: PlannedRoute): ChatRoute => ({

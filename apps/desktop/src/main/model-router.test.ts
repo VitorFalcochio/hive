@@ -163,3 +163,43 @@ describe('cadeia de modelos de um agente', () => {
     expect(router.plan(worker)[0]?.restingMs).toBeGreaterThan(100_000);
   });
 });
+
+describe('modelos para várias tentativas', () => {
+  it('o modelo do agente primeiro, depois grátis de outros provedores, nunca um pago', () => {
+    const { repos, addProvider, model, worker, router } = setup();
+    addProvider('kilo', 'kilo', { hasCredential: false });
+    addProvider('groq', 'groq');
+    addProvider('openai', 'openai');
+    repos.replaceModels('kilo', [
+      model('kilo', 'poolside/laguna-s-2.1:free'),
+      model('kilo', 'qwen/qwen3-coder:free'),
+      model('kilo', 'anthropic/claude-paid', { pricing: { inputPerMTok: 3, outputPerMTok: 15 } }),
+    ]);
+    repos.replaceModels('groq', [
+      model('groq', 'openai/gpt-oss-120b'),
+      model('groq', 'llama-3.3-70b-versatile'),
+    ]);
+    repos.replaceModels('openai', [model('openai', 'gpt-5')]);
+
+    const three = router.alternatives(worker, 3);
+    expect(three).toHaveLength(3);
+    expect(three[0]).toEqual({ providerId: 'kilo', modelId: 'poolside/laguna-s-2.1:free' });
+    // Another provider's quota comes right after the agent's own model.
+    expect(three[1]?.providerId).toBe('groq');
+    const all = router.alternatives(worker, 5);
+    expect(all.map((item) => item.modelId)).not.toContain('anthropic/claude-paid');
+    expect(all.map((item) => item.providerId)).not.toContain('openai');
+    expect(new Set(all.map((item) => `${item.providerId}:${item.modelId}`)).size).toBe(all.length);
+  });
+
+  it('sem outros provedores grátis, sobra só o modelo do agente', () => {
+    const { repos, addProvider, model, worker, router } = setup();
+    addProvider('kilo', 'kilo', { hasCredential: false });
+    addProvider('openai', 'openai');
+    repos.replaceModels('kilo', [model('kilo', 'poolside/laguna-s-2.1:free')]);
+    repos.replaceModels('openai', [model('openai', 'gpt-5')]);
+    expect(router.alternatives(worker, 3)).toEqual([
+      { providerId: 'kilo', modelId: 'poolside/laguna-s-2.1:free' },
+    ]);
+  });
+});

@@ -404,6 +404,57 @@ export const taskCheckpointSchema = z.object({
 });
 export type TaskCheckpoint = z.infer<typeof taskCheckpointSchema>;
 
+/** Most attempts one task may run side by side. */
+export const MAX_TASK_CANDIDATES = 5;
+
+/** One project check run on a candidate's result. */
+export const candidateCheckSchema = z.object({ command: z.string(), ok: z.boolean() });
+export type CandidateCheck = z.infer<typeof candidateCheckSchema>;
+
+/** How one candidate did when the round ended. */
+export const candidateScoreSchema = z.object({
+  taskId: z.string(),
+  number: z.number().int().min(1),
+  providerId: z.string(),
+  modelId: z.string(),
+  status: taskStatusSchema,
+  checks: z.array(candidateCheckSchema),
+});
+export type CandidateScore = z.infer<typeof candidateScoreSchema>;
+
+/**
+ * Several attempts in parallel ("Várias tentativas"): the task runs as `count` candidates, each
+ * on a different model in its own worktree, and the best result becomes the task's.
+ */
+export const taskBestOfSchema = z.object({
+  count: z.number().int().min(2).max(MAX_TASK_CANDIDATES),
+  /** What the last round chose; null while it runs. */
+  choice: z
+    .object({
+      round: z.number().int().min(1),
+      /** The candidate whose result the task took; null when none succeeded. */
+      winnerTaskId: z.string().nullable(),
+      reason: z.string(),
+      scores: z.array(candidateScoreSchema),
+    })
+    .nullable()
+    .optional(),
+});
+export type TaskBestOf = z.infer<typeof taskBestOfSchema>;
+
+/** Set on a candidate: one of the parallel attempts of another task. */
+export const taskCandidateSchema = z.object({
+  parentTaskId: z.string(),
+  /** Each new try of the task (a retry, an automatic retry) is a new round of candidates. */
+  round: z.number().int().min(1),
+  number: z.number().int().min(1),
+  providerId: z.string(),
+  modelId: z.string(),
+  /** Set once the round was decided. */
+  outcome: z.enum(['won', 'lost']).optional(),
+});
+export type TaskCandidate = z.infer<typeof taskCandidateSchema>;
+
 export const taskSchema = z.object({
   id: z.string(),
   runId: z.string(),
@@ -440,6 +491,10 @@ export const taskSchema = z.object({
   checkpoint: taskCheckpointSchema.optional(),
   /** Error of the attempt that failed, handed to the automatic retry; survives a restart. */
   retryNote: z.string().max(2_000).optional(),
+  /** Runs as several attempts in parallel; the best result becomes this task's. */
+  bestOf: taskBestOfSchema.optional(),
+  /** This task is one of those attempts, of the task in `parentTaskId`. */
+  candidateOf: taskCandidateSchema.optional(),
 });
 export type Task = z.infer<typeof taskSchema>;
 

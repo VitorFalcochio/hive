@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   canRunTasks,
   activeStatuses,
+  MAX_TASK_CANDIDATES,
   findCycle,
   planTaskSchema,
   honeyBoost,
@@ -14,6 +15,8 @@ import {
   workerStateSchema,
   type AgentEvent,
   type AgentEventType,
+  type CandidateCheck,
+  type CandidateScore,
   type PlanTask,
   type ReviewComment,
   type Run,
@@ -38,6 +41,7 @@ import {
   taskBranchName,
   type DiffResult,
 } from '@hive/workspace';
+import { failureSummary, newCandidate, pickWinner, type CandidateModel } from './candidates';
 import { buildRunReport } from './report';
 
 export interface SchedulerOptions {
@@ -99,6 +103,13 @@ export interface SchedulerOptions {
    * memory channel of the runtime; null when the task is not part of a team.
    */
   teamTools?: (context: { run: Run; task: Task; worker: Worker }) => AgentMemory | null;
+  /**
+   * "Várias tentativas": up to `count` different models for an agent's candidates, its own first.
+   * Only models that cost nothing extra. Without it (or with fewer than two), a task runs once.
+   */
+  candidateModels?: (worker: Worker, count: number) => CandidateModel[];
+  /** Runs the project's checks on a candidate's result, to compare candidates. */
+  checkCandidate?: (context: { run: Run; task: Task }) => Promise<CandidateCheck[]>;
 }
 
 /** Prefix of the error given to tasks skipped because a dependency did not succeed. */
@@ -150,6 +161,10 @@ export class Scheduler {
   private closing = false;
   /** True while `recover` saves interrupted work: no task starts before its checkpoint exists. */
   private recovering = false;
+  /** Tasks whose round of candidates is being compared right now. */
+  private readonly choosing = new Set<string>();
+  /** Task+try that runs once after all, for lack of models; so it is decided only once. */
+  private readonly singleAttempt = new Set<string>();
 
   constructor(private readonly options: SchedulerOptions) {}
 
@@ -320,7 +335,8 @@ export class Scheduler {
     const run = this.repos.runs.require(runId, 'Execução');
     if (!RESUMABLE.has(run.status))
       throw new HiveError('CONFLICT', 'Esta missão não pode ser executada agora.');
-    const tasks = this.repos.tasks.list('run_id = ?', runId);
+    // Candidates belong to their task's round: a new try of the task opens a new round.
+    const tasks = this.repos.tasks.list('run_id = ?', runId).filter((task) => !task.candidateOf);
     if (!tasks.length) throw new HiveError('VALIDATION', 'Gere um plano antes de executar.');
     const workers = this.repos.workers.list();
     const configured = (worker: Worker | undefined) =>
@@ -349,6 +365,7 @@ export class Scheduler {
       for (const task of tasks) {
         const assigned = assignments.get(task.id);
         const reset = NEEDS_RETRY.has(task.status);
+        if (reset) this.closeRound(task);
         if (!assigned && !reset) continue;
         this.repos.tasks.put({
           ...task,
@@ -396,6 +413,23 @@ export class Scheduler {
   cancelTask(taskId: string): void {
     const task = this.repos.tasks.require(taskId, 'Tarefa');
     this.denyApprovalsOf(taskId);
+    // A task running as candidates stops them all; their round ends without a choice.
+    const open = this.openCandidates(task);
+    if (open.length) {
+      for (const candidate of open) {
+        this.update(candidate.id, {
+          candidateOf: { ...candidate.candidateOf!, outcome: 'lost' },
+        });
+        this.cancelTask(candidate.id);
+      }
+      this.update(taskId, {
+        status: 'cancelled',
+        workerState: 'cancelled',
+        error: 'Cancelada.',
+        finishedAt: nowIso(),
+      });
+      return;
+    }
     const session = this.sessions.get(taskId);
     if (session) void (this.runtimes.get(taskId) ?? this.options.runtime).cancel(session);
     else if (this.launching.has(taskId)) this.cancelRequested.add(taskId);
@@ -411,6 +445,11 @@ export class Scheduler {
   /** Reset a failed, cancelled or rejected task (and tasks skipped because of it) and run it. */
   retry(taskId: string): void {
     const task = this.repos.tasks.require(taskId, 'Tarefa');
+    if (task.candidateOf)
+      throw new HiveError(
+        'CONFLICT',
+        'As tentativas são repetidas pela tarefa principal: use Tentar de novo nela.',
+      );
     if (!['failed', 'cancelled', 'rejected'].includes(task.status))
       throw new HiveError(
         'CONFLICT',
@@ -424,12 +463,22 @@ export class Scheduler {
         result: null,
         finishedAt: null,
       });
+    this.closeRound(task);
     reset(task);
     // A discarded result is gone, so a retry starts over instead of revising it.
     if (task.status === 'rejected') this.update(task.id, { revision: undefined });
     for (const item of this.repos.tasks.list('run_id = ?', task.runId))
-      if (item.status === 'cancelled' && item.error?.startsWith(BLOCKED)) reset(item);
+      if (!item.candidateOf && item.status === 'cancelled' && item.error?.startsWith(BLOCKED)) {
+        this.closeRound(item);
+        reset(item);
+      }
     this.resume(task.runId);
+  }
+
+  /** A task tried again leaves its last round behind: what is still open there is lost. */
+  private closeRound(task: Task): void {
+    for (const candidate of this.openCandidates(task))
+      this.update(candidate.id, { candidateOf: { ...candidate.candidateOf!, outcome: 'lost' } });
   }
 
   /**
@@ -607,6 +656,261 @@ export class Scheduler {
     return updated;
   }
 
+  /* ---------------------------------------------------------------- several attempts */
+
+  /**
+   * Makes a task run as `count` attempts in parallel, each on a different model, keeping the best
+   * result; null makes it run once again. Like honey, only before it starts (or is tried again).
+   */
+  setBestOf(taskId: string, count: number | null): Task {
+    const task = this.repos.tasks.require(taskId, 'Tarefa');
+    if (task.candidateOf || task.team)
+      throw new HiveError(
+        'VALIDATION',
+        'Várias tentativas valem para tarefas comuns, não para tarefas de equipe nem para uma tentativa.',
+      );
+    const waiting = ['pending', 'blocked', 'failed', 'cancelled', 'rejected'].includes(task.status);
+    if (!waiting || this.sessions.has(taskId) || this.launching.has(taskId))
+      throw new HiveError(
+        'CONFLICT',
+        'Várias tentativas só valem para tarefas que ainda não começaram ou que vão ser tentadas de novo.',
+      );
+    if (count !== null && (!Number.isInteger(count) || count < 2 || count > MAX_TASK_CANDIDATES))
+      throw new HiveError('VALIDATION', `Escolha de 2 a ${MAX_TASK_CANDIDATES} tentativas.`);
+    return this.update(taskId, {
+      bestOf: count === null ? undefined : { count, choice: task.bestOf?.choice ?? null },
+    });
+  }
+
+  private wantsCandidates(task: Task): boolean {
+    return (
+      !!task.bestOf &&
+      !task.candidateOf &&
+      // A revision goes back to the result that won, and a team has its own way of working.
+      !task.revision &&
+      !task.team &&
+      !this.singleAttempt.has(`${task.id}:${task.attempt}`)
+    );
+  }
+
+  private candidatesOf(task: Task): Task[] {
+    return this.repos.tasks
+      .list('run_id = ?', task.runId)
+      .filter((item) => item.candidateOf?.parentTaskId === task.id);
+  }
+
+  /** Candidates of the task's current round that were not decided yet. */
+  private openCandidates(task: Task): Task[] {
+    if (!task.bestOf || task.candidateOf) return [];
+    return this.candidatesOf(task).filter(
+      (item) => item.candidateOf!.round === task.attempt && !item.candidateOf!.outcome,
+    );
+  }
+
+  /** The model of the candidate that won the task's last round. */
+  private winningModel(task: Task): CandidateModel | null {
+    const choice = task.bestOf?.choice;
+    const score = choice?.scores.find((item) => item.taskId === choice.winnerTaskId);
+    return score ? { providerId: score.providerId, modelId: score.modelId } : null;
+  }
+
+  /**
+   * Starts a round: one candidate per model, and the task waits for them. False when the task
+   * runs once instead (fewer than two models), which is then launched as usual.
+   */
+  private openRound(run: Run, parent: Task): boolean {
+    // After a restart, the round that was going is picked up, not started over.
+    if (this.openCandidates(parent).length) {
+      this.update(parent.id, {
+        status: 'running',
+        workerState: 'thinking',
+        error: null,
+        finishedAt: null,
+      });
+      return true;
+    }
+    const worker = parent.workerId ? this.repos.workers.get(parent.workerId) : null;
+    if (!worker || !canRunTasks(worker)) return false;
+    const count = parent.bestOf!.count;
+    let models: CandidateModel[] = [];
+    try {
+      models = this.options.candidateModels?.(worker, count) ?? [];
+    } catch (error) {
+      this.log(run, parent.id, worker.id, 'info', 'warn', errorMessage(error));
+    }
+    const unique = models
+      .filter(
+        (model, index) =>
+          models.findIndex(
+            (other) => other.providerId === model.providerId && other.modelId === model.modelId,
+          ) === index,
+      )
+      .slice(0, count);
+    if (unique.length < 2) {
+      this.singleAttempt.add(`${parent.id}:${parent.attempt}`);
+      this.log(
+        run,
+        parent.id,
+        worker.id,
+        'task.status',
+        'warn',
+        'Várias tentativas pedidas, mas só há um modelo grátis disponível para este agente agora: a tarefa roda uma vez.',
+      );
+      return false;
+    }
+    const round = parent.attempt + 1;
+    const at = nowIso();
+    const created: Task[] = [];
+    this.repos.transaction(() => {
+      unique.forEach((model, index) =>
+        created.push(
+          this.repos.tasks.put({
+            ...newCandidate(parent, newId('task'), round, index + 1, model, at),
+            // The error of the try that failed reaches every candidate of the next one.
+            ...(parent.retryNote ? { retryNote: parent.retryNote } : {}),
+          }),
+        ),
+      );
+      this.update(parent.id, {
+        status: 'running',
+        workerState: 'thinking',
+        attempt: round,
+        error: null,
+        result: null,
+        retryNote: undefined,
+        startedAt: at,
+        finishedAt: null,
+        bestOf: { ...parent.bestOf!, choice: null },
+      });
+    });
+    for (const candidate of created) this.options.onChange('task', candidate.id);
+    this.log(
+      run,
+      parent.id,
+      worker.id,
+      'task.status',
+      'info',
+      `${unique.length} tentativas em paralelo, cada uma com um modelo: ${unique.map((model) => model.modelId).join(', ')}.`,
+    );
+    return true;
+  }
+
+  /** Decides the task's round once all its candidates have ended. */
+  private maybeChoose(run: Run, parent: Task): void {
+    if (this.choosing.has(parent.id) || this.closing) return;
+    // Running once (for lack of models): an ordinary attempt, nothing to choose.
+    if (this.sessions.has(parent.id) || this.launching.has(parent.id)) return;
+    const open = this.openCandidates(parent);
+    if (!open.length) {
+      this.update(parent.id, {
+        status: 'failed',
+        workerState: 'failed',
+        error: 'As tentativas desta tarefa não existem mais. Tente de novo.',
+        finishedAt: nowIso(),
+      });
+      return;
+    }
+    if (
+      open.some((task) => !['completed', 'failed', 'cancelled', 'rejected'].includes(task.status))
+    )
+      return;
+    this.choosing.add(parent.id);
+    void this.choose(run, parent, open).finally(() => {
+      this.choosing.delete(parent.id);
+      if (!this.closing) {
+        this.pumpAll();
+        this.settle(run.id);
+      }
+    });
+  }
+
+  /**
+   * Compares a round: the project's checks on each candidate that changed something, then the
+   * best one becomes the task's result. The others' branches are deleted. With no candidate that
+   * succeeded, the task fails (or, unattended, gets another round).
+   */
+  private async choose(run: Run, parent: Task, round: Task[]): Promise<void> {
+    try {
+      this.update(parent.id, { workerState: 'testing' });
+      const scores: CandidateScore[] = [];
+      for (const task of round) {
+        let checks: CandidateCheck[] = [];
+        if (task.status === 'completed' && task.result?.commit && this.options.checkCandidate)
+          try {
+            checks = await this.options.checkCandidate({ run, task });
+          } catch (error) {
+            this.log(
+              run,
+              parent.id,
+              parent.workerId,
+              'info',
+              'warn',
+              `As verificações da tentativa ${task.candidateOf!.number} não rodaram: ${errorMessage(error)}`,
+            );
+          }
+        scores.push({
+          taskId: task.id,
+          number: task.candidateOf!.number,
+          providerId: task.candidateOf!.providerId,
+          modelId: task.candidateOf!.modelId,
+          status: task.status,
+          checks,
+        });
+      }
+      if (this.closing) return;
+      const current = this.repos.tasks.get(parent.id);
+      // Cancelled (or tried again) while the checks ran: this round is no longer the task's.
+      if (current?.status !== 'running' || current.attempt !== parent.attempt) return;
+      const decided = round.map((task) => this.repos.tasks.require(task.id, 'Tarefa'));
+      const { winner, reason } = pickWinner(decided, scores);
+      const choice = { round: parent.attempt, winnerTaskId: winner?.id ?? null, reason, scores };
+      const workspace = this.repos.workspaces.require(run.workspaceId, 'Workspace');
+      for (const task of decided) {
+        const won = task.id === winner?.id;
+        this.update(task.id, {
+          candidateOf: { ...task.candidateOf!, outcome: won ? 'won' : 'lost' },
+        });
+        if (!won && task.branch && isHiveBranch(task.branch))
+          await git(workspace.path, ['branch', '-D', '--', task.branch], { allowFailure: true });
+      }
+      if (winner) {
+        this.update(parent.id, {
+          status: 'completed',
+          workerState: 'completed',
+          result: winner.result,
+          branch: winner.branch,
+          startCommit: winner.startCommit,
+          error: null,
+          finishedAt: nowIso(),
+          bestOf: { ...current.bestOf!, choice },
+        });
+        this.log(run, parent.id, parent.workerId, 'task.status', 'info', `Escolhida. ${reason}`);
+        return;
+      }
+      const error = failureSummary(decided);
+      this.update(parent.id, { bestOf: { ...current.bestOf!, choice } });
+      if (this.retryUnattended(run, parent.id, parent.attempt, error)) return;
+      this.update(parent.id, {
+        status: 'failed',
+        workerState: 'failed',
+        error,
+        finishedAt: nowIso(),
+      });
+      this.log(run, parent.id, parent.workerId, 'task.status', 'warn', error);
+      this.failedForGood(run, parent.id);
+    } catch (error) {
+      if (this.closing) return;
+      const message = `Não foi possível comparar as tentativas: ${errorMessage(error)}`;
+      this.update(parent.id, {
+        status: 'failed',
+        workerState: 'failed',
+        error: message,
+        finishedAt: nowIso(),
+      });
+      this.log(run, parent.id, parent.workerId, 'error', 'error', message);
+    }
+  }
+
   /* ---------------------------------------------------------------- changes by hand */
 
   /**
@@ -624,7 +928,8 @@ export class Scheduler {
       throw new HiveError('CONFLICT', 'Gere o plano antes de adicionar tarefas a esta missão.');
     const { lead, ...plan } = planTaskSchema.parse(input);
     const tasks = this.repos.tasks.list('run_id = ?', runId);
-    if (tasks.length >= MAX_RUN_TASKS)
+    // Candidates are attempts of a task, not more work: they do not count towards the limit.
+    if (tasks.filter((task) => !task.candidateOf).length >= MAX_RUN_TASKS)
       throw new HiveError('VALIDATION', `Uma missão tem no máximo ${MAX_RUN_TASKS} tarefas.`);
     if (tasks.some((task) => task.key === plan.key))
       throw new HiveError('CONFLICT', `Já existe uma tarefa com a chave "${plan.key}".`);
@@ -805,7 +1110,8 @@ export class Scheduler {
   private failedForGood(run: Run, taskId: string): void {
     if (!this.options.onTaskFailed) return;
     const task = this.repos.tasks.get(taskId);
-    if (task?.status !== 'failed') return;
+    // A candidate failing is not the task failing: the others may still succeed.
+    if (task?.status !== 'failed' || task.candidateOf) return;
     try {
       this.options.onTaskFailed(run, task);
     } catch (error) {
@@ -823,7 +1129,10 @@ export class Scheduler {
   isActive(runId: string): boolean {
     return this.repos.tasks
       .list('run_id = ?', runId)
-      .some((task) => this.sessions.has(task.id) || this.launching.has(task.id));
+      .some(
+        (task) =>
+          this.sessions.has(task.id) || this.launching.has(task.id) || this.choosing.has(task.id),
+      );
   }
 
   /* ---------------------------------------------------------------- internals */
@@ -857,6 +1166,15 @@ export class Scheduler {
       }
       tasks = this.repos.tasks.list('run_id = ?', runId);
     }
+    // A task marked for several attempts opens a round of candidates instead of starting itself.
+    let opened = false;
+    for (const task of readyTasks(tasks))
+      if (this.wantsCandidates(task) && this.openRound(run, task)) opened = true;
+    if (opened) tasks = this.repos.tasks.list('run_id = ?', runId);
+    // A round whose candidates all ended is decided.
+    for (const task of tasks)
+      if (task.bestOf && !task.candidateOf && task.status === 'running')
+        this.maybeChoose(run, task);
     const limit = this.repos.getSettings().maxConcurrentTasks;
     // Tasks given honey go first, and may take one slot over the limit so they never wait.
     const ready = readyTasks(tasks).sort((a, b) => Number(!!b.boosted) - Number(!!a.boosted));
@@ -877,14 +1195,17 @@ export class Scheduler {
   private settle(runId: string): void {
     const run = this.repos.runs.get(runId);
     if (!run) return;
-    const tasks = this.repos.tasks.list('run_id = ?', runId);
-    const busy = tasks.some(
+    const all = this.repos.tasks.list('run_id = ?', runId);
+    const busy = all.some(
       (task) =>
         activeStatuses.has(task.status) ||
         this.launching.has(task.id) ||
-        this.sessions.has(task.id),
+        this.sessions.has(task.id) ||
+        this.choosing.has(task.id),
     );
-    if (busy || (run.status === 'running' && readyTasks(tasks).length)) return;
+    if (busy || (run.status === 'running' && readyTasks(all).length)) return;
+    // Candidates are attempts of a task: the task they belong to speaks for them.
+    const tasks = all.filter((task) => !task.candidateOf);
     if (run.status === 'running' && tasks.some((task) => task.status === 'pending')) return;
     // A failed task waiting for a replanning decision keeps the run open, even as a leaf.
     if (run.status === 'running' && tasks.some((task) => this.held(task))) return;
@@ -931,7 +1252,13 @@ export class Scheduler {
         throw new HiveError('CANCELLED', 'Cancelada antes de começar.');
     };
     try {
-      const assigned = this.repos.workers.require(initial.workerId ?? '', 'Agente');
+      const agent = this.repos.workers.require(initial.workerId ?? '', 'Agente');
+      // A candidate runs on its own model; a revision of a task with several attempts, on the
+      // model that won, which wrote the result being revised.
+      const model = initial.candidateOf ?? (initial.revision ? this.winningModel(initial) : null);
+      const assigned = model
+        ? { ...agent, providerId: model.providerId, modelId: model.modelId }
+        : agent;
       const worker = initial.boosted ? honeyBoost(assigned) : assigned;
       if (!canRunTasks(worker))
         throw new HiveError('VALIDATION', `${worker.name} não tem provedor e modelo configurados.`);
@@ -1140,23 +1467,38 @@ export class Scheduler {
       this.log(run, initial.id, initial.workerId, 'error', cancelled ? 'warn' : 'error', message);
       if (!cancelled) this.failedForGood(run, initial.id);
     } finally {
-      this.launching.delete(initial.id);
-      this.sessions.delete(initial.id);
-      this.runtimes.delete(initial.id);
-      this.cancelRequested.delete(initial.id);
+      // The attempt counts as going until its cleanup is done: otherwise the run could be closed
+      // (and the next task picked) while its worktree is still being removed.
+      const release = () => {
+        this.launching.delete(initial.id);
+        this.sessions.delete(initial.id);
+        this.runtimes.delete(initial.id);
+        this.cancelRequested.delete(initial.id);
+      };
       // While quitting, the worktree and the records stay for `recover` to save at the next start.
-      if (!this.closing) {
-        this.denyApprovalsOf(initial.id);
-        // The branch is kept only when it holds work to review.
-        if (worktree) await manager.remove(worktree, commit ? null : branch).catch(() => undefined);
-        // An attempt sent back to the queue (an unattended retry) has not ended yet.
-        const ended = this.repos.tasks.get(initial.id);
-        if (ended && ['completed', 'failed', 'cancelled'].includes(ended.status))
-          try {
-            this.options.onTaskFinished?.(run, ended);
-          } catch (error) {
-            this.log(run, initial.id, ended.workerId, 'error', 'warn', errorMessage(error));
-          }
+      if (this.closing) release();
+      else {
+        try {
+          this.denyApprovalsOf(initial.id);
+          // The branch is kept only when it holds work to review.
+          if (worktree)
+            await manager.remove(worktree, commit ? null : branch).catch(() => undefined);
+          // An attempt sent back to the queue (an unattended retry) has not ended yet.
+          const ended = this.repos.tasks.get(initial.id);
+          // A candidate's end is its task's business: the round decides when all have ended.
+          if (
+            ended &&
+            !ended.candidateOf &&
+            ['completed', 'failed', 'cancelled'].includes(ended.status)
+          )
+            try {
+              this.options.onTaskFinished?.(run, ended);
+            } catch (error) {
+              this.log(run, initial.id, ended.workerId, 'error', 'warn', errorMessage(error));
+            }
+        } finally {
+          release();
+        }
         this.pumpAll();
         this.settle(run.id);
       }

@@ -18,6 +18,8 @@ const CHECK_TIMEOUT_MS = 10 * 60_000;
 /** How much of a failing command's output goes back to the agent. */
 const OUTPUT_TAIL = 4_000;
 const TICK_MS = 30_000;
+/** Checks run on each attempt of a task with several attempts; each may take minutes. */
+const MAX_CANDIDATE_CHECKS = 4;
 
 /**
  * Commands a check block may run: a package manager script or a known test runner, with plain
@@ -88,7 +90,9 @@ export class FlowEngine {
 
   /** A task changed: when it just finished, what is linked after its agent runs. */
   onTask(task: Task): void {
-    if (task.status !== 'completed' || !task.workerId || this.partOfTeamWork(task)) return;
+    // A candidate is one attempt of a task: the task, once its best attempt is chosen, goes on.
+    if (task.status !== 'completed' || !task.workerId || task.candidateOf) return;
+    if (this.partOfTeamWork(task)) return;
     const key = `${task.id}:${task.attempt}:${task.revision?.round ?? 0}`;
     if (this.handled.has(`done:${key}`)) return;
     this.handled.add(`done:${key}`);
@@ -142,6 +146,47 @@ export class FlowEngine {
     )
       found.push('pytest');
     return [...new Set(found)].filter(allowedCheckCommand);
+  }
+
+  /**
+   * The checks that compare attempts of a task: the project's tests, lint, type check and build,
+   * never a script that keeps running (dev, start, watch).
+   */
+  async verificationCommands(workspacePath: string): Promise<string[]> {
+    const verifying =
+      /(?:^|\s)(?:run )?(?:test|lint|typecheck|build|check)$|^(?:cargo test|go test|pytest)/;
+    return (await this.commands(workspacePath))
+      .filter((command) => verifying.test(command))
+      .slice(0, MAX_CANDIDATE_CHECKS);
+  }
+
+  /** Runs `commands` on `commit` in a temporary checkout of the project; which passed. */
+  async checkCommit(
+    workspace: { id: string; path: string },
+    commit: string,
+    commands: string[],
+  ): Promise<{ command: string; ok: boolean }[]> {
+    if (!commands.length) return [];
+    const target = path.join(
+      this.options.worktreeRoot(workspace.id),
+      `check-${randomUUID().slice(0, 8)}`,
+    );
+    const results: { command: string; ok: boolean }[] = [];
+    try {
+      await mkdir(path.dirname(target), { recursive: true });
+      await git(workspace.path, ['worktree', 'add', '--detach', target, commit], {
+        timeoutMs: 180_000,
+      });
+      await linkDependencies(workspace.path, target);
+      for (const command of commands)
+        results.push({ command, ok: (await runCommand(command, target)).code === 0 });
+    } finally {
+      await unlinkDependencies(target);
+      await git(workspace.path, ['worktree', 'remove', '--force', target], { allowFailure: true });
+      await rm(target, { recursive: true, force: true }).catch(() => undefined);
+      await git(workspace.path, ['worktree', 'prune'], { allowFailure: true });
+    }
+    return results;
   }
 
   /** The tasks waiting at an approval block are applied now. */
