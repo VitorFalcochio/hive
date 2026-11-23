@@ -1,4 +1,6 @@
 import {
+  agentChatMessageSchema,
+  agentChatSchema,
   agentEventSchema,
   approvalSchema,
   chatTurnSchema,
@@ -15,6 +17,8 @@ import {
   teamRequestSchema,
   workerSchema,
   workspaceSchema,
+  type AgentChat,
+  type AgentChatMessage,
   type AgentEvent,
   type Approval,
   type ChatTurn,
@@ -50,6 +54,9 @@ export class Repositories {
   readonly tasks: JsonTable<Task>;
   readonly approvals: JsonTable<Approval>;
   readonly chatTurns: JsonTable<ChatTurn>;
+  /** Direct Agent Chat: conversations (per project and agent) and their messages. */
+  readonly agentChats: JsonTable<AgentChat>;
+  readonly agentChatMessages: JsonTable<AgentChatMessage>;
   readonly nexusAutopilotPlans: JsonTable<NexusAutopilotPlan>;
   readonly nexusAutopilotRecoveries: JsonTable<NexusAutopilotRecovery>;
   /** Hive Teams: messages between a mission's agents, and the leaders' requests. */
@@ -81,6 +88,16 @@ export class Repositories {
     this.chatTurns = new JsonTable(db, 'chat_turns', chatTurnSchema, (c) => ({
       workspace_id: c.workspaceId,
     }));
+    this.agentChats = new JsonTable(db, 'agent_chats', agentChatSchema, (c) => ({
+      workspace_id: c.workspaceId,
+      worker_id: c.workerId,
+    }));
+    this.agentChatMessages = new JsonTable(
+      db,
+      'agent_chat_messages',
+      agentChatMessageSchema,
+      (m) => ({ chat_id: m.chatId, status: m.status, created_at: m.createdAt }),
+    );
     this.nexusAutopilotPlans = new JsonTable(
       db,
       'nexus_autopilot_plans',
@@ -111,6 +128,59 @@ export class Repositories {
         runId,
       )
       .map((row) => teamMessageSchema.parse(JSON.parse(row.data)));
+  }
+
+  /**
+   * A page of a conversation, oldest first: the latest `limit` messages, or the `limit` before
+   * the message `before`. `more` says whether older ones remain.
+   */
+  agentChatPage(
+    chatId: string,
+    limit: number,
+    before?: string,
+  ): { messages: AgentChatMessage[]; more: boolean } {
+    const anchor = before
+      ? this.db.get<{ created_at: string; rowid: number }>(
+          'SELECT created_at, rowid FROM agent_chat_messages WHERE id = ? AND chat_id = ?',
+          before,
+          chatId,
+        )
+      : undefined;
+    const rows = anchor
+      ? this.db.all<{ data: string }>(
+          `SELECT data FROM agent_chat_messages
+           WHERE chat_id = ? AND (created_at < ? OR (created_at = ? AND rowid < ?))
+           ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+          chatId,
+          anchor.created_at,
+          anchor.created_at,
+          anchor.rowid,
+          limit + 1,
+        )
+      : this.db.all<{ data: string }>(
+          'SELECT data FROM agent_chat_messages WHERE chat_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+          chatId,
+          limit + 1,
+        );
+    const more = rows.length > limit;
+    const messages = rows
+      .slice(0, limit)
+      .reverse()
+      .map((row) => agentChatMessageSchema.parse(JSON.parse(row.data)));
+    return { messages, more };
+  }
+
+  /** Marks replies left running by a previous session as interrupted; returns how many. */
+  interruptAgentChats(at: string): number {
+    const stale = this.agentChatMessages.list("status = 'running'");
+    for (const message of stale)
+      this.agentChatMessages.put({
+        ...message,
+        status: 'interrupted',
+        error: message.error ?? 'O Hive foi fechado enquanto o agente trabalhava.',
+        finishedAt: at,
+      });
+    return stale.length;
   }
 
   transaction<T>(fn: () => T): T {

@@ -2,6 +2,7 @@ import { realpath } from 'node:fs/promises';
 import {
   callableSoldiers,
   commandMatchesAllowList,
+  READ_ONLY_TOOLS,
   rolePresets,
   soldierPresets,
   soldierWrites,
@@ -217,7 +218,19 @@ export class NativeAgentRuntime implements AgentRuntime {
       throw new HiveError('VALIDATION', "O modo de contexto 'shield' ainda não foi implementado.");
   }
 
-  async start(input: AgentTaskInput): Promise<AgentSession> {
+  async start(task: AgentTaskInput): Promise<AgentSession> {
+    // Read-only: the agent, its prompt and its squad see only the tools that change nothing,
+    // and no MCP server (Hive cannot tell which MCP tools change things).
+    const input: AgentTaskInput = task.readOnly
+      ? {
+          ...task,
+          worker: {
+            ...task.worker,
+            tools: task.worker.tools.filter((name) => READ_ONLY_TOOLS.includes(name)),
+            mcpServers: [],
+          },
+        }
+      : task;
     if (this.sessions.has(input.sessionId))
       throw new HiveError('CONFLICT', `Session already running: ${input.sessionId}`);
     const session: ActiveSession = {

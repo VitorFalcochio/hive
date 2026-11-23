@@ -619,6 +619,60 @@ export class CortexService {
     };
   }
 
+  /**
+   * Shared memory for a Direct Agent Chat request: the approved memories relevant to it and
+   * `nectar_search`, from the project's blocks that grant this agent Read. Read-only: a chat
+   * has no mission or task to attach proposals to, so proposing stays a mission feature.
+   */
+  async prepareChat(context: { workspaceId: string; worker: Worker; request: string }): Promise<{
+    memory: AgentMemory;
+    summary: string;
+  } | null> {
+    const { workspaceId, worker } = context;
+    const readable = grantingNodes(this.nodesOf(workspaceId), { workspaceId }, worker.id, 'read');
+    if (!readable.length) return null;
+    const origin = { runId: null, missionId: null, taskId: null };
+    const query = context.request.slice(0, 3_000);
+    const hits: CortexSearchHit[] = [];
+    let degraded: string | null = null;
+    for (const node of readable) {
+      const result = await this.searchNode(node, query, worker.role, node.config.taskTokenBudget);
+      degraded ??= result.degraded;
+      hits.push(...result.hits);
+      this.log(
+        node,
+        'context',
+        agentActor(worker),
+        `${result.hits.length} memória(s) entregue(s) a ${worker.name} numa conversa direta.`,
+        result.hits.map((hit) => hit.memory.id),
+        null,
+        origin,
+      );
+    }
+    hits.sort((a, b) => b.score - a.score);
+    const budget = Math.max(0, ...readable.map((node) => node.config.taskTokenBudget));
+    const chosen: CortexMemory[] = [];
+    let tokens = 0;
+    for (const hit of hits) {
+      if (chosen.some((memory) => memory.id === hit.memory.id)) continue;
+      const cost = estimateTokens(renderMemory(hit.memory));
+      if (tokens + cost > budget) continue;
+      tokens += cost;
+      chosen.push(hit.memory);
+    }
+    const summary = `Nectar: ${chosen.length} memória(s) no contexto (${tokens} tokens)${degraded ? '; busca local usada' : ''}.`;
+    return {
+      summary,
+      memory: {
+        context: chosen.length
+          ? renderUntrusted('Shared memory (Nectar) relevant to this request', chosen)
+          : '',
+        guidance: guidance(new Set<CortexPermission>(['read'])),
+        tools: [this.searchTool(readable, worker, origin)],
+      },
+    };
+  }
+
   /** Planning context for the Queen, only when she is connected to a Nectar with Read. */
   async planningContext(run: Run, queenId: string, objective: string): Promise<string> {
     const nodes = grantingNodes(this.nodesOf(run.workspaceId), run, queenId, 'read');
@@ -697,6 +751,61 @@ export class CortexService {
 
   /* ---------------------------------------------------------------- internals */
 
+  /** `nectar_search` over the blocks that grant Read; each call re-reads the block first. */
+  private searchTool(
+    readable: CortexNode[],
+    worker: Worker,
+    origin: { runId: string | null; missionId: string | null; taskId: string | null },
+  ): AgentExtraTool {
+    const fresh = (node: CortexNode) => this.repo.nodes.get(node.id);
+    return {
+      definition: {
+        type: 'function',
+        function: {
+          name: 'nectar_search',
+          description:
+            "Search the project's shared memory (Nectar) for approved decisions, API contracts, conventions and requirements recorded by other agents. Search by meaning, in any language.",
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string', description: 'What you need to know.' } },
+            required: ['query'],
+          },
+        },
+      },
+      run: async (args) => {
+        const query = typeof args.query === 'string' ? args.query.trim().slice(0, 500) : '';
+        if (!query) return 'Error: give a query.';
+        const found: CortexMemory[] = [];
+        for (const node of readable) {
+          const current = fresh(node);
+          if (!current || !can(current, worker.id, 'read')) {
+            if (current) this.denied(current, worker, origin, 'nectar_search sem Read');
+            continue;
+          }
+          const result = await this.searchNode(
+            current,
+            query,
+            worker.role,
+            current.config.queryTokenBudget,
+          );
+          found.push(...result.hits.map((hit) => hit.memory));
+          this.log(
+            current,
+            'query',
+            agentActor(worker),
+            `${worker.name} buscou “${query.slice(0, 120)}” → ${result.hits.length} resultado(s).`,
+            result.hits.map((hit) => hit.memory.id),
+            { model: result.model, degraded: result.degraded },
+            origin,
+          );
+        }
+        return found.length
+          ? renderUntrusted('Nectar search results', found)
+          : 'No approved memory matches this query. Pending proposals are not shown because they are not confirmed knowledge.';
+      },
+    };
+  }
+
   private agentTools(nodes: CortexNode[], run: Run, task: Task, worker: Worker): AgentExtraTool[] {
     const origin = { runId: run.id, missionId: run.missionId, taskId: task.id };
     const readable = grantingNodes(nodes, run, worker.id, 'read');
@@ -707,53 +816,7 @@ export class CortexService {
     // Every call re-reads the block: a connection removed mid-task stops working at once.
     const fresh = (node: CortexNode) => this.repo.nodes.get(node.id);
 
-    if (readable.length)
-      tools.push({
-        definition: {
-          type: 'function',
-          function: {
-            name: 'nectar_search',
-            description:
-              "Search the project's shared memory (Nectar) for approved decisions, API contracts, conventions and requirements recorded by other agents. Search by meaning, in any language.",
-            parameters: {
-              type: 'object',
-              properties: { query: { type: 'string', description: 'What you need to know.' } },
-              required: ['query'],
-            },
-          },
-        },
-        run: async (args) => {
-          const query = typeof args.query === 'string' ? args.query.trim().slice(0, 500) : '';
-          if (!query) return 'Error: give a query.';
-          const found: CortexMemory[] = [];
-          for (const node of readable) {
-            const current = fresh(node);
-            if (!current || !can(current, worker.id, 'read')) {
-              if (current) this.denied(current, worker, origin, 'nectar_search sem Read');
-              continue;
-            }
-            const result = await this.searchNode(
-              current,
-              query,
-              worker.role,
-              current.config.queryTokenBudget,
-            );
-            found.push(...result.hits.map((hit) => hit.memory));
-            this.log(
-              current,
-              'query',
-              agentActor(worker),
-              `${worker.name} buscou “${query.slice(0, 120)}” → ${result.hits.length} resultado(s).`,
-              result.hits.map((hit) => hit.memory.id),
-              { model: result.model, degraded: result.degraded },
-              origin,
-            );
-          }
-          return found.length
-            ? renderUntrusted('Nectar search results', found)
-            : 'No approved memory matches this query. Pending proposals are not shown because they are not confirmed knowledge.';
-        },
-      });
+    if (readable.length) tools.push(this.searchTool(readable, worker, origin));
 
     if (proposing.length || managing.length)
       tools.push({
@@ -1061,7 +1124,7 @@ export class CortexService {
   private denied(
     node: CortexNode,
     worker: Worker,
-    origin: { runId: string; taskId: string },
+    origin: { runId: string | null; taskId: string | null },
     reason: string,
   ) {
     this.log(

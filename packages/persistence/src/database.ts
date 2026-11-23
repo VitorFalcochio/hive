@@ -150,6 +150,28 @@ const migrations: string[] = [
   );
   CREATE INDEX IF NOT EXISTS team_requests_run ON team_requests(run_id);
   `,
+  // Direct Agent Chat: conversations with one agent in one project, and their messages. A
+  // conversation's messages go with it; messages are read a page at a time, never all at once.
+  `
+  CREATE TABLE IF NOT EXISTS agent_chats (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS agent_chats_owner ON agent_chats(workspace_id, worker_id, updated_at);
+  CREATE TABLE IF NOT EXISTS agent_chat_messages (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES agent_chats(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS agent_chat_messages_chat ON agent_chat_messages(chat_id, created_at);
+  CREATE INDEX IF NOT EXISTS agent_chat_messages_status ON agent_chat_messages(status);
+  `,
 ];
 
 /** The schema version this build creates; a database above it came from a newer Hive. */

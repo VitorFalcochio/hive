@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 
 /**
  * The Markdown agents write in their summaries, drawn as React elements: headings, lists,
@@ -104,7 +104,38 @@ function renderInline(text: string): ReactNode[] {
   });
 }
 
-export function Markdown({ source, className }: { source: string; className?: string }) {
+/** Copies a code block's text; shows "Copiado" for a moment. */
+function CopyCode({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="ghost md-copy"
+      onClick={() =>
+        void navigator.clipboard.writeText(text).then(
+          () => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          },
+          () => undefined,
+        )
+      }
+    >
+      {copied ? 'Copiado' : 'Copiar'}
+    </button>
+  );
+}
+
+export function Markdown({
+  source,
+  className,
+  copyable = false,
+}: {
+  source: string;
+  className?: string;
+  /** Code blocks get a copy button. */
+  copyable?: boolean;
+}) {
   return (
     <div className={`markdown${className ? ` ${className}` : ''}`}>
       {parseMarkdown(source).map((block, index) => {
@@ -162,7 +193,8 @@ export function Markdown({ source, className }: { source: string; className?: st
             );
           case 'code':
             return (
-              <pre key={index}>
+              <pre key={index} className={copyable ? 'md-pre-copyable' : undefined}>
+                {copyable && <CopyCode text={block.text} />}
                 <code>{block.text}</code>
               </pre>
             );

@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import type {
   AgentEvent,
+  HivePush,
   AppInfo,
   DashboardSummary,
   ProviderConfig,
@@ -21,6 +22,8 @@ export type View =
   | 'run'
   | 'shift'
   | 'agents'
+  /** Direct Agent Chat with one agent (see `chatWorkerId`). */
+  | 'agentChat'
   | 'providers'
   | 'skills'
   | 'settings'
@@ -62,6 +65,10 @@ export interface HiveContext {
   onFiles(listener: (paths: string[]) => void): () => void;
   /** Output and state changes from workspace terminal processes. */
   onTerminal(listener: (event: TerminalEvent) => void): () => void;
+  /** Direct Agent Chat progress pushed by the main process. Returns an unsubscribe function. */
+  onAgentChat(listener: (push: Extract<HivePush, { kind: 'agentChat' }>) => void): () => void;
+  /** Opens the Direct Agent Chat with this agent, in the project in front. */
+  openAgentChat(workerId: string): void;
   pickWorkspace(): Promise<void>;
   /** Brings an open project to the front, as its tab would. */
   openWorkspace(workspace: Workspace): Promise<void>;

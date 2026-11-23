@@ -52,6 +52,11 @@ export interface AgentTaskInput {
    * terminal (no worktree, no snapshot); missions use the default 'worktree'.
    */
   place?: 'worktree' | 'project';
+  /**
+   * Only reads the project: no file edits, no commands and no MCP tools, whatever the agent's
+   * tools allow. Used by the Direct Agent Chat's conversation mode.
+   */
+  readOnly?: boolean;
   skills: ResolvedSkill[];
   limits: ExecutionLimits;
   memory?: AgentMemory;

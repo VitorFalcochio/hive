@@ -142,7 +142,7 @@ describe('Hive Teams: compatibilidade', () => {
     const repos = new Repositories(before);
     repos.workers.put(workerSchema.parse(oldWorker));
     before.db.exec('DROP TABLE team_messages; DROP TABLE team_requests;');
-    before.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION - 1}`);
+    before.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION - 2}`);
     before.close();
 
     const after = new HiveDatabase(file);

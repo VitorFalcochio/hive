@@ -30,6 +30,13 @@ import {
   type CortexSearchResult,
 } from './cortex';
 import {
+  agentChatModeSchema,
+  type AgentChat,
+  type AgentChatApproval,
+  type AgentChatMessage,
+  type AgentChatState,
+} from './agent-chat';
+import {
   mcpServerSchema,
   planSchema,
   planTaskSchema,
@@ -141,6 +148,8 @@ export interface ActiveChat {
   /** The request being answered, shortened. */
   title: string;
   state: WorkerState;
+  /** Set for a Direct Agent Chat reply: the conversation it belongs to. */
+  direct?: string;
 }
 
 export interface DashboardSummary {
@@ -782,6 +791,42 @@ export const ipcContract = {
   ),
   'terminal.stop': channel<TerminalSession>()(id),
   'terminal.clear': channel<TerminalSession>()(id),
+  /**
+   * Direct Agent Chat: conversations with one agent in one project, newest first. Each
+   * conversation belongs to a project and an agent; nothing crosses to another project.
+   */
+  'agentChat.list': channel<AgentChat[]>()(z.object({ workspaceId: id, workerId: id }).strict()),
+  'agentChat.create': channel<AgentChat>()(z.object({ workspaceId: id, workerId: id }).strict()),
+  'agentChat.delete': channel<void>()(id),
+  /** Messages of a conversation, oldest first: the latest `limit`, or those before `before`. */
+  'agentChat.messages': channel<{ messages: AgentChatMessage[]; more: boolean }>()(
+    z
+      .object({
+        chatId: id,
+        before: z.string().max(100).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      })
+      .strict(),
+  ),
+  'agentChat.state': channel<AgentChatState>()(id),
+  /**
+   * Sends a request; the agent starts at once and works in the background. Its progress
+   * arrives as `agentChat` pushes, and the reply is stored when it ends.
+   */
+  'agentChat.send': channel<{ user: AgentChatMessage; agent: AgentChatMessage }>()(
+    z
+      .object({
+        chatId: id,
+        text: z.string().trim().min(1).max(20_000),
+        mode: agentChatModeSchema,
+      })
+      .strict(),
+  ),
+  /** Stops the agent working in this conversation; its reply is stored as cancelled. */
+  'agentChat.cancel': channel<void>()(id),
+  'agentChat.approve': channel<void>()(
+    z.object({ chatId: id, approvalId: id, answer: z.enum(['yes', 'no', 'always']) }).strict(),
+  ),
   'code.assist': channel<CodeAssistantResponse>()(
     z.object({
       workerId: id,
@@ -1082,6 +1127,14 @@ export type HivePush =
   | { kind: 'navigate'; page: 'add-provider' }
   /** Sent to the main window only: where the app update stands. */
   | { kind: 'update'; state: UpdateState }
+  /** Direct Agent Chat: a reply changed (a step, an approval, the end). Not a reload. */
+  | {
+      kind: 'agentChat';
+      chatId: string;
+      workspaceId: string;
+      message: AgentChatMessage;
+      approval: AgentChatApproval | null;
+    }
   | {
       kind: 'changed';
       entity:

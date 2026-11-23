@@ -10,6 +10,7 @@ import {
   Hexagon,
   Info,
   Settings as SettingsIcon,
+  SlidersHorizontal,
   LayoutGrid,
   Network,
   PanelLeftClose,
@@ -25,6 +26,7 @@ import {
 import type {
   AgentEvent,
   AppInfo,
+  HivePush,
   DashboardSummary,
   ProviderConfig,
   RunDetail,
@@ -49,6 +51,7 @@ const CodeView = lazy(() => import('./code/CodeView'));
 import { ModalHost } from './modals';
 import { SplashScreen, useSplash } from './splash';
 import { AgentsPage } from './agents';
+import { AgentChatPage, chatAgents } from './agent-chat';
 import { AgentBee } from './mascot';
 import { TokenMeter } from './token-meter';
 import { HoneyMeter } from './honey';
@@ -63,7 +66,7 @@ const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   { view: 'code', label: 'Código', icon: Code2 },
   { view: 'run', label: 'Terminal', icon: SquareTerminal },
   { view: 'shift', label: 'Modo Turno', icon: Timer },
-  { view: 'agents', label: 'Agentes', icon: Bot },
+  // 'agents' is drawn on its own, as the Agentes accordion, between these two.
   { view: 'providers', label: 'Provedores', icon: Plug },
   { view: 'skills', label: 'Skills', icon: BookOpen },
 ];
@@ -98,6 +101,7 @@ const viewTitles: Record<View, string> = {
   run: 'Terminal',
   shift: 'Modo Turno',
   agents: 'Agentes',
+  agentChat: 'Agentes',
   providers: 'Provedores',
   skills: 'Skills',
   about: 'Sobre',
@@ -114,6 +118,10 @@ export function App() {
   // The whole sidebar shrinks to an icon rail; the menu alone can shrink to one row of icons.
   const [railed, setRailed] = useRemembered('hive.sidebar.railed');
   const [menuCompact, setMenuCompact] = useRemembered('hive.sidebar.menuCompact');
+  // The Agentes accordion starts open; closing it is remembered on this machine.
+  const [agentsClosed, setAgentsClosed] = useRemembered('hive.sidebar.agentsClosed');
+  // The agent whose Direct Agent Chat is open (view 'agentChat').
+  const [chatWorkerId, setChatWorkerId] = useState<string | null>(null);
   // Projects whose mission list the user collapsed; every project starts expanded.
   const [collapsedProjects, setCollapsedProjects] = useState<string[]>([]);
   // Project in front; file events from other projects are ignored.
@@ -139,6 +147,9 @@ export function App() {
   const eventListeners = useRef(new Set<(event: AgentEvent) => void>());
   const fileListeners = useRef(new Set<(paths: string[]) => void>());
   const terminalListeners = useRef(new Set<(event: TerminalEvent) => void>());
+  const agentChatListeners = useRef(
+    new Set<(push: Extract<HivePush, { kind: 'agentChat' }>) => void>(),
+  );
   // The "reduce animations" setting is applied as a class, so every animation can be turned off at once.
   useEffect(() => {
     document.documentElement.classList.toggle('motion-reduce', settings?.reduceMotion === 'on');
@@ -218,6 +229,15 @@ export function App() {
       terminalListeners.current.delete(listener);
     };
   }, []);
+  const onAgentChat = useCallback(
+    (listener: (push: Extract<HivePush, { kind: 'agentChat' }>) => void) => {
+      agentChatListeners.current.add(listener);
+      return () => {
+        agentChatListeners.current.delete(listener);
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     let alive = true;
@@ -241,6 +261,11 @@ export function App() {
       }
       if (push.kind === 'terminal') {
         for (const listener of terminalListeners.current) listener(push.event);
+        return;
+      }
+      // A chat reply's progress goes to the open chat only; it never reloads the app.
+      if (push.kind === 'agentChat') {
+        for (const listener of agentChatListeners.current) listener(push);
         return;
       }
       if (push.kind === 'navigate') {
@@ -291,6 +316,11 @@ export function App() {
       onEvent,
       onFiles,
       onTerminal,
+      onAgentChat,
+      openAgentChat(workerId) {
+        setChatWorkerId(workerId);
+        setView('agentChat');
+      },
       async openRun(runId) {
         try {
           setDetail(await window.hive.invoke('run.get', runId));
@@ -345,12 +375,23 @@ export function App() {
     onEvent,
     onFiles,
     onTerminal,
+    onAgentChat,
   ]);
 
   const activeWorkspace = summary?.workspace ?? null;
   const queen = workers.find((worker) => worker.role === 'queen');
   const connected = providers.filter(hasAccess);
-  const page = view === 'mission' && !detail ? 'overview' : view;
+  const chatWorker =
+    view === 'agentChat' ? (workers.find((worker) => worker.id === chatWorkerId) ?? null) : null;
+  // A removed agent's chat falls back to the team page.
+  const page =
+    view === 'mission' && !detail
+      ? 'overview'
+      : view === 'agentChat' && !chatWorker && ready
+        ? 'agents'
+        : view;
+  const team = useMemo(() => chatAgents(workers), [workers]);
+  const sidebarIcons = railed || menuCompact;
   const approvals = summary?.pendingApprovals ?? [];
   // The editor stays mounted after its first visit, so tabs and the tree survive navigation.
   const [codeVisited, setCodeVisited] = useState(false);
@@ -484,6 +525,12 @@ export function App() {
               {activeWorkspace?.name ?? 'sem repositório'}
               <span className="sep">/</span>
               {page === 'mission' && detail ? detail.mission.title : viewTitles[page]}
+              {page === 'agentChat' && chatWorker && (
+                <>
+                  <span className="sep">/</span>
+                  {chatWorker.name}
+                </>
+              )}
             </span>
           </div>
 
@@ -505,7 +552,68 @@ export function App() {
               <ChevronDown size={13} className={menuCompact ? 'chevron' : 'chevron open'} />
             </button>
             <nav aria-label="Navegação principal" className={menuCompact ? 'compact' : undefined}>
-              {navigation.map(({ view: item, label, icon: Icon }) => (
+              {navigation.slice(0, 5).map(({ view: item, label, icon: Icon }) => (
+                <button
+                  key={item}
+                  className={page === item ? 'nav-item selected' : 'nav-item'}
+                  aria-current={page === item ? 'page' : undefined}
+                  aria-label={label}
+                  title={railed || menuCompact ? label : undefined}
+                  onClick={() => setView(item)}
+                >
+                  <Icon size={15} /> <span className="nav-label">{label}</span>
+                </button>
+              ))}
+              {/* Agentes: managing the team, and a direct chat with each agent. As icons only,
+                it opens the team page. */}
+              <button
+                className={
+                  (page === 'agents' || page === 'agentChat') && (agentsClosed || sidebarIcons)
+                    ? 'nav-item selected'
+                    : 'nav-item'
+                }
+                aria-expanded={sidebarIcons ? undefined : !agentsClosed}
+                aria-label="Agentes"
+                title={
+                  sidebarIcons ? 'Agentes' : agentsClosed ? 'Mostrar agentes' : 'Recolher agentes'
+                }
+                onClick={() => (sidebarIcons ? setView('agents') : setAgentsClosed(!agentsClosed))}
+              >
+                <Bot size={15} /> <span className="nav-label">Agentes</span>
+                <ChevronDown
+                  size={13}
+                  className={agentsClosed ? 'nav-chevron chevron' : 'nav-chevron chevron open'}
+                />
+              </button>
+              {!sidebarIcons && !agentsClosed && (
+                <div className="nav-sub" role="group" aria-label="Agentes">
+                  <button
+                    className={page === 'agents' ? 'nav-subitem selected' : 'nav-subitem'}
+                    aria-current={page === 'agents' ? 'page' : undefined}
+                    onClick={() => setView('agents')}
+                  >
+                    <SlidersHorizontal size={13} />
+                    <span className="truncate">Gerenciar agentes</span>
+                  </button>
+                  <span className="nav-sub-title">Chat com agentes</span>
+                  {team.map((worker) => {
+                    const selected = page === 'agentChat' && chatWorker?.id === worker.id;
+                    return (
+                      <button
+                        key={worker.id}
+                        className={selected ? 'nav-subitem selected' : 'nav-subitem'}
+                        aria-current={selected ? 'page' : undefined}
+                        title={worker.description || worker.name}
+                        onClick={() => context.openAgentChat(worker.id)}
+                      >
+                        <AgentBee worker={worker} size={14} />
+                        <span className="truncate">{worker.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {navigation.slice(5).map(({ view: item, label, icon: Icon }) => (
                 <button
                   key={item}
                   className={page === item ? 'nav-item selected' : 'nav-item'}
@@ -629,7 +737,7 @@ export function App() {
             className={
               page === 'code'
                 ? 'content code-mode'
-                : page === 'run'
+                : page === 'run' || page === 'agentChat'
                   ? 'content run-mode'
                   : page === 'overview'
                     ? 'content home-mode'
@@ -662,12 +770,27 @@ export function App() {
                 </Suspense>
               </div>
             )}
-            <div className={page === 'run' ? 'page page-full' : 'page'} hidden={page === 'code'}>
+            <div
+              className={page === 'run' || page === 'agentChat' ? 'page page-full' : 'page'}
+              hidden={page === 'code'}
+            >
               {page === 'overview' && <OverviewPage />}
               {page === 'search' && <SearchPage key={activeWorkspace?.id ?? 'none'} />}
               {page === 'mission' && <MissionPage />}
               {page === 'run' && <RunPage key={activeWorkspace?.id ?? 'none'} />}
               {page === 'agents' && <AgentsPage />}
+              {page === 'agentChat' && chatWorker && activeWorkspace && (
+                <AgentChatPage
+                  key={`${activeWorkspace.id}:${chatWorker.id}`}
+                  workspace={activeWorkspace}
+                  worker={chatWorker}
+                />
+              )}
+              {page === 'agentChat' && !activeWorkspace && ready && (
+                <div className="page">
+                  <p className="muted">Abra um projeto para conversar com os agentes.</p>
+                </div>
+              )}
               {page === 'providers' && <ProvidersPage />}
               {page === 'skills' && <SkillsPage />}
               {page === 'about' && <AboutPage />}
@@ -694,6 +817,7 @@ export function App() {
               workers={workers}
               onOpenRun={(runId) => void context.openRun(runId)}
               onOpenTerminal={() => setView('run')}
+              onOpenChat={(workerId) => context.openAgentChat(workerId)}
             />
             {approvals.length > 0 && (
               <span className="warn-text">{approvals.length} aprovação(ões) pendente(s)</span>
@@ -744,6 +868,7 @@ function BusyBees({
   workers,
   onOpenRun,
   onOpenTerminal,
+  onOpenChat,
 }: {
   tasks: DashboardSummary['activeTasks'];
   chats: DashboardSummary['activeChats'];
@@ -751,6 +876,7 @@ function BusyBees({
   workers: Worker[];
   onOpenRun: (runId: string) => void;
   onOpenTerminal: () => void;
+  onOpenChat: (workerId: string) => void;
 }) {
   const queen = workers.find((worker) => worker.role === 'queen');
   const busy = new Map<string, { worker: Worker; titles: string[]; working: boolean }>();
@@ -766,14 +892,20 @@ function BusyBees({
   for (const chat of chats)
     add(
       chat.workerId,
-      `no terminal: ${chat.title}`,
+      chat.direct ? `em conversa: ${chat.title}` : `no terminal: ${chat.title}`,
       isWaiting({ status: 'running', workerState: chat.state }),
     );
   const runId = tasks[0]?.runId ?? planning?.id;
+  const direct = chats.find((chat) => chat.direct) ?? null;
   if (!runId && !chats.length) return null;
   const parts = [
     tasks.length ? `${tasks.length} tarefa(s) em execução` : '',
-    chats.length ? `${chats.length} no terminal` : '',
+    chats.some((chat) => !chat.direct)
+      ? `${chats.filter((chat) => !chat.direct).length} no terminal`
+      : '',
+    chats.some((chat) => chat.direct)
+      ? `${chats.filter((chat) => chat.direct).length} em conversa`
+      : '',
   ].filter(Boolean);
   const label = parts.length
     ? parts.join(' · ')
@@ -781,8 +913,10 @@ function BusyBees({
   return (
     <button
       className="busy-bees"
-      title={runId ? 'Abrir execução' : 'Abrir os terminais'}
-      onClick={() => (runId ? onOpenRun(runId) : onOpenTerminal())}
+      title={runId ? 'Abrir execução' : direct ? 'Abrir a conversa' : 'Abrir os terminais'}
+      onClick={() =>
+        runId ? onOpenRun(runId) : direct ? onOpenChat(direct.workerId) : onOpenTerminal()
+      }
     >
       <span className="busy-bees-swarm">
         {planning && queen && !busy.has(queen.id) && (

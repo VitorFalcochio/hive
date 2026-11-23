@@ -15,6 +15,7 @@ import {
   type CanvasLayout,
   type CanvasTerminal,
   canvasLayoutSchema,
+  settingsSchema,
   emptyCanvasLayout,
   type DashboardSummary,
   type ExecutionLimits,
@@ -75,6 +76,7 @@ import { SkillForgeAdapter, builtinSkillNames, retiredSkillReplacements } from '
 import { FileService } from './files';
 import { TerminalManager } from './terminal';
 import { TerminalAgents } from './terminal-agents';
+import { AgentChats } from './agent-chats';
 import { HiveTerminalApp } from './terminal-ui';
 import { startControlServer, writeCommandShims, type ControlServer } from './control-server';
 import { assistCode } from './code-assistant';
@@ -125,6 +127,8 @@ export class DesktopService {
   private readonly flow: FlowEngine;
   readonly autopilot: Autopilot;
   readonly terminals: TerminalManager;
+  /** Direct Agent Chat: conversations with one agent, without a mission or the Queen. */
+  readonly agentChats: AgentChats;
   /** Set by the app shell to notify the user when the shift finishes a mission. */
   onShiftFinished?: (item: AutopilotHistoryItem) => void;
   /** Set by the app shell: a PNG data URL of part of the window, for Design Mode notes. */
@@ -270,6 +274,23 @@ export class DesktopService {
           : null,
     });
     this.teams = new HiveTeams({ repos: this.repos, scheduler: this.scheduler });
+    // The same engines, model routing, skills, Nectar and approval rules as mission tasks.
+    this.agentChats = new AgentChats({
+      repos: this.repos,
+      runtime: this.runtime,
+      runtimeFor: (worker) =>
+        worker.providerId && this.repos.providers.get(worker.providerId)?.kind === 'claude-code'
+          ? this.claudeCode()
+          : null,
+      chatForWorker: (worker, notify) =>
+        this.router.clientFor(worker, (change) => notify(describeSwitch(change))),
+      resolveSkills: async (names) => (await this.skills().resolve(names)).skills,
+      prepareMemory: (context) => this.cortex.prepareChat(context),
+      gitStatus: (root) => statusPorcelain(root),
+      push: (push) => this.push(push),
+      onWorkerChanged: (id) => this.changed('worker', id),
+      onChange: () => this.changed('chat'),
+    });
     this.flow = new FlowEngine({
       repos: this.repos,
       layout: (runId) => this.canvasLayout(runId),
@@ -669,6 +690,7 @@ export class DesktopService {
   }
 
   dispose(): void {
+    this.agentChats.dispose();
     const stopped = this.scheduler.shutdown();
     if (stopped) console.warn(`Encerrando: ${stopped} sessão(ões) de agente interrompida(s).`);
     void this.claudePermissions.close();
@@ -1316,7 +1338,11 @@ export class DesktopService {
       case 'settings.get':
         return this.repos.getSettings();
       case 'settings.update': {
-        const result = this.repos.saveSettings({ ...this.repos.getSettings(), ...parse(channel) });
+        const current = this.repos.getSettings();
+        const update = parse(channel);
+        const result = this.repos.saveSettings(
+          settingsSchema.parse({ ...current, ...update }),
+        );
         this.updater?.setAutomatic(result.updates.auto);
         this.changed('settings');
         return result;
@@ -1434,7 +1460,8 @@ export class DesktopService {
           await this.previewServers.get(closed.path)?.close();
           this.previewServers.delete(closed.path);
         }
-        // Running commands of the closed project stop with its tab.
+        // Running commands of the closed project stop with its tab, and so do its agents' replies.
+        this.agentChats.cancelWorkspace(id);
         for (const session of this.terminals.list(id))
           if (session.status === 'running' || session.status === 'stopping')
             this.terminals.stop(session.id);
@@ -1445,6 +1472,7 @@ export class DesktopService {
       }
       case 'workspace.remove': {
         const id = parse(channel);
+        this.agentChats.cancelWorkspace(id);
         this.repos.workspaces.delete(id);
         if (this.repos.getValue('activeWorkspace') === id)
           this.repos.setValue('activeWorkspace', null);
@@ -1967,6 +1995,32 @@ export class DesktopService {
         return this.terminals.stop(parse(channel));
       case 'terminal.clear':
         return this.terminals.clear(parse(channel));
+      case 'agentChat.list': {
+        const { workspaceId, workerId } = parse(channel);
+        return this.agentChats.list(workspaceId, workerId);
+      }
+      case 'agentChat.create': {
+        const { workspaceId, workerId } = parse(channel);
+        return this.agentChats.create(workspaceId, workerId);
+      }
+      case 'agentChat.delete':
+        return this.agentChats.delete(parse(channel));
+      case 'agentChat.messages': {
+        const { chatId, before, limit } = parse(channel);
+        return this.agentChats.messages(chatId, limit, before);
+      }
+      case 'agentChat.state':
+        return this.agentChats.state(parse(channel));
+      case 'agentChat.send': {
+        const { chatId, text, mode } = parse(channel);
+        return this.agentChats.send(chatId, text, mode);
+      }
+      case 'agentChat.cancel':
+        return this.agentChats.cancel(parse(channel));
+      case 'agentChat.approve': {
+        const { chatId, approvalId, answer } = parse(channel);
+        return this.agentChats.approve(chatId, approvalId, answer);
+      }
       case 'code.assist': {
         const value = parse(channel);
         if (!this.active())
@@ -1995,7 +2049,10 @@ export class DesktopService {
               ...task,
               workerName: this.repos.workers.get(task.workerId ?? '')?.name ?? null,
             })),
-          activeChats: this.terminalAgents?.activeChats() ?? [],
+          activeChats: [
+            ...(this.terminalAgents?.activeChats() ?? []),
+            ...this.agentChats.activeChats(),
+          ],
           pendingApprovals: this.repos.approvals.list("status = 'pending'"),
           providers: this.repos.providers.list(),
           recentRuns: runs.slice(0, 8).map((run) => ({

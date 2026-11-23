@@ -193,11 +193,13 @@ export class ClaudeCodeRuntime implements AgentRuntime {
   /** The prompt: the agent's role and Hive's rules first, then the task as Hive writes it. */
   private prompt(input: AgentTaskInput): string {
     const role = input.worker.systemPrompt.trim();
-    return [
-      `You are ${input.worker.name}, working for Hive, a team of coding agents. Work only inside the current directory, which is an isolated copy of the project. Do not commit; Hive snapshots your changes when you finish. End with a short summary of what you changed and how you verified it.`,
-      role ? `## Your role\n${role}` : '',
-      buildTaskPrompt(input),
-    ]
+    // 'project': the user's own folder, with the user following along (Direct Agent Chat).
+    const rules = input.readOnly
+      ? `You are ${input.worker.name}, working for Hive, a team of coding agents, talking with the user. The current directory is the user's project. Only read it: do not edit files or run commands. Answer in the user's language.`
+      : input.place === 'project'
+        ? `You are ${input.worker.name}, working for Hive, a team of coding agents, talking with the user. The current directory is the user's project folder: edits apply at once. Work only inside it. No git commit, push, merge, rebase or reset unless asked. End with a short summary of what you changed and how you verified it, in the user's language.`
+        : `You are ${input.worker.name}, working for Hive, a team of coding agents. Work only inside the current directory, which is an isolated copy of the project. Do not commit; Hive snapshots your changes when you finish. End with a short summary of what you changed and how you verified it.`;
+    return [rules, role ? `## Your role\n${role}` : '', buildTaskPrompt(input)]
       .filter(Boolean)
       .join('\n\n');
   }
@@ -217,6 +219,9 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       String(Math.max(1, input.limits.maxSteps)),
     ];
     if (input.model && input.model !== 'default') args.push('--model', input.model);
+    // Read-only (a Direct Agent Chat conversation): editing and shell tools are refused outright,
+    // before any permission prompt.
+    const readOnly = input.readOnly ? [...FILE_TOOLS, ...COMMAND_TOOLS] : [];
     if (mcpConfig)
       // Only Hive's server: the user's own MCP servers are not part of a Hive task.
       args.push(
@@ -229,9 +234,14 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     else {
       // Nothing waits for an answer nobody can give: what would prompt is refused.
       args.push('--permission-prompts', 'none');
-      if (this.options.allowCommands?.()) args.push('--allowedTools', 'Bash', 'PowerShell');
-      else args.push('--disallowedTools', 'Bash', 'PowerShell');
+      if (this.options.allowCommands?.() && !input.readOnly)
+        args.push('--allowedTools', 'Bash', 'PowerShell');
+      else readOnly.push(...COMMAND_TOOLS);
     }
+    const refused = [...new Set(readOnly)];
+    if (refused.length) args.push('--disallowedTools', ...refused);
+    // In read-only mode Claude Code must not auto-accept edits either.
+    if (input.readOnly) args[args.indexOf('acceptEdits')] = 'default';
     return args;
   }
 
