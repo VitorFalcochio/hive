@@ -1,7 +1,6 @@
 import { BookOpen, Eye, FlaskConical, Search, Wrench, type LucideIcon } from 'lucide-react';
 import {
   beeColorOf,
-  beeColors,
   beeCrown,
   beeGrid,
   beePalette,
@@ -143,11 +142,7 @@ export function SoldierBee({
   const state = working ? ' working' : enabled ? '' : ' off';
   return (
     <span className={`soldier-bee${state}`} title={soldierPresets[role].label}>
-      <Mascot
-        size={size}
-        mood={working ? 'working' : 'still'}
-        color={beeColors[beeColorOf(captain)].hex}
-      />
+      <Mascot size={size} mood={working ? 'working' : 'still'} color={beeColorOf(captain)} />
       <span className="soldier-insignia" aria-hidden>
         <Insignia size={Math.max(9, Math.round(size * 0.55))} strokeWidth={2.5} />
       </span>
@@ -166,11 +161,6 @@ export function AgentBee({
   mood?: MascotMood;
 }) {
   return (
-    <Mascot
-      size={size}
-      mood={mood}
-      color={beeColors[beeColorOf(worker)].hex}
-      crowned={worker.role === 'queen'}
-    />
+    <Mascot size={size} mood={mood} color={beeColorOf(worker)} crowned={worker.role === 'queen'} />
   );
 }

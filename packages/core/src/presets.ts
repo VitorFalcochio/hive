@@ -2,6 +2,7 @@ import {
   beeColorSchema,
   soldierRoleSchema,
   type BeeColor,
+  type BeeColorValue,
   type ProviderKind,
   type Soldier,
   type SoldierRole,
@@ -320,6 +321,112 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     systemPrompt:
       'You are a careful code reviewer. Read the relevant code, identify concrete defects with file and line references, and do not modify files.',
   },
+  explorer: {
+    role: 'explorer',
+    label: 'Codebase Explorer',
+    description:
+      'Maps the repository before work starts: structure, technologies, relevant files and integration points. Read-only.',
+    tools: presetReadOnlyTools,
+    skills: ['documentation-and-adrs', 'api-and-interface-design'],
+    systemPrompt: [
+      'You are a codebase explorer. Your job is to understand the repository so others can change it safely. You only read: never create, edit or delete files.',
+      'Map the project structure, frameworks and tools, the files and modules relevant to the task, their dependencies, the conventions the code follows and the points where new work should plug in.',
+      'Back every claim with evidence: relative file paths, and line numbers or short quotes where they matter. Say when something is a guess.',
+      'Finish with a structured report: Summary; Relevant files (path: why it matters); Conventions; Integration points; Risks; Recommendations for whoever implements.',
+    ].join('\n\n'),
+  },
+  debugger: {
+    role: 'debugger',
+    label: 'Debug Detective',
+    description:
+      'Investigates failures before anyone fixes them: reproduces the error, finds the cause and proposes a regression test.',
+    tools: presetTools,
+    skills: ['systematic-debugging', 'test-driven-development', 'verification-before-completion'],
+    systemPrompt: [
+      'You are a debugging specialist. You find out why something fails; fixing it is usually another agent’s task.',
+      'Read the logs and stack traces you are given, reproduce the failure with the smallest command or test you can, and separate the symptom from the cause. Follow the evidence; do not guess.',
+      'Do not change production code. You may add a failing test or a small reproduction script that shows the bug; commands you run go through the usual approvals.',
+      'Finish with a diagnosis: Symptom; How to reproduce (exact command); Root cause (file and line); Why it happens; Suggested fix; Regression test to add.',
+    ].join('\n\n'),
+  },
+  security: {
+    role: 'security',
+    label: 'Security Engineer',
+    description:
+      'Reviews changes for security risks: authentication, secrets, input validation, permissions and vulnerable dependencies.',
+    tools: [...presetReadOnlyTools, 'run_command'],
+    skills: ['security-and-hardening', 'code-review-and-quality'],
+    systemPrompt: [
+      'You are a defensive security engineer. Review the code and changes for risks; do not edit files.',
+      'Check authentication and authorization, secrets or tokens in code, logs and config, input validation and injection, excessive permissions, unsafe file and command handling, and dependencies with known vulnerabilities (use the project’s own audit command when there is one).',
+      'Never run offensive or intrusive tests (scanning, exploitation, brute force) unless the task explicitly says the environment is authorized for it.',
+      'Finish with a risk report: for each finding, Severity (critical/high/medium/low), Location (file and line), Evidence, Impact, Recommended fix and a test that would catch it. Say plainly when you found nothing serious.',
+    ].join('\n\n'),
+  },
+  database: {
+    role: 'database',
+    label: 'Database Engineer',
+    description:
+      'Designs and improves data structures: schemas, migrations, queries, indexes and rollback plans.',
+    tools: presetTools,
+    skills: [
+      'api-and-interface-design',
+      'performance-optimization',
+      'verification-before-completion',
+    ],
+    systemPrompt: [
+      'You are a database engineer. Model schemas, write migrations, review queries and indexes, and keep data consistent.',
+      'Follow the migration tool and conventions the project already uses. Every migration must be safe to run on existing data, backwards compatible where the app may run old and new code together, and come with a way to roll it back.',
+      'Never run a destructive change (dropping tables or columns, deleting or rewriting data) against a real database without the user’s explicit approval in the task; prepare it as a migration and explain the risk instead.',
+      'Finish with: what changed in the schema, why, how to apply and roll back, and the checks you ran.',
+    ].join('\n\n'),
+  },
+  performance: {
+    role: 'performance',
+    label: 'Performance Engineer',
+    description:
+      'Finds and fixes bottlenecks with measurements: CPU, memory, startup time, slow queries and blocking work.',
+    tools: presetTools,
+    skills: ['performance-optimization', 'systematic-debugging', 'verification-before-completion'],
+    systemPrompt: [
+      'You are a performance engineer. You improve speed and resource use based on measurements, never on assumptions.',
+      'Measure first: pick a benchmark, profile or timing the project can run, and record the baseline. Look for blocking operations, slow queries, unnecessary work, memory that keeps growing and slow startup.',
+      'Change one thing at a time and measure again with the same method. Keep a change only if the numbers improve and the tests still pass.',
+      'Finish with a table of before and after for each measurement, the command used, what you changed, and anything you tried that did not help.',
+    ].join('\n\n'),
+  },
+  integration: {
+    role: 'integration',
+    label: 'Integration Engineer',
+    description:
+      'Makes the work of several agents fit together: contracts between modules, conflicts and integration tests.',
+    tools: presetTools,
+    skills: [
+      'verification-before-completion',
+      'code-review-and-quality',
+      'test-driven-development',
+    ],
+    systemPrompt: [
+      'You are an integration engineer. Your worktree already holds the results of the tasks you depend on, merged by Hive. Check that they work together.',
+      'Look for mismatched contracts (types, API routes, payloads, events) between frontend and backend or between modules, duplicated or conflicting changes, and broken imports. Run the project’s build and tests, and integration tests where they exist.',
+      'Fix small integration problems yourself. For anything larger, describe precisely what each side must change. Do not run git merges, rebases or branch operations yourself: Hive manages branches and worktrees.',
+      'Finish with: what was integrated, the problems found and how each was resolved or who should resolve it, and the commands that now pass.',
+    ].join('\n\n'),
+  },
+  requirements: {
+    role: 'requirements',
+    label: 'Requirements Analyst',
+    description:
+      'Turns a request into clear, verifiable requirements and acceptance criteria, and points out what is ambiguous.',
+    tools: presetReadOnlyTools,
+    skills: ['planning-and-task-breakdown', 'writing-plans', 'documentation-and-adrs'],
+    systemPrompt: [
+      'You are a requirements analyst. Turn the request into requirements others can build and verify. You do not write code or edit files.',
+      'Identify functional and non-functional requirements, write user stories and concrete, testable acceptance criteria, and suggest how the work could be split. Read the project where it helps you understand what already exists.',
+      'Never invent an important decision the request leaves open. List it under Open questions, with the options and what each would mean.',
+      'Finish with: Goal; Requirements (functional, non-functional); User stories; Acceptance criteria; Suggested breakdown; Risks; Open questions.',
+    ].join('\n\n'),
+  },
   custom: {
     role: 'custom',
     label: 'Custom',
@@ -329,6 +436,57 @@ export const rolePresets: Record<WorkerRole, RolePreset> = {
     systemPrompt: '',
   },
 };
+
+/**
+ * Groups of roles for the agent catalog. Extensible: a new role names its group in `roleInfo`,
+ * and a new group only needs an entry here.
+ */
+export const roleCategories = [
+  { id: 'coordination', label: 'Coordenação' },
+  { id: 'architecture', label: 'Arquitetura' },
+  { id: 'development', label: 'Desenvolvimento' },
+  { id: 'analysis', label: 'Exploração e análise' },
+  { id: 'quality', label: 'Qualidade e testes' },
+  { id: 'security', label: 'Segurança' },
+  { id: 'infrastructure', label: 'Infraestrutura e performance' },
+  { id: 'integration', label: 'Integração' },
+  { id: 'custom', label: 'Personalizados' },
+] as const;
+export type RoleCategory = (typeof roleCategories)[number]['id'];
+
+/** How each role is shown: a short name in Portuguese and its group. */
+export const roleInfo: Record<WorkerRole, { label: string; category: RoleCategory }> = {
+  queen: { label: 'Coordenação', category: 'coordination' },
+  architect: { label: 'Arquitetura', category: 'architecture' },
+  frontend: { label: 'Frontend', category: 'development' },
+  backend: { label: 'Backend', category: 'development' },
+  explorer: { label: 'Exploração', category: 'analysis' },
+  requirements: { label: 'Requisitos', category: 'analysis' },
+  qa: { label: 'Testes', category: 'quality' },
+  reviewer: { label: 'Revisão', category: 'quality' },
+  debugger: { label: 'Depuração', category: 'quality' },
+  security: { label: 'Segurança', category: 'security' },
+  database: { label: 'Banco de dados', category: 'infrastructure' },
+  performance: { label: 'Performance', category: 'infrastructure' },
+  integration: { label: 'Integração', category: 'integration' },
+  custom: { label: 'Personalizado', category: 'custom' },
+};
+
+/** Roles in catalog order: by group, then as listed in `roleInfo`. */
+export const roleOrder: WorkerRole[] = roleCategories.flatMap((category) =>
+  (Object.keys(roleInfo) as WorkerRole[]).filter((role) => roleInfo[role].category === category.id),
+);
+
+/** The specialists Hive added in 0.3: installed once on existing installs (see the service). */
+export const specialistRoles: WorkerRole[] = [
+  'explorer',
+  'debugger',
+  'security',
+  'database',
+  'performance',
+  'integration',
+  'requirements',
+];
 
 export const beeColors: Record<BeeColor, { label: string; hex: string }> = {
   gold: { label: 'Dourada', hex: '#f5b544' },
@@ -341,36 +499,131 @@ export const beeColors: Record<BeeColor, { label: string; hex: string }> = {
   silver: { label: 'Prata', hex: '#cbd5e1' },
 };
 
-const roleBeeColors: Record<Exclude<WorkerRole, 'custom'>, BeeColor> = {
+/** A colour of the bee palette. */
+export interface BeeSwatch {
+  hex: string;
+  label: string;
+}
+
+/** The colours offered for bees, by family. Any other colour can be typed as HEX. */
+export const beeSwatchFamilies: { label: string; swatches: BeeSwatch[] }[] = [
+  {
+    label: 'Vermelhos e rosas',
+    swatches: [
+      { hex: '#EF4444', label: 'Vermelho coral' },
+      { hex: '#DC2626', label: 'Vermelho vibrante' },
+      { hex: '#EC4899', label: 'Rosa' },
+      { hex: '#F472B6', label: 'Rosa-claro' },
+    ],
+  },
+  {
+    label: 'Laranjas e amarelos',
+    swatches: [
+      { hex: '#F97316', label: 'Laranja' },
+      { hex: '#F59E0B', label: 'Âmbar' },
+      { hex: '#EAB308', label: 'Amarelo' },
+      { hex: '#D4A017', label: 'Dourado' },
+    ],
+  },
+  {
+    label: 'Verdes',
+    swatches: [
+      { hex: '#10B981', label: 'Verde-esmeralda' },
+      { hex: '#22C55E', label: 'Verde' },
+      { hex: '#84CC16', label: 'Verde-lima' },
+      { hex: '#2DD4BF', label: 'Verde-menta' },
+    ],
+  },
+  {
+    label: 'Azuis e cianos',
+    swatches: [
+      { hex: '#06B6D4', label: 'Ciano' },
+      { hex: '#38BDF8', label: 'Azul-celeste' },
+      { hex: '#3B82F6', label: 'Azul' },
+      { hex: '#2563EB', label: 'Azul-profundo' },
+    ],
+  },
+  {
+    label: 'Roxos e violetas',
+    swatches: [
+      { hex: '#8B5CF6', label: 'Violeta' },
+      { hex: '#A855F7', label: 'Roxo' },
+      { hex: '#6366F1', label: 'Índigo' },
+      { hex: '#C084FC', label: 'Lilás' },
+    ],
+  },
+  {
+    label: 'Neutros e especiais',
+    swatches: [
+      { hex: '#FFFFFF', label: 'Branco' },
+      { hex: '#94A3B8', label: 'Cinza' },
+      { hex: '#475569', label: 'Grafite' },
+      { hex: '#14B8A6', label: 'Turquesa' },
+    ],
+  },
+];
+export const beeSwatches: BeeSwatch[] = beeSwatchFamilies.flatMap((family) => family.swatches);
+
+/** The colour each role's bee wears unless the user picks one. */
+const roleBeeColors: Record<Exclude<WorkerRole, 'custom'>, BeeColorValue> = {
   queen: 'gold',
   architect: 'violet',
   frontend: 'cyan',
   backend: 'orange',
   qa: 'lime',
   reviewer: 'fuchsia',
+  explorer: '#38BDF8',
+  debugger: '#EF4444',
+  security: '#EC4899',
+  database: '#10B981',
+  performance: '#F59E0B',
+  integration: '#6366F1',
+  requirements: '#C084FC',
 };
 
+/** `#RRGGBB` of a stored colour: a named colour of earlier versions, or a HEX value. */
+export function beeHex(color: BeeColorValue): string {
+  return color in beeColors ? beeColors[color as BeeColor].hex.toUpperCase() : color.toUpperCase();
+}
+
 /**
- * The colour an agent's bee is drawn in: the one picked for it, else its role's. Custom agents
- * without a pick get a stable colour from their id, never the Queen's gold.
+ * The colour an agent wears when none is picked: its role's. Custom agents get a stable colour
+ * from their id, never the Queen's gold.
  */
-export function beeColorOf(worker: Pick<Worker, 'id' | 'role' | 'beeColor'>): BeeColor {
-  if (worker.beeColor) return worker.beeColor;
-  if (worker.role !== 'custom') return roleBeeColors[worker.role];
+export function defaultBeeColor(worker: Pick<Worker, 'id' | 'role'>): string {
+  if (worker.role !== 'custom') return beeHex(roleBeeColors[worker.role]);
   const choices = beeColorSchema.options.filter((color) => color !== 'gold');
   let hash = 0;
   for (const char of worker.id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return choices[hash % choices.length]!;
+  return beeHex(choices[hash % choices.length]!);
 }
 
-/** The colour for a new custom agent: one no agent wears yet, else the least worn. */
-export function nextBeeColor(workers: Pick<Worker, 'id' | 'role' | 'beeColor'>[]): BeeColor {
-  const worn = new Map<BeeColor, number>();
+/** `#RRGGBB` an agent's bee is drawn in: the one picked for it, else its role's. */
+export function beeColorOf(worker: Pick<Worker, 'id' | 'role' | 'beeColor'>): string {
+  return worker.beeColor ? beeHex(worker.beeColor) : defaultBeeColor(worker);
+}
+
+/** The name of a colour: the palette's or an earlier version's, else "Personalizada". */
+export function beeColorName(hex: string): string {
+  const value = hex.toUpperCase();
+  return (
+    beeSwatches.find((swatch) => swatch.hex === value)?.label ??
+    Object.values(beeColors).find((color) => color.hex.toUpperCase() === value)?.label ??
+    'Personalizada'
+  );
+}
+
+/** The colour for a new custom agent: a palette colour no agent wears yet, else the least worn. */
+export function nextBeeColor(workers: Pick<Worker, 'id' | 'role' | 'beeColor'>[]): string {
+  const worn = new Map<string, number>();
   for (const worker of workers) {
     const color = beeColorOf(worker);
     worn.set(color, (worn.get(color) ?? 0) + 1);
   }
-  const choices = beeColorSchema.options.filter((color) => color !== 'gold');
+  // Gold stays the Queen's; white and graphite read poorly as a body colour on their own.
+  const choices = beeSwatches
+    .map((swatch) => swatch.hex)
+    .filter((hex) => !['#D4A017', '#EAB308', '#FFFFFF', '#475569'].includes(hex));
   return choices.reduce((best, color) =>
     (worn.get(color) ?? 0) < (worn.get(best) ?? 0) ? color : best,
   );
@@ -486,6 +739,14 @@ const roleTiers: Record<WorkerRole, ModelTier> = {
   backend: 'coder',
   qa: 'coder',
   reviewer: 'reviewer',
+  // Reading and judging code, like a reviewer; making changes, like a coder; planning.
+  explorer: 'reviewer',
+  security: 'reviewer',
+  debugger: 'coder',
+  database: 'coder',
+  performance: 'coder',
+  integration: 'coder',
+  requirements: 'planner',
   custom: 'coder',
 };
 

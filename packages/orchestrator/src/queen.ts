@@ -59,6 +59,7 @@ export function buildPlanPrompt(request: PlanRequest): ChatMessage[] {
         "- Use dependsOn only when a task needs another task's output.",
         '- Every task needs 1-5 concrete, verifiable acceptance criteria.',
         '- Assign workerId only from the provided list; match the worker role to the work.',
+        '- Specialists (explorer, debugger, security, database, performance, integration, requirements) get a task only when the mission needs that specialty, never just because they exist: an ambiguous request → a requirements task first; an unfamiliar module → an explorer task the coders depend on; a bug to fix → a debugger diagnosis before the fix; a schema change → database; authentication, secrets or permissions → a security review after the change; several parallel tasks sharing a contract → an integration task that depends on them; a slowness complaint → performance.',
         "- Ground the plan in the project context: name the real folders and files involved, follow its README and agent notes, and use the project's own test, lint and build commands in acceptance criteria.",
         ...(request.teams
           ? [

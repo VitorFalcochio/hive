@@ -6,6 +6,8 @@ import path from 'node:path';
 import {
   ipcContract,
   rolePresets,
+  specialistRoles,
+  canRunTasks,
   defaultLimits,
   defaultSettings,
   recommendedModelCandidates,
@@ -388,6 +390,7 @@ export class DesktopService {
       }
       this.repos.setValue('seeded', '1');
     }
+    this.installSpecialists();
     this.raiseLimits();
     this.detachWorkers();
     // Projects from before the default Nectar get theirs once; new ones get it when opened.
@@ -492,6 +495,46 @@ export class DesktopService {
    * Puts the skills that ship with Hive in the library and on the agents whose role uses them.
    * Each skill only once: one the user deleted, or took off an agent, stays that way.
    */
+  /**
+   * The specialist agents (Codebase Explorer, Debug Detective…), each once: new installs and
+   * existing ones get them, without a provider, for the user to configure. One the user deleted
+   * is not brought back, and a role that already has an agent of the user's gets no second one.
+   */
+  private installSpecialists(): void {
+    let done: string[] = [];
+    try {
+      done = JSON.parse(this.repos.getValue('specialistsInstalled') ?? '[]') as string[];
+    } catch {
+      // A damaged list installs again; a role that already has an agent is skipped below.
+    }
+    const fresh = specialistRoles.filter((role) => !done.includes(role));
+    if (!fresh.length) return;
+    const existing = this.repos.workers.list();
+    for (const role of fresh) {
+      if (existing.some((worker) => worker.role === role && !worker.team)) continue;
+      const preset = rolePresets[role];
+      this.repos.workers.put({
+        id: newId('worker'),
+        name: preset.label,
+        role,
+        beeColor: null,
+        squad: [],
+        description: preset.description,
+        providerId: null,
+        modelId: null,
+        skills: preset.skills,
+        tools: preset.tools,
+        autoApproveCommands: [],
+        mcpServers: [],
+        systemPrompt: preset.systemPrompt,
+        limits: { ...this.repos.getSettings().defaultLimits },
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      });
+    }
+    this.repos.setValue('specialistsInstalled', JSON.stringify([...done, ...fresh]));
+  }
+
   async installBuiltinSkills(): Promise<void> {
     let done: string[] = [];
     try {
@@ -884,7 +927,8 @@ export class DesktopService {
         title: mission.title,
         objective: mission.objective,
         // Agents Hive Teams created belong to their own mission; the Queen plans with the team.
-        workers: this.repos.workers.list().filter((worker) => !worker.team),
+        // Only agents that can run: a task given to one without a model would stop the mission.
+        workers: this.repos.workers.list().filter((worker) => !worker.team && canRunTasks(worker)),
         teams: this.repos.getSettings().teams.enabled,
         projectContext:
           (await describeProject(workspace.path, {

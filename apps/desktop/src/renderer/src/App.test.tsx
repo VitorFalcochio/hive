@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { rolePresets } from '@hive/core';
 import { App } from './App';
 
 // xterm.js draws on a canvas jsdom does not have; these tests only need the session's text.
@@ -153,6 +154,90 @@ it('cria um agente novo a partir de uma função base', async () => {
         name: 'Acessibilidade',
         role: 'reviewer',
         tools: ['list_dir', 'read_file', 'search', 'read_skill_resource', 'view_page'],
+      }),
+    ),
+  );
+});
+
+it('o catálogo agrupa por especialidade, busca, filtra, restaura o padrão e duplica', async () => {
+  const detective = {
+    ...queen,
+    id: 'w2',
+    name: 'Debug Detective',
+    role: 'debugger',
+    description: rolePresets.debugger.description,
+    providerId: 'p1',
+    modelId: 'm1',
+    systemPrompt: 'Instruções minhas',
+    tools: ['read_file'],
+  };
+  const mine = {
+    ...queen,
+    id: 'w3',
+    name: 'Acessibilidade',
+    role: 'custom',
+    description: 'Revisa telas',
+  };
+  const invoke = mount({
+    'provider.list': () => [provider],
+    'worker.list': () => [queen, detective, mine],
+    'worker.save': (input) => ({ ...(input as object), id: 'w9', createdAt: '', updatedAt: '' }),
+  });
+  await waitFor(() => expect(screen.queryByText('Carregando o Hive…')).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: /Gerenciar agentes/ }));
+
+  const quality = screen.getByRole('rowgroup', { name: 'Qualidade e testes' });
+  expect(within(quality).getByText('Debug Detective')).toBeTruthy();
+  expect(within(quality).getByText('Padrão')).toBeTruthy();
+  const custom = screen.getByRole('rowgroup', { name: 'Personalizados' });
+  // The user's own agent: the role says so, with no badge repeating it.
+  expect(within(custom).getAllByText('Personalizado')).toHaveLength(1);
+  expect(within(custom).queryByText('Padrão')).toBeNull();
+
+  const search = screen.getByRole('searchbox', { name: 'Buscar agente' });
+  fireEvent.change(search, { target: { value: 'debug' } });
+  expect(screen.queryByRole('rowgroup', { name: 'Personalizados' })).toBeNull();
+  fireEvent.change(search, { target: { value: 'nada assim' } });
+  expect(screen.getByText(/Nenhum agente com esse nome/)).toBeTruthy();
+  fireEvent.change(search, { target: { value: '' } });
+
+  fireEvent.click(screen.getByRole('combobox', { name: 'Especialidade' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Personalizados' }));
+  expect(screen.queryByRole('rowgroup', { name: 'Qualidade e testes' })).toBeNull();
+  expect(screen.getByRole('rowgroup', { name: 'Personalizados' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('combobox', { name: 'Especialidade' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Todas as especialidades' }));
+
+  // Back to Hive's defaults for the role; the model chosen stays.
+  fireEvent.click(screen.getByRole('button', { name: 'Editar Debug Detective' }));
+  fireEvent.click(screen.getByRole('button', { name: /Restaurar padrão/ }));
+  expect(screen.getByText('Não salvo')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /Salvar/ }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      'worker.save',
+      expect.objectContaining({
+        id: 'w2',
+        systemPrompt: rolePresets.debugger.systemPrompt,
+        tools: rolePresets.debugger.tools,
+        beeColor: null,
+        providerId: 'p1',
+        modelId: 'm1',
+      }),
+    ),
+  );
+
+  // A copy is a new agent with the same setup and a colour of its own.
+  fireEvent.click(screen.getByRole('button', { name: 'Editar Debug Detective' }));
+  fireEvent.click(screen.getByRole('button', { name: /Duplicar/ }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      'worker.save',
+      expect.objectContaining({
+        id: undefined,
+        name: 'Debug Detective (cópia)',
+        role: 'debugger',
+        beeColor: expect.stringMatching(/^#[0-9A-F]{6}$/),
       }),
     ),
   );

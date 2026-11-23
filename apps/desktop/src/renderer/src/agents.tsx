@@ -1,19 +1,31 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronRight, Eye, Plus, SlidersHorizontal, Sparkles, Trash2 } from 'lucide-react';
+import {
+  Check,
+  ChevronRight,
+  Copy,
+  Eye,
+  Plus,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import {
   allTools,
   beeColorOf,
-  beeColors,
-  beeColorSchema,
   canRunTasks,
   compareByPrice,
   isFreeModel,
   nextBeeColor,
+  roleCategories,
+  roleInfo,
+  roleOrder,
   rolePresets,
   soldierPresets,
   squadOf,
-  type BeeColor,
   type RecommendedSetup,
+  type RoleCategory,
   type Soldier,
   type SoldierRole,
   type ToolName,
@@ -23,30 +35,13 @@ import {
 } from '@hive/core';
 import { hasAccess, useHive } from './context';
 import { Dot, Drawer, PageHeader, Select, useTask } from './ui';
-import { AgentBee, Mascot, SoldierBee } from './mascot';
+import { AgentBee, SoldierBee } from './mascot';
+import { BeeColorPicker } from './bee-color-picker';
 import { NumberField } from './settings';
 import { AgentMcpSection } from './mcp';
 import { FailoverSection } from './model-failover';
 
-const roleOrder: WorkerRole[] = [
-  'queen',
-  'architect',
-  'frontend',
-  'backend',
-  'qa',
-  'reviewer',
-  'custom',
-];
-
-const roleLabels: Record<WorkerRole, string> = {
-  queen: 'Coordenação',
-  architect: 'Arquitetura',
-  frontend: 'Frontend',
-  backend: 'Backend',
-  qa: 'Testes',
-  reviewer: 'Revisão',
-  custom: 'Personalizado',
-};
+const roleLabel = (role: WorkerRole) => roleInfo[role].label;
 
 const toolLabels: Record<ToolName, { label: string; detail: string }> = {
   list_dir: { label: 'Listar pastas', detail: 'Vê os arquivos e pastas do projeto.' },
@@ -85,6 +80,25 @@ export function AgentsPage() {
   const usable = providers.filter(hasAccess);
   const sorted = sortWorkers(workers);
   const [selected, setSelected] = useState<Selection>(null);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<RoleCategory | 'all'>('all');
+  const needle = query.trim().toLocaleLowerCase('pt-BR');
+  const visible = sorted.filter(
+    (worker) =>
+      (category === 'all' || roleInfo[worker.role].category === category) &&
+      (!needle ||
+        [worker.name, worker.description, roleLabel(worker.role), rolePresets[worker.role].label]
+          .join(' ')
+          .toLocaleLowerCase('pt-BR')
+          .includes(needle)),
+  );
+  // Grouped by specialty, in catalog order; groups with no agent left out.
+  const groups = roleCategories
+    .map((item) => ({
+      ...item,
+      workers: visible.filter((worker) => roleInfo[worker.role].category === item.id),
+    }))
+    .filter((group) => group.workers.length);
   const current = sorted.find((worker) => worker.id === selected) ?? null;
   const close = () => setSelected(null);
 
@@ -111,6 +125,32 @@ export function AgentsPage() {
           Adicione um provedor com chave na aba Provedores para configurar os agentes.
         </p>
       )}
+      <div className="agent-toolbar">
+        <label className="agent-search">
+          <Search size={14} aria-hidden />
+          <input
+            type="search"
+            value={query}
+            placeholder="Buscar agente"
+            aria-label="Buscar agente"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <Select
+          size="sm"
+          ariaLabel="Especialidade"
+          value={category}
+          onChange={(next) => setCategory(next as RoleCategory | 'all')}
+          options={[
+            { value: 'all', label: 'Todas as especialidades' },
+            ...roleCategories
+              .filter((item) =>
+                workers.some((worker) => roleInfo[worker.role].category === item.id),
+              )
+              .map((item) => ({ value: item.id, label: item.label })),
+          ]}
+        />
+      </div>
       <div className="agent-table" role="table" aria-label="Agentes">
         <div className="agent-tr agent-th" role="row">
           <span role="columnheader">Função</span>
@@ -121,46 +161,74 @@ export function AgentsPage() {
             Editar
           </span>
         </div>
-        {sorted.map((worker) => (
-          <div
-            key={worker.id}
-            role="row"
-            className={`agent-tr${selected === worker.id ? ' active' : ''}`}
-            onClick={(event) => {
-              // The provider menu and buttons in the row do their own thing.
-              if ((event.target as Element).closest('button, .select-menu')) return;
-              setSelected(worker.id);
-            }}
-          >
-            <span role="cell" className="agent-role-cell">
-              <Dot tone={canRunTasks(worker) ? 'ok' : 'idle'} />
-              {roleLabels[worker.role]}
-            </span>
-            <span role="cell" className="agent-name-cell">
-              <AgentBee worker={worker} size={22} />
-              <span className="agent-name-text">
-                <span>{worker.name}</span>
-                <small>{worker.description || 'Sem descrição'}</small>
-              </span>
-            </span>
-            <AgentModel worker={worker} />
-            <span role="cell">
-              <button
-                className="icon-button"
-                title="Editar agente"
-                aria-label={`Editar ${worker.name}`}
-                onClick={() => setSelected(worker.id)}
+        {!groups.length && (
+          <p className="hint agent-empty">Nenhum agente com esse nome nesta especialidade.</p>
+        )}
+        {groups.map((group) => (
+          <div key={group.id} role="rowgroup" aria-label={group.label}>
+            <div className="agent-group" role="row">
+              <span role="columnheader">{group.label}</span>
+            </div>
+            {group.workers.map((worker) => (
+              <div
+                key={worker.id}
+                role="row"
+                className={`agent-tr${selected === worker.id ? ' active' : ''}`}
+                onClick={(event) => {
+                  // The provider menu and buttons in the row do their own thing.
+                  if ((event.target as Element).closest('button, .select-menu')) return;
+                  setSelected(worker.id);
+                }}
               >
-                <ChevronRight size={15} />
-              </button>
-            </span>
-            <SquadLine worker={worker} />
+                <span role="cell" className="agent-role-cell">
+                  <Dot tone={canRunTasks(worker) ? 'ok' : 'idle'} />
+                  {roleLabel(worker.role)}
+                </span>
+                <span role="cell" className="agent-name-cell">
+                  <AgentBee worker={worker} size={22} />
+                  <span className="agent-name-text">
+                    <span>
+                      {worker.name} <OriginBadge worker={worker} />
+                    </span>
+                    <small>{worker.description || 'Sem descrição'}</small>
+                  </span>
+                </span>
+                <AgentModel worker={worker} />
+                <span role="cell">
+                  <button
+                    className="icon-button"
+                    title="Editar agente"
+                    aria-label={`Editar ${worker.name}`}
+                    onClick={() => setSelected(worker.id)}
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </span>
+                <SquadLine worker={worker} />
+              </div>
+            ))}
           </div>
         ))}
       </div>
       {selected === 'new' && <NewAgent onCreated={setSelected} onClose={close} />}
-      {current && <AgentDetail key={current.id} worker={current} onClose={close} />}
+      {current && (
+        <AgentDetail key={current.id} worker={current} onClose={close} onOpen={setSelected} />
+      )}
     </>
+  );
+}
+
+/** Whether the agent came with Hive or Hive Teams made it for a mission. */
+function OriginBadge({ worker }: { worker: Worker }) {
+  // The user's own agents need no badge: their role already reads "Personalizado".
+  if (!worker.team && worker.role === 'custom') return null;
+  const [label, title] = worker.team
+    ? ['Equipe', 'Criado pelo Hive Teams para uma missão']
+    : ['Padrão', 'Vem com o Hive; pode ser ajustado e restaurado'];
+  return (
+    <span className="agent-origin" title={title}>
+      {label}
+    </span>
   );
 }
 
@@ -233,13 +301,25 @@ function NewAgent({
   // Picking a base role fills in what that role usually needs; the user can still change it.
   function pickRole(role: string) {
     const preset = rolePresets[role as WorkerRole];
+    const previous = rolePresets[draft!.role];
     const available = new Set(
       skills.filter((skill) => skill.source === 'local').map((s) => s.name),
     );
+    // Texts still empty, or still the previous role's, take the new role's; the user's stay.
+    const untouched = (text: string, before: string) => !text.trim() || text === before;
     patch({
       role: preset.role,
       tools: [...preset.tools],
       skills: preset.skills.filter((name) => available.has(name)),
+      ...(untouched(draft!.description, previous.description)
+        ? { description: preset.role === 'custom' ? '' : preset.description }
+        : {}),
+      ...(untouched(draft!.systemPrompt, previous.systemPrompt)
+        ? { systemPrompt: preset.systemPrompt }
+        : {}),
+      ...(untouched(draft!.name, previous.label) && preset.role !== 'custom'
+        ? { name: preset.label }
+        : {}),
     });
   }
 
@@ -282,10 +362,10 @@ function NewAgent({
             onChange={pickRole}
             options={roleOrder
               .filter((role) => role !== 'queen')
-              .map((role) => ({ value: role, label: roleLabels[role] }))}
+              .map((role) => ({ value: role, label: roleLabel(role) }))}
           />
         </label>
-        <BeePicker
+        <BeeColorPicker
           value={draft.beeColor}
           fallback={draft.role === 'custom' ? suggested : beeColorOf({ ...draft, id: '' })}
           onChange={(beeColor) => patch({ beeColor })}
@@ -307,8 +387,17 @@ function NewAgent({
   );
 }
 
-function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void }) {
-  const { refresh, notify } = useHive();
+function AgentDetail({
+  worker,
+  onClose,
+  onOpen,
+}: {
+  worker: Worker;
+  onClose: () => void;
+  /** Opens another agent in the drawer: the copy just made. */
+  onOpen: (id: string) => void;
+}) {
+  const { workers, skills, refresh, notify } = useHive();
   const [draft, setDraft] = useState(worker);
   const task = useTask();
   // Model changes save on their own; keep them from showing up as unsaved edits.
@@ -334,10 +423,42 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
     JSON.stringify(draft.fallbacks ?? []) !== JSON.stringify(worker.fallbacks ?? []) ||
     draft.autoApproveCommands.join('\n') !== worker.autoApproveCommands.join('\n');
   const patch = (next: Partial<Worker>) => setDraft((value) => ({ ...value, ...next }));
+  const preset = rolePresets[worker.role];
+
+  // The profile, tools and skills Hive gives this role; the model, limits and squad are kept.
+  // Like any edit, it is saved only with Salvar.
+  function restore() {
+    const available = new Set(
+      skills.filter((skill) => skill.source === 'local').map((s) => s.name),
+    );
+    patch({
+      name: preset.label,
+      description: preset.description,
+      systemPrompt: preset.systemPrompt,
+      tools: [...preset.tools],
+      skills: preset.skills.filter((name) => available.has(name)),
+      beeColor: null,
+    });
+  }
+
+  // A new agent of the user's with the same setup (as saved), a name and colour of its own.
+  function duplicate() {
+    void task.run(async () => {
+      const copy = await window.hive.invoke('worker.save', {
+        ...worker,
+        id: undefined,
+        name: `${worker.name} (cópia)`.slice(0, 60),
+        beeColor: nextBeeColor(workers),
+      });
+      await refresh();
+      notify(`"${copy.name}" criado.`);
+      onOpen(copy.id);
+    });
+  }
 
   return (
     <Drawer
-      eyebrow={roleLabels[worker.role]}
+      eyebrow={roleLabel(worker.role)}
       title={worker.name}
       onClose={onClose}
       onSubmit={() =>
@@ -371,6 +492,28 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
               <Trash2 size={14} /> Remover
             </button>
           )}
+          {worker.role !== 'queen' && (
+            <button
+              type="button"
+              className="ghost"
+              disabled={task.running}
+              title="Cria outro agente com esta configuração"
+              onClick={duplicate}
+            >
+              <Copy size={14} /> Duplicar
+            </button>
+          )}
+          {worker.role !== 'custom' && (
+            <button
+              type="button"
+              className="ghost"
+              disabled={task.running}
+              title={`Volta perfil, instruções, ferramentas, skills e cor ao padrão de ${preset.label}. O modelo e os limites ficam.`}
+              onClick={restore}
+            >
+              <RotateCcw size={14} /> Restaurar padrão
+            </button>
+          )}
           <span className="drawer-spacer" />
           {dirty && <span className="agent-unsaved">Não salvo</span>}
           <button type="button" className="secondary" onClick={onClose}>
@@ -384,7 +527,7 @@ function AgentDetail({ worker, onClose }: { worker: Worker; onClose: () => void 
     >
       <section className="agent-section">
         <h3>Perfil</h3>
-        <BeePicker
+        <BeeColorPicker
           value={draft.beeColor}
           fallback={beeColorOf({ ...draft, beeColor: null })}
           onChange={(beeColor) => patch({ beeColor })}
@@ -616,50 +759,6 @@ function useSees(worker: Worker): boolean {
     };
   }, [providerId, modelId]);
   return sees;
-}
-
-/**
- * The agent's bee and the colours it can wear. `fallback` is the colour it wears with no pick
- * (its role's), which "Cor da função" goes back to.
- */
-function BeePicker({
-  value,
-  fallback,
-  onChange,
-}: {
-  value: BeeColor | null;
-  fallback: BeeColor;
-  onChange: (color: BeeColor | null) => void;
-}) {
-  const current = value ?? fallback;
-  return (
-    <div className="bee-picker">
-      <span className="bee-picker-preview">
-        <Mascot size={44} color={beeColors[current].hex} />
-      </span>
-      <div className="bee-picker-body">
-        <span className="bee-picker-label">
-          Cor da abelha · {beeColors[current].label}
-          {value === null && <span className="optional"> (da função)</span>}
-        </span>
-        <div className="bee-swatches" role="radiogroup" aria-label="Cor da abelha">
-          {beeColorSchema.options.map((color) => (
-            <button
-              key={color}
-              type="button"
-              role="radio"
-              aria-checked={color === current}
-              aria-label={beeColors[color].label}
-              title={beeColors[color].label}
-              className={color === current ? 'bee-swatch selected' : 'bee-swatch'}
-              style={{ background: beeColors[color].hex }}
-              onClick={() => onChange(color === fallback ? null : color)}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 type Profile = Pick<Worker, 'name' | 'description' | 'systemPrompt'>;

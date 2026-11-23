@@ -1,7 +1,8 @@
 import type { AgentOutcome, RuntimeEvent } from '@hive/agents';
 import {
   beeColorOf,
-  beeColors,
+  roleInfo,
+  roleOrder,
   soldierPresets,
   soldierRoleSchema,
   type Worker,
@@ -54,16 +55,9 @@ const red = rgb('#f87185');
 const green = rgb('#4cd6a0');
 const yellow = rgb('#f5b544');
 
-const roleOrder: WorkerRole[] = ['queen', 'architect', 'frontend', 'backend', 'qa', 'reviewer'];
-const roleLabels: Record<WorkerRole, string> = {
-  queen: 'Coordenação',
-  architect: 'Arquitetura',
-  frontend: 'Frontend',
-  backend: 'Backend',
-  qa: 'Testes',
-  reviewer: 'Revisão',
-  custom: 'Personalizado',
-};
+const roleLabels = Object.fromEntries(
+  Object.entries(roleInfo).map(([role, info]) => [role, info.label]),
+) as Record<WorkerRole, string>;
 
 /** What the agent is doing, for the spinner line. */
 const stateLabels: Record<string, string> = {
@@ -342,7 +336,7 @@ export class HiveTerminalApp {
     const roleWidth = 14;
     const modelWidth = Math.max(8, cols - 6 - nameWidth - roleWidth - 2);
     const rows = this.choices.map((worker, index) => {
-      const color = rgb(beeColors[beeColorOf(worker)].hex);
+      const color = rgb(beeColorOf(worker));
       const selected = index === this.pickIndex;
       const marker = selected ? `${color}❯${reset}` : ' ';
       const name = fit(worker.name, nameWidth);
@@ -404,14 +398,14 @@ export class HiveTerminalApp {
   /* ---------------------------------------------------------------- The conversation */
 
   private color() {
-    return this.worker ? rgb(beeColors[beeColorOf(this.worker)].hex) : yellow;
+    return this.worker ? rgb(beeColorOf(this.worker)) : yellow;
   }
 
   /** The agent's bee with its name, role and description beside it. */
   private portrait(worker: Worker, wingsUp = false): string[] {
     const { cols } = this.host.size();
     const room = Math.max(10, cols - BEE_COLUMNS - 6);
-    const color = rgb(beeColors[beeColorOf(worker)].hex);
+    const color = rgb(beeColorOf(worker));
     return besideBee(this.bee(worker, wingsUp), [
       '',
       `${color}${bold}${fit(worker.name, room).trimEnd()}${reset}`,
@@ -422,7 +416,7 @@ export class HiveTerminalApp {
 
   private bee(worker: Worker, wingsUp = false, small = false): string[] {
     return beeLines({
-      body: beeColors[beeColorOf(worker)].hex,
+      body: beeColorOf(worker),
       crowned: worker.role === 'queen',
       wingsUp,
       small,

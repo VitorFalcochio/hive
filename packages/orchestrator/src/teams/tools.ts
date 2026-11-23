@@ -58,7 +58,12 @@ function leaderTools(teams: HiveTeams, task: Task): AgentExtraTool[] {
         properties: {
           key: { type: 'string', description: 'Your short name for this request, e.g. "codex".' },
           name: { type: 'string', description: 'Display name, e.g. "Codex".' },
-          role: { type: 'string', enum: roles },
+          role: {
+            type: 'string',
+            enum: roles,
+            description:
+              'Specialists only when the work calls for one: explorer maps unfamiliar code (read-only); debugger finds the cause of a failure before anyone fixes it; security reviews auth, secrets and permissions; database changes schemas and migrations; performance measures and removes bottlenecks; integration checks that several members’ work fits together; requirements turns a vague goal into acceptance criteria.',
+          },
           description: { type: 'string' },
           family: {
             type: 'string',
@@ -294,6 +299,7 @@ export function teamToolsFor(
             : 'Faça a sua parte primeiro (por exemplo, o contrato da API num arquivo do projeto); depois monte a equipe e delegue.',
           '- `spawn_agent` cria um membro num provedor já configurado (ex.: family "codex" ou "nemotron"). Ele nunca recebe mais que você.',
           '- `delegate_task` dá trabalho a um membro; `request_review` pede que outro membro revise.',
+          '- Especialistas só quando o trabalho pedir: debugger quando um teste falha sem causa clara, database para mudar schema, security para autenticação ou segredos, integration para juntar o trabalho de vários membros, explorer para entender um módulo desconhecido. Não crie um de cada.',
           '- Você não espera ativo: chame `finish` depois de delegar. Os membros começam quando sua sessão termina, e você é retomado com os resultados.',
           '- Ao final, chame `report_to_queen` com o resumo e depois `finish`.',
           `- Limites: até ${settings.maxTeamSize} membros, ${settings.maxDelegationsPerLead} delegações e ${settings.maxLeaderResumes} retomadas.`,

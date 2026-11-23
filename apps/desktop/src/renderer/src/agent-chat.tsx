@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  roleOrder,
   rolePresets,
   type AgentChat,
   type AgentChatApproval,
@@ -46,8 +47,6 @@ const PAGE = 40;
 const LONG_ANSWER = 24_000;
 /** Steps shown before "show earlier steps". */
 const VISIBLE_STEPS = 8;
-
-const roleOrder: WorkerRole[] = ['queen', 'architect', 'frontend', 'backend', 'qa', 'reviewer'];
 
 /** The team as the sidebar lists it: the user's agents (not a mission's Hive Teams members). */
 export function chatAgents(workers: Worker[]): Worker[] {

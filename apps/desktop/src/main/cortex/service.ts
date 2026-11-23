@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  workerRoleSchema,
   cortexDraftSchema,
   cortexMemoryKindSchema,
   defaultCortexConfig,
@@ -848,7 +849,7 @@ export class CortexService {
                   type: 'array',
                   items: {
                     type: 'string',
-                    enum: ['architect', 'frontend', 'backend', 'qa', 'reviewer', 'custom'],
+                    enum: workerRoleSchema.options.filter((role) => role !== 'queen'),
                   },
                   description: 'Roles that depend on this.',
                 },

@@ -45,3 +45,29 @@ it('só fala de líderes de equipe quando o Hive Teams está ligado', async () =
   expect(validatePlan(plan(true), new Set()).plan?.tasks[0]?.lead).toBe(true);
   expect(validatePlan(plan(), new Set()).plan?.tasks[0]?.lead).toBeUndefined();
 });
+
+it('a Queen chama especialistas só quando a missão pede', async () => {
+  const { buildPlanPrompt } = await import('./queen');
+  const prompt = String(
+    buildPlanPrompt({
+      objective: 'Corrigir o login',
+      title: 'Login',
+      workers: [],
+      projectContext: '',
+      chat: {} as never,
+      model: 'm',
+      queen: { systemPrompt: 'Você é a Queen.' } as never,
+    })[0]!.content,
+  );
+  expect(prompt).toContain('never just because they exist');
+  for (const role of [
+    'explorer',
+    'debugger',
+    'security',
+    'database',
+    'performance',
+    'integration',
+    'requirements',
+  ])
+    expect(prompt).toContain(role);
+});

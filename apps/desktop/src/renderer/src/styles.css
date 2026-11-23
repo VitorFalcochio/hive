@@ -912,6 +912,60 @@ select:disabled {
 .agent-tr.active {
   background: var(--hover);
 }
+/* Search and specialty filter above the table. */
+.agent-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.agent-search {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--subtle-foreground);
+}
+.agent-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 6px 0;
+}
+.agent-search input:focus {
+  outline: none;
+}
+.agent-search:focus-within {
+  border-color: var(--foreground);
+}
+/* A specialty's title row; the agents of that specialty follow. */
+.agent-group {
+  padding: 14px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  font: 500 10.5px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+}
+.agent-empty {
+  padding: 14px 10px;
+}
+.agent-origin {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--subtle-foreground);
+  vertical-align: 1px;
+}
 .agent-th {
   min-height: 34px;
   padding-block: 0;
@@ -1005,6 +1059,59 @@ select:disabled {
   box-shadow:
     0 0 0 2px var(--background),
     0 0 0 3.5px var(--foreground);
+}
+.bee-hex {
+  margin-left: 4px;
+  font: 11px var(--font-mono);
+  color: var(--muted-foreground);
+}
+/* The palette: one row of four per family, wrapping into columns where there is room. */
+.bee-families {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px 14px;
+}
+.bee-recent {
+  align-items: center;
+}
+.bee-recent-label {
+  font-size: 11.5px;
+  color: var(--subtle-foreground);
+}
+.bee-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.bee-picker-actions .ghost {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.bee-custom {
+  display: grid;
+  gap: 8px;
+  max-width: 280px;
+}
+.bee-hex-field input {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+.bee-hex-field input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.bee-field-error {
+  font-size: 11.5px;
+  color: var(--danger);
+}
+.bee-slider {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+.bee-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--foreground);
 }
 .agent-name-cell small {
   font-size: 12px;

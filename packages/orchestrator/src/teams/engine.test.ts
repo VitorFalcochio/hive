@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  rolePresets,
   defaultLimits,
   type ModelInfo,
   type ProviderConfig,
@@ -216,6 +217,24 @@ describe('Hive Teams: criação de agentes', () => {
       ['spawn', 'Agente criado: Codex'],
       ['spawn', 'Agente criado: Nemotron'],
     ]);
+  });
+
+  it('o líder convoca um especialista, que nasce do preset da função dele', () => {
+    const { repos, teams } = setup();
+    const request = teams.spawnAgent('task_lead', {
+      key: 'detetive',
+      name: 'Detetive',
+      role: 'debugger',
+      model: { family: 'codex' },
+    });
+    expect(request.status).toBe('accepted');
+    const agent = repos.workers.require(request.result.agentId!, 'Agente');
+    expect(agent.role).toBe('debugger');
+    expect(agent.systemPrompt).toContain('debugging specialist');
+    expect(agent.skills).toEqual(rolePresets.debugger.skills);
+    // Never more tools than the leader has.
+    const leader = repos.workers.require('w_claude', 'Agente');
+    for (const tool of agent.tools) expect(leader.tools).toContain(tool);
   });
 
   it('pedir de novo com a mesma chave devolve o mesmo agente, sem criar outro', () => {

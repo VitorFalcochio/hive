@@ -94,6 +94,14 @@ export const workerRoleSchema = z.enum([
   'backend',
   'qa',
   'reviewer',
+  /** Specialists, called on when a mission needs them (see the Queen's and Teams' guidance). */
+  'explorer',
+  'debugger',
+  'security',
+  'database',
+  'performance',
+  'integration',
+  'requirements',
   'custom',
 ]);
 export type WorkerRole = z.infer<typeof workerRoleSchema>;
@@ -175,6 +183,16 @@ export const beeColorSchema = z.enum([
 ]);
 export type BeeColor = z.infer<typeof beeColorSchema>;
 
+/** A colour as `#RRGGBB`. */
+export const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * An agent's bee colour: one of the named colours of earlier versions (kept as they were), or
+ * any colour as `#RRGGBB`.
+ */
+export const beeColorValueSchema = z.union([beeColorSchema, z.string().regex(HEX_COLOR)]);
+export type BeeColorValue = z.infer<typeof beeColorValueSchema>;
+
 /** The soldier bees every agent but the Queen leads as captain, one at work at a time. */
 export const soldierRoleSchema = z.enum(['scout', 'builder', 'tester', 'reviewer', 'researcher']);
 export type SoldierRole = z.infer<typeof soldierRoleSchema>;
@@ -199,7 +217,7 @@ export const workerSchema = z.object({
   name: z.string().min(1).max(60),
   role: workerRoleSchema,
   /** Null follows the role's colour; agents saved before colours existed read as null. */
-  beeColor: beeColorSchema.nullable().default(null),
+  beeColor: beeColorValueSchema.nullable().default(null),
   /** Only soldiers changed from the defaults are stored; read the full squad with `squadOf`. */
   squad: z.array(soldierSchema).default([]),
   description: z.string().max(500),

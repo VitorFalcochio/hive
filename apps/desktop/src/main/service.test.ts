@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HiveDatabase } from '@hive/persistence';
+import { HiveDatabase, Repositories } from '@hive/persistence';
+import { rolePresets, specialistRoles } from '@hive/core';
 import type {
   AutopilotStatus,
   HivePush,
@@ -60,7 +61,8 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
     const file = path.join(folder, 'test.sqlite');
     const first = setup(file);
     const workers = (await first.service.invoke('worker.list', undefined)) as Worker[];
-    expect(workers).toHaveLength(6);
+    // The six agents of the first version and the seven specialists.
+    expect(workers).toHaveLength(13);
     const worker = workers[0]!;
     await first.service.invoke('worker.save', { ...worker, name: 'Minha equipe' });
     first.service.dispose();
@@ -69,8 +71,56 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
     databases.splice(databases.indexOf(first.db), 1);
     const second = setup(file);
     const reopened = (await second.service.invoke('worker.list', undefined)) as Worker[];
-    expect(reopened).toHaveLength(6);
+    expect(reopened).toHaveLength(13);
     expect(reopened.find((item) => item.id === worker.id)?.name).toBe('Minha equipe');
+  });
+
+  it('uma instalação antiga recebe os especialistas uma vez; apagado não volta, e nada duplica', async () => {
+    const folder = await mkdtemp(path.join(os.tmpdir(), 'hive-service-'));
+    const file = path.join(folder, 'test.sqlite');
+    const reopen = async (prepare?: (repos: Repositories) => void) => {
+      const { service, db } = setup(file);
+      const workers = (await service.invoke('worker.list', undefined)) as Worker[];
+      prepare?.(new Repositories(db));
+      service.dispose();
+      services.splice(services.indexOf(service), 1);
+      db.close();
+      databases.splice(databases.indexOf(db), 1);
+      return workers;
+    };
+    // As an install from before the specialists: six agents, one renamed and given a model.
+    await reopen((repos) => {
+      for (const worker of repos.workers.list())
+        if (specialistRoles.includes(worker.role)) repos.workers.delete(worker.id);
+      const backend = repos.workers.list().find((worker) => worker.role === 'backend')!;
+      repos.workers.put({ ...backend, name: 'Meu backend', providerId: null, modelId: 'x' });
+      // The user already made a security agent of their own.
+      repos.workers.put({ ...backend, id: 'w_sec', name: 'Segurança da casa', role: 'security' });
+      repos.setValue('specialistsInstalled', '');
+    });
+    const upgraded = await reopen((repos) => {
+      repos.workers.delete(repos.workers.list().find((worker) => worker.role === 'debugger')!.id);
+    });
+    // Six of the seven came: the user's own security agent stands for the seventh.
+    expect(upgraded.filter((worker) => specialistRoles.includes(worker.role))).toHaveLength(7);
+    expect(upgraded.filter((worker) => worker.role === 'security')).toHaveLength(1);
+    const backend = upgraded.find((worker) => worker.role === 'backend')!;
+    expect(backend.name).toBe('Meu backend');
+    expect(backend.modelId).toBe('x');
+    const explorer = upgraded.find((worker) => worker.role === 'explorer')!;
+    expect(explorer).toEqual(
+      expect.objectContaining({
+        name: 'Codebase Explorer',
+        providerId: null,
+        modelId: null,
+        tools: rolePresets.explorer.tools,
+        skills: rolePresets.explorer.skills,
+      }),
+    );
+    // The Debug Detective the user deleted does not come back.
+    const after = await reopen();
+    expect(after.some((worker) => worker.role === 'debugger')).toBe(false);
+    expect(after).toHaveLength(upgraded.length - 1);
   });
 
   it('cria missão de um repositório real, consulta API simulada e persiste o plano', async () => {
