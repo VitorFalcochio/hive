@@ -59,11 +59,15 @@ export function BeeColorPicker({
   const invalid = normalizeHex(typed) === null;
   const hsl = hexToHsl(current);
 
-  const pick = (hex: string) => {
+  /** `keep` adds the colour to the recent ones; a slider being dragged only previews it. */
+  const pick = (hex: string, keep = true) => {
     const color = normalizeHex(hex);
     if (!color) return;
-    if (color !== fallback.toUpperCase()) setRecent(remember(color));
+    if (keep) keepRecent(color);
     onChange(color === fallback.toUpperCase() ? null : color);
+  };
+  const keepRecent = (color: string) => {
+    if (color !== fallback.toUpperCase()) setRecent(remember(color));
   };
 
   const swatch = (hex: string, label: string) => (
@@ -162,8 +166,11 @@ export function BeeColorPicker({
                   max={max}
                   value={hsl[key]}
                   onChange={(event) =>
-                    pick(hslToHex({ ...hsl, [key]: Number(event.target.value) }))
+                    pick(hslToHex({ ...hsl, [key]: Number(event.target.value) }), false)
                   }
+                  // Let go (mouse, touch or keys): the colour reached counts as one recent.
+                  onPointerUp={() => keepRecent(current)}
+                  onKeyUp={() => keepRecent(current)}
                 />
               </label>
             ))}

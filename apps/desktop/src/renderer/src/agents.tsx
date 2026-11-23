@@ -136,20 +136,22 @@ export function AgentsPage() {
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <Select
-          size="sm"
-          ariaLabel="Especialidade"
-          value={category}
-          onChange={(next) => setCategory(next as RoleCategory | 'all')}
-          options={[
-            { value: 'all', label: 'Todas as especialidades' },
-            ...roleCategories
-              .filter((item) =>
-                workers.some((worker) => roleInfo[worker.role].category === item.id),
-              )
-              .map((item) => ({ value: item.id, label: item.label })),
-          ]}
-        />
+        <div className="agent-filter">
+          <Select
+            size="sm"
+            ariaLabel="Especialidade"
+            value={category}
+            onChange={(next) => setCategory(next as RoleCategory | 'all')}
+            options={[
+              { value: 'all', label: 'Todas as especialidades' },
+              ...roleCategories
+                .filter((item) =>
+                  workers.some((worker) => roleInfo[worker.role].category === item.id),
+                )
+                .map((item) => ({ value: item.id, label: item.label })),
+            ]}
+          />
+        </div>
       </div>
       <div className="agent-table" role="table" aria-label="Agentes">
         <div className="agent-tr agent-th" role="row">
@@ -492,28 +494,6 @@ function AgentDetail({
               <Trash2 size={14} /> Remover
             </button>
           )}
-          {worker.role !== 'queen' && (
-            <button
-              type="button"
-              className="ghost"
-              disabled={task.running}
-              title="Cria outro agente com esta configuração"
-              onClick={duplicate}
-            >
-              <Copy size={14} /> Duplicar
-            </button>
-          )}
-          {worker.role !== 'custom' && (
-            <button
-              type="button"
-              className="ghost"
-              disabled={task.running}
-              title={`Volta perfil, instruções, ferramentas, skills e cor ao padrão de ${preset.label}. O modelo e os limites ficam.`}
-              onClick={restore}
-            >
-              <RotateCcw size={14} /> Restaurar padrão
-            </button>
-          )}
           <span className="drawer-spacer" />
           {dirty && <span className="agent-unsaved">Não salvo</span>}
           <button type="button" className="secondary" onClick={onClose}>
@@ -526,7 +506,33 @@ function AgentDetail({
       }
     >
       <section className="agent-section">
-        <h3>Perfil</h3>
+        <div className="agent-section-head">
+          <h3>Perfil</h3>
+          <span className="agent-profile-actions">
+            {worker.role !== 'queen' && (
+              <button
+                type="button"
+                className="ghost"
+                disabled={task.running}
+                title="Cria outro agente com esta configuração"
+                onClick={duplicate}
+              >
+                <Copy size={14} /> Duplicar
+              </button>
+            )}
+            {worker.role !== 'custom' && (
+              <button
+                type="button"
+                className="ghost"
+                disabled={task.running}
+                title={`Volta perfil, instruções, ferramentas, skills e cor ao padrão de ${preset.label}. O modelo e os limites ficam.`}
+                onClick={restore}
+              >
+                <RotateCcw size={14} /> Restaurar padrão
+              </button>
+            )}
+          </span>
+        </div>
         <BeeColorPicker
           value={draft.beeColor}
           fallback={beeColorOf({ ...draft, beeColor: null })}

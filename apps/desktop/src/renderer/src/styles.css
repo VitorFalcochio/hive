@@ -922,8 +922,11 @@ select:disabled {
 }
 .agent-search {
   display: flex;
+  flex-direction: row;
   flex: 1 1 220px;
   align-items: center;
+  height: 34px;
+  margin: 0;
   gap: 6px;
   max-width: 320px;
   padding: 0 10px;
@@ -931,12 +934,18 @@ select:disabled {
   border-radius: 8px;
   color: var(--subtle-foreground);
 }
-.agent-search input {
+.agent-search input,
+.agent-search input:hover,
+.agent-search input:focus {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   border: 0;
   background: transparent;
-  padding: 6px 0;
+  padding: 0;
+}
+.agent-filter {
+  flex: 0 0 240px;
 }
 .agent-search input:focus {
   outline: none;
@@ -1018,7 +1027,7 @@ select:disabled {
 /* The agent's bee and its colour swatches, at the top of the profile. */
 .bee-picker {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
@@ -1090,8 +1099,46 @@ select:disabled {
 }
 .bee-custom {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   max-width: 280px;
+}
+.bee-custom label {
+  gap: 3px;
+  margin: 0;
+  font-size: 12px;
+}
+.bee-custom input[type='range'] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.bee-hex-field input {
+  min-height: 30px;
+  padding: 4px 9px;
+}
+/* The section title with the agent's actions (duplicate, restore) on its right. */
+.agent-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.agent-section-head {
+  margin-bottom: 14px;
+}
+.agent-section .agent-section-head h3 {
+  margin: 0;
+}
+.agent-profile-actions {
+  display: flex;
+  gap: 2px;
+}
+.agent-profile-actions .ghost {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 .bee-hex-field input {
   font-family: var(--font-mono);

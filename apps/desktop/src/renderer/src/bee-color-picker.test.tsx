@@ -89,6 +89,16 @@ describe('seletor de cor da abelha', () => {
     ).toHaveLength(2);
   });
 
+  it('arrastar um controle não enche as recentes: só a cor em que ele parou entra', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: /Personalizar/ }));
+    const hue = screen.getByRole('slider', { name: /Matiz/ });
+    for (const value of ['40', '80', '120', '160']) fireEvent.change(hue, { target: { value } });
+    expect(recentBeeColors()).toEqual([]);
+    fireEvent.pointerUp(hue);
+    expect(recentBeeColors()).toHaveLength(1);
+  });
+
   it('sem armazenamento disponível o seletor continua funcionando', () => {
     const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('bloqueado');
