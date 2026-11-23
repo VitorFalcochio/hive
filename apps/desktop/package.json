@@ -1,7 +1,7 @@
 {
   "name": "@hive/desktop",
   "productName": "Hive",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "Hive desktop application (Electron + React).",
   "author": "Hive contributors",
