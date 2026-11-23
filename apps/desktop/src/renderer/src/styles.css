@@ -217,9 +217,16 @@ button.ghost:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 10px 8px 8px;
+  padding: 10px 8px 0;
   border-right: 1px solid var(--border);
   background: var(--sidebar);
+  /* One scroll for the whole sidebar, with no visible bar: the wheel still works over it. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 nav {
   display: grid;
@@ -255,9 +262,7 @@ nav {
   color: var(--muted-foreground);
 }
 .tree {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 1 0 auto;
   display: grid;
   align-content: start;
   gap: 2px;
@@ -334,8 +339,12 @@ nav {
   min-width: 0;
 }
 .sidebar-bottom {
-  padding-top: 8px;
+  /* Stays at the foot while the rest of the sidebar scrolls under it. */
+  position: sticky;
+  bottom: 0;
+  padding: 8px 0;
   border-top: 1px solid var(--border);
+  background: var(--sidebar);
 }
 
 /* Sidebar toggles: the menu header collapses the menu to one row of icons, and the title bar
@@ -395,7 +404,7 @@ nav.compact .nav-label,
 }
 .sidebar-railed .sidebar {
   align-items: center;
-  padding: 10px 6px 8px;
+  padding: 10px 6px 0;
 }
 .sidebar-railed nav {
   grid-template-columns: none;
