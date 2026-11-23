@@ -1,3 +1,5 @@
+import { readdir, stat } from 'node:fs/promises';
+import path from 'node:path';
 import {
   canRunTasks,
   activeStatuses,
@@ -120,6 +122,11 @@ const EDITABLE: ReadonlySet<RunStatus> = new Set([
 const NOT_STARTED: ReadonlySet<Task['status']> = new Set(['pending', 'blocked']);
 /** A run planned by hand on top of the Queen's plan still stays a reviewable size. */
 export const MAX_RUN_TASKS = 40;
+/**
+ * A task cut off this many times in a row is no longer resumed on its own: something in it may
+ * be what brings Hive down (a command that exhausts the machine, for instance).
+ */
+export const MAX_INTERRUPTIONS = 3;
 
 /**
  * Runs a planned mission. Each task gets its own worktree and `hive/` branch created from the
@@ -135,8 +142,14 @@ export class Scheduler {
   private readonly launching = new Set<string>();
   private readonly cancelRequested = new Set<string>();
   private readonly pendingApprovals = new Map<string, (approved: boolean) => void>();
-  /** taskId → error of the attempt that failed, handed to the agent on the automatic retry. */
-  private readonly retryNotes = new Map<string, string>();
+  /**
+   * Set when Hive is quitting: the attempts still going are left exactly as they are in the
+   * database, for `recover` to save and resume at the next start, instead of being closed as
+   * cancelled half-way while the process exits.
+   */
+  private closing = false;
+  /** True while `recover` saves interrupted work: no task starts before its checkpoint exists. */
+  private recovering = false;
 
   constructor(private readonly options: SchedulerOptions) {}
 
@@ -144,25 +157,161 @@ export class Scheduler {
     return this.options.repos;
   }
 
-  /** Call once at startup: nothing can still be running after the app was closed. */
-  recover(): void {
+  /**
+   * Call once at startup, before anything starts tasks: nothing can still be running after Hive
+   * closed or crashed. What each interrupted attempt had done is saved as a commit on its branch,
+   * and runs that were going pick up from there, each task from its own saved work. Leftover
+   * worktrees are removed. Returns the runs resumed.
+   */
+  async recover(): Promise<Run[]> {
+    this.recovering = true;
+    try {
+      return await this.recoverInterrupted();
+    } finally {
+      this.recovering = false;
+      // Also the runs started while recovering, which could not launch anything until now.
+      this.pumpAll();
+    }
+  }
+
+  private async recoverInterrupted(): Promise<Run[]> {
     for (const approval of this.repos.approvals.list("status = 'pending'"))
       this.repos.approvals.put({ ...approval, status: 'expired', resolvedAt: nowIso() });
+    const resumed: Run[] = [];
     for (const run of this.repos.runs.list()) {
-      if (run.status !== 'running') continue;
-      for (const task of this.repos.tasks.list('run_id = ?', run.id)) {
-        if (!activeStatuses.has(task.status)) continue;
-        this.repos.tasks.put({
-          ...task,
-          status: 'failed',
-          workerState: 'failed',
-          worktreePath: null,
-          error: 'O aplicativo fechou durante a execução. Tente novamente.',
-          finishedAt: nowIso(),
-        });
+      const cut = this.repos.tasks
+        .list('run_id = ?', run.id)
+        .filter((task) => activeStatuses.has(task.status));
+      for (const task of cut)
+        this.update(
+          task.id,
+          run.status === 'running'
+            ? { status: 'pending', workerState: 'idle', error: null, finishedAt: null }
+            : // The run had already stopped (cancelled, for instance): the task was on its way out.
+              {
+                status: 'cancelled',
+                workerState: 'cancelled',
+                error: 'Interrompida quando o Hive fechou.',
+                finishedAt: nowIso(),
+              },
+        );
+      if (run.status === 'running') resumed.push(run);
+    }
+    // Every task that still names a worktree was cut off inside it, whatever its status says now.
+    for (const task of this.repos.tasks.list()) if (task.worktreePath) await this.salvage(task);
+    await this.removeLeftoverWorktrees();
+    for (const run of resumed) {
+      this.log(
+        run,
+        null,
+        null,
+        'run.status',
+        'warn',
+        'O Hive fechou no meio desta missão. Retomada de onde parou.',
+      );
+      this.options.onChange('run', run.id);
+    }
+    return resumed;
+  }
+
+  /**
+   * Saves what an interrupted attempt changed as a commit on its branch and removes its
+   * worktree. The task keeps a checkpoint, so its next attempt continues from that work. A task
+   * cut off too many times in a row stops being resumed and waits for the user.
+   */
+  private async salvage(task: Task): Promise<void> {
+    const worktree = task.worktreePath!;
+    const run = this.repos.runs.get(task.runId);
+    const workspace = run ? this.repos.workspaces.get(run.workspaceId) : null;
+    let work: string | null = null;
+    if (workspace) {
+      const manager = new WorktreeManager(workspace.path, this.options.worktreeRoot(workspace));
+      // Where this attempt began: without that, it never got as far as working.
+      const began = task.checkpoint?.commit ?? task.revision?.fromCommit ?? task.startCommit;
+      try {
+        const saved = await manager.commitAll(worktree, `hive: ${task.title} (interrompida)`);
+        // The agent may have committed by itself, so the branch's tip counts, not only new files.
+        const head =
+          saved ??
+          (await git(worktree, ['rev-parse', 'HEAD'], { allowFailure: true })).stdout.trim();
+        if (began && task.startCommit && head && head !== began) work = head;
+      } catch {
+        // The worktree is gone or unreadable: there is nothing left to save from it.
       }
-      this.repos.runs.put({ ...run, status: 'failed', error: 'Execução interrompida.' });
-      this.settle(run.id);
+      const branch = task.branch && isHiveBranch(task.branch) ? task.branch : null;
+      await manager.remove(worktree, work ? null : branch).catch(() => undefined);
+      // The new work was built on the earlier checkpoint, so its branch is no longer needed.
+      const earlier = task.checkpoint?.branch;
+      if (work && earlier && earlier !== task.branch && isHiveBranch(earlier))
+        await git(workspace.path, ['branch', '-D', '--', earlier], { allowFailure: true });
+    }
+    const interruptions = (task.checkpoint?.interruptions ?? 0) + 1;
+    const checkpoint = work
+      ? {
+          commit: work,
+          branch: task.branch,
+          startCommit: task.startCommit,
+          interruptions,
+          at: nowIso(),
+        }
+      : {
+          commit: task.checkpoint?.commit ?? null,
+          branch: task.checkpoint?.branch ?? null,
+          startCommit: task.checkpoint?.startCommit ?? null,
+          interruptions,
+          at: nowIso(),
+        };
+    const giveUp = interruptions >= MAX_INTERRUPTIONS && task.status === 'pending';
+    this.update(task.id, {
+      worktreePath: null,
+      checkpoint,
+      ...(giveUp
+        ? {
+            status: 'failed',
+            workerState: 'failed',
+            error: `Interrompida ${interruptions} vezes seguidas, sempre no meio do trabalho. O que ela já fez está guardado; use Tentar de novo para continuar.`,
+            finishedAt: nowIso(),
+          }
+        : {}),
+    });
+    if (run)
+      this.log(
+        run,
+        task.id,
+        task.workerId,
+        'task.status',
+        giveUp ? 'warn' : 'info',
+        work
+          ? `Trabalho da tentativa interrompida guardado (${work.slice(0, 8)}); a próxima continua dele.`
+          : 'A tentativa interrompida não tinha alterado nada ainda.',
+      );
+  }
+
+  /**
+   * Removes worktrees in Hive's folder that no task owns: what a crash left behind. A check
+   * worktree of the Flow may be in use right now, so only old ones are removed.
+   */
+  private async removeLeftoverWorktrees(): Promise<void> {
+    const owned = new Set(
+      this.repos.tasks
+        .list()
+        .filter((task) => task.worktreePath)
+        .map((task) => path.resolve(task.worktreePath!)),
+    );
+    for (const workspace of this.repos.workspaces.list()) {
+      const root = this.options.worktreeRoot(workspace);
+      const names = await readdir(root).catch(() => [] as string[]);
+      if (!names.length) continue;
+      const manager = new WorktreeManager(workspace.path, root);
+      for (const name of names) {
+        const target = path.join(root, name);
+        if (owned.has(path.resolve(target))) continue;
+        if (name.startsWith('check-')) {
+          const info = await stat(target).catch(() => null);
+          if (!info || Date.now() - info.mtimeMs < 60 * 60_000) continue;
+        }
+        await manager.remove(target, null).catch(() => undefined);
+      }
     }
   }
 
@@ -226,10 +375,11 @@ export class Scheduler {
 
   /**
    * Stops every agent session when Hive quits, which kills the commands they started (dev
-   * servers, watchers) instead of leaving them running with no owner. The tasks are marked as
-   * interrupted by `recover` at the next start, where the user can run them again.
+   * servers, watchers) instead of leaving them running with no owner. Their tasks are left as
+   * they are; `recover` saves their work and resumes them at the next start.
    */
   shutdown(): number {
+    this.closing = true;
     let stopped = 0;
     for (const [taskId, session] of this.sessions) {
       stopped++;
@@ -683,6 +833,7 @@ export class Scheduler {
   }
 
   private pump(runId: string): void {
+    if (this.closing || this.recovering) return;
     const run = this.repos.runs.get(runId);
     if (!run || run.status !== 'running') return;
     let tasks = this.repos.tasks.list('run_id = ?', runId);
@@ -773,6 +924,8 @@ export class Scheduler {
     // A revision continues from the task's last result, which already holds its dependencies.
     const revision = initial.revision;
     const previousBranch = revision ? initial.branch : null;
+    // An attempt Hive's closing cut off is continued from what it had done, not started over.
+    const checkpoint = initial.checkpoint?.commit ? initial.checkpoint : null;
     const checkCancelled = () => {
       if (this.cancelRequested.delete(initial.id))
         throw new HiveError('CANCELLED', 'Cancelada antes de começar.');
@@ -789,6 +942,7 @@ export class Scheduler {
         branch,
         error: null,
         result: null,
+        retryNote: undefined,
         startedAt: nowIso(),
         finishedAt: null,
       });
@@ -803,18 +957,25 @@ export class Scheduler {
           : `${worker.name} começou.`,
       );
       const name = `${run.id.slice(-6)}-${initial.key}-a${attempt}`.replace(/[^\w-]+/g, '-');
-      worktree = await manager.create(name, branch, revision?.fromCommit ?? run.baseCommit);
+      worktree = await manager.create(
+        name,
+        branch,
+        checkpoint?.commit ?? revision?.fromCommit ?? run.baseCommit,
+      );
       const tasks = this.repos.tasks.list('run_id = ?', run.id);
       const upstream = initial.dependsOn
         .map((key) => tasks.find((task) => task.key === key))
         .filter((task): task is Task => !!task);
-      if (!revision)
+      // A checkpoint already holds the dependencies merged by the attempt it came from.
+      if (!revision && !checkpoint)
         for (const dependency of integrationSources(upstream, tasks)) {
           await manager.mergeBranch(worktree, dependency.result!.commit!);
           this.log(run, initial.id, worker.id, 'git', 'debug', `Incluído: ${dependency.title}`);
         }
       const startCommit =
-        revision?.startCommit ?? (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+        checkpoint?.startCommit ??
+        revision?.startCommit ??
+        (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
       this.update(initial.id, { worktreePath: worktree, startCommit, workerState: 'thinking' });
       const { skills, missing } = await this.options.resolveSkills(worker.skills);
       if (missing.length)
@@ -856,17 +1017,23 @@ export class Scheduler {
       }
       checkCancelled();
 
-      const previousError = this.retryNotes.get(initial.id);
-      this.retryNotes.delete(initial.id);
+      const previousError = initial.retryNote;
+      const notes = [
+        initial.description,
+        checkpoint
+          ? `Esta tarefa já tinha começado e foi interrompida porque o Hive fechou. O que a tentativa anterior fez já está nesta pasta (veja com \`git diff ${startCommit.slice(0, 12)}\`). Confira o estado atual, não refaça o que está pronto e termine o que falta.`
+          : null,
+        previousError
+          ? `A tentativa anterior falhou com este erro: ${previousError}\nCorrija a causa antes de concluir.`
+          : null,
+      ];
       const runtime = this.options.runtimeFor?.(worker) ?? this.options.runtime;
       this.runtimes.set(initial.id, runtime);
       const session = await runtime.start({
         sessionId,
         task: {
           title: initial.title,
-          description: previousError
-            ? `${initial.description}\n\nA tentativa anterior falhou com este erro: ${previousError}\nCorrija a causa antes de concluir.`
-            : initial.description,
+          description: notes.filter(Boolean).join('\n\n'),
           acceptanceCriteria: initial.acceptanceCriteria,
           upstream: upstream.map((task) => ({
             title: task.title,
@@ -904,13 +1071,15 @@ export class Scheduler {
       if (this.cancelRequested.delete(initial.id)) void runtime.cancel(sessionId);
       const outcome = await session.done;
       unsubscribe();
+      // Hive is quitting: the attempt stays as it is, for the next start to save and resume.
+      if (this.closing) return;
 
       commit = await manager.commitAll(
         worktree,
         revision ? `hive: ${initial.title} (revisão ${revision.round})` : `hive: ${initial.title}`,
       );
-      // A revision that changed nothing still holds the earlier work, so it stays reviewable.
-      commit ??= revision?.fromCommit ?? null;
+      // An attempt that changed nothing still holds the earlier work, so it stays reviewable.
+      commit ??= checkpoint?.commit ?? revision?.fromCommit ?? null;
       const diff = commit ? await diffRefs(worktree, startCommit, commit) : null;
       const result: TaskResult = {
         summary: outcome.summary,
@@ -934,7 +1103,13 @@ export class Scheduler {
         error: outcome.error,
         finishedAt: nowIso(),
         worktreePath: null,
+        // The attempt ran to its end: its result now holds the interrupted work too.
+        checkpoint: undefined,
       });
+      if (checkpoint?.branch && checkpoint.branch !== branch && isHiveBranch(checkpoint.branch))
+        await git(workspace.path, ['branch', '-D', '--', checkpoint.branch], {
+          allowFailure: true,
+        });
       this.log(
         run,
         initial.id,
@@ -950,6 +1125,8 @@ export class Scheduler {
       if (previousBranch && previousBranch !== branch && outcome.status === 'completed')
         await git(workspace.path, ['branch', '-D', previousBranch], { allowFailure: true });
     } catch (error) {
+      // Hive is quitting: whatever broke here broke because of that; `recover` sorts it out.
+      if (this.closing) return;
       const cancelled = error instanceof HiveError && error.code === 'CANCELLED';
       const message = secretRedactor.redact(clipText(errorMessage(error)));
       if (!cancelled && this.retryUnattended(run, initial.id, attempt, message)) return;
@@ -967,19 +1144,22 @@ export class Scheduler {
       this.sessions.delete(initial.id);
       this.runtimes.delete(initial.id);
       this.cancelRequested.delete(initial.id);
-      this.denyApprovalsOf(initial.id);
-      // The branch is kept only when it holds work to review.
-      if (worktree) await manager.remove(worktree, commit ? null : branch).catch(() => undefined);
-      // An attempt sent back to the queue (an unattended retry) has not ended yet.
-      const ended = this.repos.tasks.get(initial.id);
-      if (ended && ['completed', 'failed', 'cancelled'].includes(ended.status))
-        try {
-          this.options.onTaskFinished?.(run, ended);
-        } catch (error) {
-          this.log(run, initial.id, ended.workerId, 'error', 'warn', errorMessage(error));
-        }
-      this.pumpAll();
-      this.settle(run.id);
+      // While quitting, the worktree and the records stay for `recover` to save at the next start.
+      if (!this.closing) {
+        this.denyApprovalsOf(initial.id);
+        // The branch is kept only when it holds work to review.
+        if (worktree) await manager.remove(worktree, commit ? null : branch).catch(() => undefined);
+        // An attempt sent back to the queue (an unattended retry) has not ended yet.
+        const ended = this.repos.tasks.get(initial.id);
+        if (ended && ['completed', 'failed', 'cancelled'].includes(ended.status))
+          try {
+            this.options.onTaskFinished?.(run, ended);
+          } catch (error) {
+            this.log(run, initial.id, ended.workerId, 'error', 'warn', errorMessage(error));
+          }
+        this.pumpAll();
+        this.settle(run.id);
+      }
     }
   }
 
@@ -994,8 +1174,8 @@ export class Scheduler {
     const max = this.repos.getSettings().autopilot.maxAttempts;
     if (attempt >= max || this.repos.runs.get(run.id)?.status !== 'running') return false;
     const reason = error?.trim() || 'erro sem descrição';
-    this.retryNotes.set(taskId, reason.slice(0, 2_000));
     this.update(taskId, {
+      retryNote: reason.slice(0, 2_000),
       status: 'pending',
       workerState: 'idle',
       error: null,

@@ -561,15 +561,14 @@ describe('Hive Teams: cancelamento e recuperação', { timeout: 120_000 }, () =>
       'o Codex começar',
     );
 
+    // Hive closes: its sessions stop and their records stay as they are for the next start.
+    ctx.scheduler.shutdown();
     // A new Scheduler over the same database, as when Hive opens again after closing mid-run.
     gate = async () => undefined;
     const reopened = ctx.build();
-    reopened.scheduler.recover();
-    // Reopening fails what was running; with the leader's work done, the mission waits in review.
-    expect(ctx.status()).toBe('review');
-    expect(byRole(ctx.tasks(), 'member')[0]!.status).toBe('failed');
-
-    reopened.scheduler.start('run_teams1');
+    const resumed = await reopened.scheduler.recover();
+    // Reopening resumes the mission by itself: the member's task picks up and the team finishes.
+    expect(resumed.map((run) => run.id)).toEqual(['run_teams1']);
     await until(() => ctx.status() !== 'running', 'a missão terminar depois de reabrir');
     expect(ctx.status()).toBe('review');
     expect(ctx.tasks().find((t) => t.key === 'qa')!.result?.commands[0]?.exitCode).toBe(0);
@@ -577,8 +576,7 @@ describe('Hive Teams: cancelamento e recuperação', { timeout: 120_000 }, () =>
     expect(byRole(ctx.tasks(), 'member')).toHaveLength(1);
 
     // The closed app's session is still stranded in this process: end it before the database
-    // closes, as the operating system would have when Hive closed.
-    ctx.scheduler.cancelTask(byRole(ctx.tasks(), 'member')[0]!.id);
+    // closes, as the operating system would have when Hive closed. It writes nothing any more.
     releaseHung();
     await until(() => !ctx.scheduler.isActive('run_teams1'), 'a sessão antiga terminar');
   });

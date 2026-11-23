@@ -31,7 +31,7 @@ const FINISHED: ReadonlySet<RunStatus> = new Set(['review', 'completed', 'failed
 /**
  * Shift mode: works through a queue of missions one at a time, planning each with the Queen and
  * running it without waiting for anyone. The queue lives in the database, so a restart picks up
- * where it stopped: a run interrupted by the restart is resumed once.
+ * where it stopped: the scheduler resumes an interrupted run, and a plan cut off is made again.
  */
 export class Autopilot {
   /** Runs started (or resumed) by this process. A finished status on one of them means done. */
@@ -129,7 +129,11 @@ export class Autopilot {
       const runId = this.queue()[0];
       if (!runId) return;
       const run = this.repos.runs.require(runId, 'Execução');
-      if (run.status === 'planning' || run.status === 'running') return;
+      // Going already, possibly resumed after a restart: its end is the shift's to record.
+      if (run.status === 'planning' || run.status === 'running') {
+        this.startedHere.add(run.id);
+        return;
+      }
       if (FINISHED.has(run.status) && this.startedHere.has(run.id)) {
         this.finish(run, null);
         continue;

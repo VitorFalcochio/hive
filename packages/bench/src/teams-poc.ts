@@ -454,19 +454,20 @@ async function main() {
       `Plano da Queen: ${planned.plan.tasks.length} tarefa(s); líder marcado pela Queen: ${leadByQueen ? 'sim' : 'não'}.`,
     );
   } else {
-    // A paused run: what was running when it stopped is failed and tried again, nothing else.
+    // A paused run: what was running when it stopped is saved and resumed from there.
     const saved = repos.getValue('poc.leadByQueen');
     leadByQueen =
       saved === null
         ? repos.tasks.list('run_id = ?', 'run_poc').some((task) => task.team?.role === 'lead')
         : saved === 'true';
     planUsage = JSON.parse(repos.getValue('poc.planUsage') ?? JSON.stringify(planUsage));
-    scheduler.recover();
+    await scheduler.recover();
     say('Retomando a rodada pausada de onde parou.');
   }
 
   // 2-9. The team works.
-  scheduler.start('run_poc');
+  // A resumed run is going already; a new one (or one that stopped) is started here.
+  if (repos.runs.require('run_poc', 'Execução').status !== 'running') scheduler.start('run_poc');
   const deadline = started + RUN_LIMIT_MIN * 60_000;
   const status = () => repos.runs.require('run_poc', 'Execução').status;
   while (status() === 'running' || scheduler.isActive('run_poc')) {

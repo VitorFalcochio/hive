@@ -390,6 +390,20 @@ export const taskRevisionSchema = z.object({
 });
 export type TaskRevision = z.infer<typeof taskRevisionSchema>;
 
+/** What an interrupted attempt had done, kept so the task picks up from there. */
+export const taskCheckpointSchema = z.object({
+  /** Commit holding the interrupted attempts' work; null when they had not changed anything. */
+  commit: z.string().nullable(),
+  /** Branch that holds `commit`; deleted once a later attempt carries the work on. */
+  branch: z.string().nullable(),
+  /** Diff base of the task, so the review still shows everything it did. */
+  startCommit: z.string().nullable(),
+  /** Times the task was interrupted in a row, to stop resuming one that keeps getting cut off. */
+  interruptions: z.number().int().min(1),
+  at: z.string(),
+});
+export type TaskCheckpoint = z.infer<typeof taskCheckpointSchema>;
+
 export const taskSchema = z.object({
   id: z.string(),
   runId: z.string(),
@@ -419,6 +433,13 @@ export const taskSchema = z.object({
   parentTaskId: z.string().nullable().optional(),
   /** Its place in a Hive Teams team; absent on tasks planned the usual way. */
   team: taskTeamSchema.optional(),
+  /**
+   * Work of an attempt that Hive's closing (or a crash) interrupted, saved as a commit on its
+   * branch. The next attempt starts from it instead of starting over; cleared once one ends.
+   */
+  checkpoint: taskCheckpointSchema.optional(),
+  /** Error of the attempt that failed, handed to the automatic retry; survives a restart. */
+  retryNote: z.string().max(2_000).optional(),
 });
 export type Task = z.infer<typeof taskSchema>;
 

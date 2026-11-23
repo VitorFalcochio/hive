@@ -599,6 +599,37 @@ export class NexusAutopilot {
       .some((recovery) => recoveryHoldStates.has(recovery.state));
   }
 
+  /**
+   * Call once at startup: a Queen's proposal or an application that Hive's closing cut off never
+   * ends by itself, and holds its branch forever. A proposal is asked for again. An application
+   * half done is left to the user as failed: trying again goes on without repeating what it made.
+   */
+  recoverInterrupted(): void {
+    const { repos } = this.options;
+    for (const recovery of repos.nexusAutopilotRecoveries.list()) {
+      if (recovery.state !== 'proposing' && recovery.state !== 'applying') continue;
+      const stillNeeded =
+        repos.runs.get(recovery.runId)?.status === 'running' &&
+        repos.tasks.get(recovery.taskId)?.status === 'failed';
+      if (recovery.state === 'proposing' && stillNeeded) {
+        void this.proposeRecovery(recovery.id);
+        continue;
+      }
+      const reason =
+        recovery.state === 'proposing'
+          ? 'O Hive fechou enquanto a Queen preparava este replanejamento.'
+          : 'O Hive fechou no meio da aplicação deste replanejamento. Tente de novo (o que já foi criado não se repete) ou recuse.';
+      const failed = repos.nexusAutopilotRecoveries.put({
+        ...recovery,
+        state: 'failed',
+        reason,
+        updatedAt: nowIso(),
+      });
+      this.recoveryEvent(failed, 'warn', reason);
+      this.options.onChange?.(recovery.runId);
+    }
+  }
+
   /** Replans that still need a decision: the run is going and the task is still failed. */
   recoveries(runId: string): NexusAutopilotRecovery[] {
     const { repos } = this.options;

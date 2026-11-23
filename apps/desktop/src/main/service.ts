@@ -363,20 +363,52 @@ export class DesktopService {
     this.detachWorkers();
     // Projects from before the default Nectar get theirs once; new ones get it when opened.
     for (const workspace of this.repos.workspaces.list()) this.cortex.ensureDefault(workspace.id);
-    // A process interruption must not leave a plan marked as running indefinitely.
-    for (const run of this.repos.runs.list()) {
-      if (run.status === 'planning')
-        this.repos.runs.put({
-          ...run,
-          status: 'failed',
-          error: 'O aplicativo fechou durante o planejamento. Gere o plano novamente.',
-        });
-    }
-    this.scheduler.recover();
+    const replan = this.recoverPlanning();
+    this.nexusAutopilot.recoverInterrupted();
     for (const run of this.repos.runs.list()) this.liveResults.schedule(run.id);
     this.terminals = new TerminalManager((event) => this.push({ kind: 'terminal', event }));
-    // A shift that was on when Hive closed picks its queue back up.
-    this.advanceShift();
+    // Interrupted work is saved and resumed first; then a shift that was on picks its queue back up.
+    void this.scheduler
+      .recover()
+      .then((resumed) => {
+        for (const runId of replan)
+          void this.planRun(runId, this.repos.runs.require(runId, 'Execução').queenWorkerId!).catch(
+            (error: unknown) =>
+              console.warn('Não foi possível refazer o plano interrompido:', errorMessage(error)),
+          );
+        const total = resumed.length + replan.length;
+        if (total && Notification.isSupported())
+          new Notification({
+            title: 'Missões retomadas',
+            body:
+              total === 1
+                ? 'O Hive fechou no meio de uma missão e continuou de onde ela parou.'
+                : `O Hive fechou no meio de ${total} missões e continuou de onde elas pararam.`,
+          }).show();
+      })
+      .catch((error: unknown) =>
+        console.error('Recuperação das missões interrompidas falhou:', errorMessage(error)),
+      )
+      .finally(() => this.advanceShift());
+  }
+
+  /**
+   * A plan the Queen was making when Hive closed is asked for again, so the mission does not stay
+   * stopped. The shift re-plans its own missions; a run whose Queen is unknown waits for the user.
+   * Returns the runs to plan again once recovery is done.
+   */
+  private recoverPlanning(): string[] {
+    const replan: string[] = [];
+    for (const run of this.repos.runs.list()) {
+      if (run.status !== 'planning') continue;
+      this.repos.runs.put({
+        ...run,
+        status: 'failed',
+        error: 'O aplicativo fechou durante o planejamento. Gere o plano novamente.',
+      });
+      if (run.queenWorkerId && !this.autopilot.isUnattended(run.id)) replan.push(run.id);
+    }
+    return replan;
   }
 
   /** Honey given today and in all; "today" starts at local midnight, like the token meter. */

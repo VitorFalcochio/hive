@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -129,20 +129,25 @@ async function setup(
       startedAt: null,
       finishedAt: null,
     });
-  const scheduler = new Scheduler({
-    repos,
-    runtime: new FakeRuntime(behaviour),
-    chatFor: () => ({ chat: () => Promise.reject(new Error('unused')) }),
-    resolveSkills: async () => ({ skills: [], missing: [] }),
-    worktreeRoot: () => path.join(repo, '..', `${path.basename(repo)}-worktrees`),
-    onEvent: () => undefined,
-    onChange: () => undefined,
-    unattended: () => unattended,
-    ...hooks,
-  });
+  const worktreeRoot = path.join(repo, '..', `${path.basename(repo)}-worktrees`);
+  const build = (next: Behaviour) =>
+    new Scheduler({
+      repos,
+      runtime: new FakeRuntime(next),
+      chatFor: () => ({ chat: () => Promise.reject(new Error('unused')) }),
+      resolveSkills: async () => ({ skills: [], missing: [] }),
+      worktreeRoot: () => worktreeRoot,
+      onEvent: () => undefined,
+      onChange: () => undefined,
+      unattended: () => unattended,
+      ...hooks,
+    });
+  const scheduler = build(behaviour);
   const task = (key: string) => repos.tasks.require(`task_${key}`, 'Tarefa');
   const status = () => repos.runs.require(run.id, 'Execução').status;
-  return { repo, repos, scheduler, run, task, status, git };
+  /** A new Scheduler over the same database: Hive opening again. */
+  const reopen = (next: Behaviour) => build(next);
+  return { repo, repos, scheduler, run, task, status, git, worktreeRoot, reopen };
 }
 
 async function until(check: () => boolean, what: string, timeoutMs = 20_000) {
@@ -668,7 +673,129 @@ describe('Scheduler ao fechar o Hive', { timeout: 60_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(ctx.scheduler.shutdown()).toBe(1);
     expect(cancelled).toEqual(['task_a-a1']);
-    await until(() => ctx.task('a').status === 'cancelled', 'tarefa cancelada');
+    await until(() => !ctx.scheduler.isActive(ctx.run.id), 'a sessão terminar');
+    // Nothing is closed half-way: the task and its worktree stay for the next start to resume.
+    const task = ctx.task('a');
+    expect(task.status).toBe('running');
+    expect(task.worktreePath && existsSync(task.worktreePath)).toBe(true);
+  });
+
+  it('o Hive fecha no meio de uma tarefa; ao abrir, ela continua do trabalho já feito', async () => {
+    let release = () => {};
+    const hung = new Promise<void>((resolve) => (release = resolve));
+    const ctx = await setup(
+      async (input) => {
+        await writeFile(path.join(input.worktreePath, 'parte1.txt'), 'um');
+        await hung;
+        return {};
+      },
+      [{ key: 'a' }, { key: 'b', dependsOn: ['a'] }],
+    );
+    ctx.scheduler.start(ctx.run.id);
+    await until(() => {
+      const worktree = ctx.task('a').worktreePath;
+      return !!worktree && existsSync(path.join(worktree, 'parte1.txt'));
+    }, 'a primeira parte do trabalho');
+    const firstWorktree = ctx.task('a').worktreePath!;
+    ctx.scheduler.shutdown();
+
+    const seen: { description: string; hadPart1: boolean }[] = [];
+    const reopened = ctx.reopen(async (input) => {
+      if (input.task.title === 'Tarefa a') {
+        seen.push({
+          description: input.task.description,
+          hadPart1: existsSync(path.join(input.worktreePath, 'parte1.txt')),
+        });
+        await writeFile(path.join(input.worktreePath, 'parte2.txt'), 'dois');
+      } else await writeTaskFile(input);
+      return {};
+    });
+    const resumed = await reopened.recover();
+    expect(resumed.map((run) => run.id)).toEqual([ctx.run.id]);
+    expect(existsSync(firstWorktree)).toBe(false);
+    await until(() => ctx.status() === 'review', 'a missão terminar depois de reabrir');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.hadPart1).toBe(true);
+    expect(seen[0]!.description).toContain('interrompida');
+    const a = ctx.task('a');
+    expect(a.attempt).toBe(2);
+    expect(a.checkpoint).toBeUndefined();
+    // The review shows the whole task, both the interrupted part and the rest.
+    expect(a.result?.filesChanged.map((file) => file.path).sort()).toEqual([
+      'parte1.txt',
+      'parte2.txt',
+    ]);
+    // The dependent task started from all of it.
+    expect(ctx.task('b').status).toBe('completed');
+    // Only the branches holding results are left: the checkpoint's was carried on and removed.
+    const branches = ctx.git('branch', '--list', 'hive/*').trim().split('\n');
+    expect(branches).toHaveLength(2);
+
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+
+  it('uma tarefa interrompida vezes demais para de ser retomada e espera o usuário', async () => {
+    const ctx = await setup(async () => ({}), [{ key: 'a' }]);
+    ctx.repos.runs.put({ ...ctx.run, status: 'running' });
+    ctx.repos.tasks.put({
+      ...ctx.task('a'),
+      workerId: 'w1',
+      status: 'running',
+      attempt: 3,
+      branch: 'hive/t/a-a3',
+      startCommit: ctx.run.baseCommit,
+      worktreePath: path.join(ctx.worktreeRoot, 'sumiu'),
+      checkpoint: {
+        commit: null,
+        branch: null,
+        startCommit: null,
+        interruptions: 2,
+        at: new Date().toISOString(),
+      },
+    });
+    await ctx.scheduler.recover();
+    const a = ctx.task('a');
+    expect(a.status).toBe('failed');
+    expect(a.error).toContain('Interrompida 3 vezes');
+    expect(a.worktreePath).toBeNull();
+    expect(ctx.status()).toBe('failed');
+  });
+
+  it('ao abrir: tarefa presa numa missão cancelada é encerrada e worktrees sem dono são removidas', async () => {
+    const ctx = await setup(async () => ({}), [{ key: 'a' }]);
+    ctx.repos.runs.put({ ...ctx.run, status: 'cancelled' });
+    ctx.repos.tasks.put({ ...ctx.task('a'), workerId: 'w1', status: 'running' });
+    const leftover = path.join(ctx.worktreeRoot, 'sobra-de-queda');
+    await mkdir(leftover, { recursive: true });
+    await writeFile(path.join(leftover, 'x.txt'), 'x');
+
+    expect(await ctx.scheduler.recover()).toEqual([]);
+    expect(ctx.task('a').status).toBe('cancelled');
+    expect(existsSync(leftover)).toBe(false);
+  });
+
+  it('o erro da tentativa anterior chega à nova tentativa mesmo depois de reabrir', async () => {
+    const descriptions: string[] = [];
+    const ctx = await setup(
+      async (input) => {
+        descriptions.push(input.task.description);
+        return {};
+      },
+      [{ key: 'a' }],
+    );
+    ctx.repos.runs.put({ ...ctx.run, status: 'running' });
+    ctx.repos.tasks.put({
+      ...ctx.task('a'),
+      workerId: 'w1',
+      attempt: 1,
+      retryNote: 'npm test falhou: 2 testes',
+    });
+    await ctx.scheduler.recover();
+    await until(() => ctx.status() !== 'running', 'a tarefa terminar');
+    expect(descriptions[0]).toContain('npm test falhou: 2 testes');
+    expect(ctx.task('a').retryNote).toBeUndefined();
   });
 });
 
