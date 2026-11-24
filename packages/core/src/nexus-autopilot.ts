@@ -133,6 +133,8 @@ export const nexusAutopilotDraftSchema = z
     approvalSteps: z.array(z.string().trim().min(1).max(300)).max(10),
     warnings: z.array(z.string().trim().min(1).max(500)).max(20),
     cortexAccess: z.array(nexusAutopilotCortexAccessSchema).max(24).optional(),
+    /** Project commands that must pass when the flow is done; Hive checks the work with them. */
+    verify: z.array(z.string().trim().min(1).max(300)).max(3).optional(),
   })
   .strict()
   .superRefine((draft, context) => refineFlow(draft, context));

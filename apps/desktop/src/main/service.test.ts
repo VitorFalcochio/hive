@@ -205,6 +205,107 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
     expect(git(['status', '--porcelain']).toString()).toBe('');
   });
 
+  it('projeto do zero: a verificação usa o comando do plano e só nas tarefas finais', async () => {
+    const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-zero-'));
+    const git = (args: string[]) => execFileSync('git', args, { cwd: repo, windowsHide: true });
+    git(['init', '-b', 'main']);
+    await writeFile(path.join(repo, 'README.md'), '# Do zero\n');
+    git(['add', 'README.md']);
+    git([
+      '-c',
+      'user.name=T',
+      '-c',
+      'user.email=t@hive.local',
+      '-c',
+      'core.hooksPath=',
+      'commit',
+      '-m',
+      'i',
+    ]);
+    mocks.selected = repo;
+    const { service } = setup();
+    await service.invoke('workspace.pick', undefined);
+    const provider = (await service.invoke('provider.save', {
+      kind: 'openai-compatible',
+      name: 'Local',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      enabled: true,
+    })) as ProviderConfig;
+    const workers = (await service.invoke('worker.list', undefined)) as Worker[];
+    const pick = (role: string) => workers.find((worker) => worker.role === role)!;
+    const [queen, backend, frontend] = [pick('queen'), pick('backend'), pick('frontend')];
+    for (const worker of [queen, backend, frontend])
+      await service.invoke('worker.save', { ...worker, providerId: provider.id, modelId: 'm' });
+    const created = (await service.invoke('mission.create', {
+      title: 'App do zero',
+      objective: 'Criar um app desktop.',
+    })) as MissionDetail & { runId: string };
+    const task = (key: string, workerId: string, dependsOn: string[]) => ({
+      key,
+      title: key,
+      description: key,
+      workerId,
+      dependsOn,
+      acceptanceCriteria: ['ok'],
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      notes: 'Contrato primeiro, depois a interface, depois a integração.',
+                      tasks: [
+                        task('contract', backend.id, []),
+                        task('ui', frontend.id, ['contract']),
+                        task('integrate', backend.id, ['ui']),
+                      ],
+                      verify: ['rm -rf /', 'npm run build', 'npm test'],
+                    }),
+                  },
+                },
+              ],
+              usage: { prompt_tokens: 10, completion_tokens: 20 },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    await service.invoke('run.plan', { runId: created.runId, queenWorkerId: queen.id });
+    type Layout = {
+      flow: { id: string; kind: string; command?: string; retries?: number }[];
+      links: { source: string; target: string; port: string }[];
+      notes: { text: string }[];
+    };
+    let layout: Layout | null = null;
+    for (let i = 0; i < 100 && !layout?.flow.length; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      layout = (await service.invoke('canvas.layout.get', created.runId)) as Layout;
+    }
+    const check = layout!.flow.find((block) => block.kind === 'check')!;
+    const approval = layout!.flow.find((block) => block.kind === 'approval')!;
+    // The dangerous command is refused; the first allowed one is used.
+    expect(check.command).toBe('npm run build');
+    expect(check.retries).toBe(2);
+    const from = (source: string) =>
+      layout!.links.filter((link) => link.source === source).map((link) => link.target);
+    // The agent of the final task is checked; the other goes straight to approval.
+    expect(from(`agent:${backend.id}`)).toEqual([check.id]);
+    expect(from(`agent:${frontend.id}`)).toEqual([approval.id]);
+    expect(layout!.links).toContainEqual(
+      expect.objectContaining({ source: check.id, target: `agent:${backend.id}`, port: 'fail' }),
+    );
+    expect(layout!.flow.some((block) => block.kind === 'notify')).toBe(true);
+    const note = layout!.notes.find((item) => item.text.startsWith('Plano da Queen'))!;
+    expect(note.text).toContain('Contrato primeiro');
+    expect(note.text).toContain('npm run build · npm test');
+    expect(note.text).not.toContain('rm -rf');
+  });
+
   it('no Modo Turno, planeja a missão da fila sozinho e registra por que não pôde executar', async () => {
     const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-shift-'));
     const git = (args: string[]) => execFileSync('git', args, { cwd: repo, windowsHide: true });

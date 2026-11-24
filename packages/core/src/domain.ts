@@ -536,6 +536,12 @@ export type PlanTask = z.infer<typeof planTaskSchema>;
 export const planSchema = z.object({
   notes: z.string().max(4_000),
   tasks: z.array(planTaskSchema).min(1).max(12),
+  /**
+   * The project commands that must pass once the plan is done ("npm run build", "npm test"),
+   * even when the project does not have them yet: a project started from scratch gets them from
+   * its first task. Hive checks the agents' work with them.
+   */
+  verify: z.array(z.string().trim().min(1).max(300)).max(3).optional(),
 });
 export type Plan = z.infer<typeof planSchema>;
 

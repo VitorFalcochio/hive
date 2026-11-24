@@ -304,7 +304,22 @@ export class FlowEngine {
       });
       // The project's installed dependencies serve the checkout too, so tests can run.
       await linkDependencies(workspace.path, target);
-      result = await runCommand(command, target);
+      // A project started from scratch has none in its folder yet: the agents installed them in
+      // their own checkouts. They are installed here first, or every check fails on a missing
+      // tool instead of on the agent's code.
+      const install = await installCommand(target);
+      result = { code: 0, output: '' };
+      if (install) {
+        this.setState(context.runId, block.id, 'running', `Instalando dependências · ${task.key}`);
+        const installed = await runCommand(install, target);
+        if (installed.code !== 0)
+          result = {
+            code: installed.code,
+            output: `"${install}" falhou antes da verificação; confira o package.json e as dependências.\n\n${installed.output}`,
+          };
+        else this.setState(context.runId, block.id, 'running', `${command} · ${task.key}`);
+      }
+      if (result.code === 0) result = await runCommand(command, target);
     } finally {
       await unlinkDependencies(target);
       await git(workspace.path, ['worktree', 'remove', '--force', target], { allowFailure: true });
@@ -429,6 +444,20 @@ export class FlowEngine {
       this.setState(runId, blockId, 'failed', message(error));
     }
   }
+}
+
+/**
+ * The install a checkout needs before its checks can run: a Node project with no dependencies
+ * folder (nor a link to the project's), with the package manager its lockfile names. Null when
+ * nothing is missing or it is not a Node project.
+ */
+export async function installCommand(checkout: string): Promise<string | null> {
+  if (!(await exists(path.join(checkout, 'package.json')))) return null;
+  if (await exists(path.join(checkout, 'node_modules'))) return null;
+  if (await exists(path.join(checkout, 'pnpm-lock.yaml'))) return 'pnpm install';
+  if (await exists(path.join(checkout, 'yarn.lock'))) return 'yarn install';
+  if (await exists(path.join(checkout, 'bun.lockb'))) return 'bun install';
+  return 'npm install --no-audit --no-fund';
 }
 
 async function exists(target: string): Promise<boolean> {

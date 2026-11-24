@@ -30,7 +30,24 @@ const COOLDOWN = {
   auth: 30 * MINUTE,
   missing: 6 * 60 * MINUTE,
   unavailable: 30 * SECOND,
+  /** A request too large for the route: smaller ones may fit later, this one never will. */
+  tooLarge: 10 * MINUTE,
 };
+
+/**
+ * Whether the route refused the request for its size: a 413 (Groq's free tier answers it when one
+ * request passes the tokens-per-minute limit) or a 400 saying the context window is exceeded.
+ * Waiting never helps, but a model with a larger window or a higher limit can take it.
+ */
+export function tooLargeForRoute(status: number | null, text: string): boolean {
+  if (status === 413) return true;
+  return (
+    status === 400 &&
+    /context[_ ]length|context window|maximum context|too many tokens|request too large|prompt is too long|reduce the length/.test(
+      text,
+    )
+  );
+}
 
 const routeKey = (route: Pick<ChatRoute, 'providerId' | 'model'>) =>
   `${route.providerId}\u0000${route.model}`;
@@ -79,7 +96,8 @@ export class RouteHealth {
 
 /**
  * Whether another provider or model can help with this failure, and for how long the failed
- * route should rest. Bad requests and cancellations are not the route's fault: they go up as is.
+ * route should rest. Bad requests and cancellations are not the route's fault: they go up as is,
+ * except a request too large for this route, which another route may well accept.
  */
 export function failoverCause(
   error: unknown,
@@ -118,6 +136,12 @@ export function failoverCause(
       return {
         reason: `falha do provedor (${status})`,
         restMs: COOLDOWN.unavailable,
+        providerMs: 0,
+      };
+    if (tooLargeForRoute(status, text))
+      return {
+        reason: `pedido grande demais para o modelo (${status})`,
+        restMs: COOLDOWN.tooLarge,
         providerMs: 0,
       };
     return null;
@@ -162,6 +186,13 @@ export class FailoverClient implements ChatClient {
     if (!primary)
       throw new HiveError('VALIDATION', 'Nenhum provedor configurado para este agente.');
     let last: { error: unknown; reason: string; route: ChatRoute } | null = null;
+    // Routes that refused this very request for its size: if all did, waiting never helps.
+    const tooLarge = new Set<string>();
+    const refused = (route: ChatRoute, error: unknown) => {
+      if (error instanceof ProviderError)
+        if (tooLargeForRoute(error.status, errorMessage(error).toLowerCase()))
+          tooLarge.add(routeKey(route));
+    };
     // A provider paused after a 429 (another agent hit its limit) holds every call in its gate
     // until the pause ends, which can be minutes: with somewhere else to go, go there instead.
     const paused =
@@ -179,6 +210,7 @@ export class FailoverClient implements ChatClient {
         // With nowhere to go, nothing changes: the provider's own errors and retries apply.
         if (this.routes(true).length <= 1) throw error;
         this.health.rest(primary, cause.restMs, cause.providerMs);
+        refused(primary, error);
         last = { error, reason: cause.reason, route: primary };
       }
     }
@@ -208,9 +240,13 @@ export class FailoverClient implements ChatClient {
         const cause = failoverCause(error);
         if (!cause) throw error;
         this.health.rest(route, cause.restMs, cause.providerMs);
+        refused(route, error);
         last = { error, reason: cause.reason, route };
       }
     }
+    // Every route turned this request down for its size: the error goes up as is, so the task
+    // fails now (and may be split) instead of waiting for a limit that will never fit it.
+    if (last && routes.every((route) => tooLarge.has(routeKey(route)))) throw last.error;
     // Everything is resting: wait for the first route to come back, then try again.
     const wait = Math.min(
       ...routes.map((route) => this.health.resting(route)).filter((ms) => ms > 0),

@@ -193,4 +193,49 @@ describe('troca automática de modelo', () => {
     // Not left resting for hours: the next call goes to the provider again.
     await expect(client.chat(request)).rejects.toThrow('404');
   });
+
+  it('um pedido grande demais para o modelo (413) passa para outro que aguenta', async () => {
+    const tooLarge = new ProviderError(
+      'Provider error 413. Request too large for model `openai/gpt-oss-120b`: Limit 8000, Requested 11037.',
+      413,
+    );
+    const b = provider('ok');
+    const switches: RouteSwitch[] = [];
+    const client = new FailoverClient(
+      () => [route('groq', 'gpt-oss', provider(tooLarge).client), route('b', 'n', b.client)],
+      new RouteHealth(),
+      (change) => switches.push(change),
+    );
+    expect((await client.chat(request)).message.content).toBe('ok');
+    expect(switches[0]?.reason).toBe('pedido grande demais para o modelo (413)');
+  });
+
+  it('contexto excedido (400) também troca de modelo', async () => {
+    const b = provider('ok');
+    const client = new FailoverClient(
+      () => [
+        route(
+          'a',
+          'm',
+          provider(new ProviderError("This model's maximum context length is 8192 tokens.", 400))
+            .client,
+        ),
+        route('b', 'n', b.client),
+      ],
+      new RouteHealth(),
+    );
+    expect((await client.chat(request)).message.content).toBe('ok');
+  });
+
+  it('quando nenhum modelo aguenta o tamanho, o erro sobe em vez de esperar para sempre', async () => {
+    const tooLarge = () => new ProviderError('Request too large', 413);
+    const client = new FailoverClient(
+      () => [
+        route('a', 'm', provider(tooLarge()).client),
+        route('b', 'n', provider(tooLarge()).client),
+      ],
+      new RouteHealth(),
+    );
+    await expect(client.chat(request)).rejects.toMatchObject({ status: 413 });
+  });
 });

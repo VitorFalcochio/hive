@@ -33,7 +33,7 @@ import {
   type Workspace,
 } from '@hive/core';
 import { HiveDatabase, Repositories, SCHEMA_VERSION } from '@hive/persistence';
-import { FlowEngine } from './flow-engine';
+import { FlowEngine, allowedCheckCommand } from './flow-engine';
 import {
   ChatGPTPlanClient,
   ChatGPTSession,
@@ -950,7 +950,7 @@ export class DesktopService {
         signal: AbortSignal.timeout(180_000),
       });
       const detail = this.setPlan(runId, result.plan);
-      void this.scaffoldFlow(runId);
+      void this.scaffoldFlow(runId, result.plan);
       return detail;
     } catch (error) {
       const failure = this.modelFailure(queen.modelId, error);
@@ -1030,24 +1030,40 @@ export class DesktopService {
    * project's own command, a failure goes back to that agent with the error, what passes waits
    * for your approval, and the end of the mission is notified. Only on a canvas without flow
    * blocks, so it never overrides a flow the user built.
+   *
+   * A project started from scratch has no command yet when the Queen plans: then the check uses
+   * the first of the commands the plan says must pass (`verify`), and only on the agents of the
+   * tasks nothing else waits for. An earlier piece cannot build before the others exist, and
+   * sending it back would make its agent write the other agents' parts.
    */
-  private async scaffoldFlow(runId: string): Promise<void> {
+  private async scaffoldFlow(
+    runId: string,
+    plan?: { notes?: string; verify?: string[] },
+  ): Promise<void> {
     this.scaffoldBlocks(runId);
     try {
       const layout = this.canvasLayout(runId);
       const run = this.repos.runs.get(runId);
       if (!run || layout.flow.length) return;
       const workspace = this.repos.workspaces.require(run.workspaceId, 'Projeto');
+      const tasks = this.repos.tasks.list('run_id = ?', runId).filter((task) => !task.candidateOf);
       const agents = [
-        ...new Set(
-          this.repos.tasks
-            .list('run_id = ?', runId)
-            .map((task) => task.workerId)
-            .filter((id): id is string => !!id),
-        ),
+        ...new Set(tasks.map((task) => task.workerId).filter((id): id is string => !!id)),
       ];
       if (!agents.length) return;
-      const [command] = await this.flow.commands(workspace.path);
+      const [existing] = await this.flow.commands(workspace.path);
+      const planned = (plan?.verify ?? []).map((item) => item.trim()).filter(allowedCheckCommand);
+      const command = existing ?? planned[0];
+      // Agents whose work ends the plan: nothing depends on their task.
+      const waitedOn = new Set(tasks.flatMap((task) => task.dependsOn));
+      const finishing = [
+        ...new Set(
+          tasks
+            .filter((task) => !waitedOn.has(task.key) && task.workerId)
+            .map((task) => task.workerId!),
+        ),
+      ];
+      const checked = existing || !finishing.length ? agents : finishing;
       // Right of where the agents sit, when the user has placed them; otherwise a fixed column.
       const placed = Object.values(layout.pinned)
         .flatMap((points) => Object.entries(points))
@@ -1071,15 +1087,24 @@ export class DesktopService {
           y: 40,
           kind: 'check' as const,
           command,
-          retries: 1,
+          // Putting a project together from scratch rarely builds at the first try.
+          retries: existing ? 1 : 2,
         };
         flow.push(check);
-        for (const agent of agents)
+        for (const agent of checked)
           links.push(
             { id: `link:${key()}`, source: `agent:${agent}`, target: check.id, port: 'out' },
             { id: `link:${key()}`, source: check.id, target: `agent:${agent}`, port: 'fail' },
           );
         links.push({ id: `link:${key()}`, source: check.id, target: approval.id, port: 'pass' });
+        // The other agents' pieces go straight to approval, as without a check.
+        for (const agent of agents.filter((item) => !checked.includes(item)))
+          links.push({
+            id: `link:${key()}`,
+            source: `agent:${agent}`,
+            target: approval.id,
+            port: 'out',
+          });
       } else
         for (const agent of agents)
           links.push({
@@ -1099,9 +1124,30 @@ export class DesktopService {
           port: 'out',
         });
       }
+      // The Queen's reasoning, pinned above the flow, so the canvas says why it looks this way.
+      const reasoning = plan?.notes?.trim();
+      const notes =
+        reasoning && layout.notes.length < 100
+          ? [
+              ...layout.notes,
+              {
+                id: `note:plan-${key()}`,
+                text: [
+                  `Plano da Queen\n\n${reasoning}`,
+                  planned.length ? `Precisa passar no fim: ${planned.join(' · ')}` : '',
+                ]
+                  .filter(Boolean)
+                  .join('\n\n')
+                  .slice(0, 8_000),
+                x,
+                y: -300,
+                tone: 'gold' as const,
+              },
+            ]
+          : layout.notes;
       this.repos.setValue(
         `canvasLayout:${runId}`,
-        JSON.stringify({ ...layout, flow, links: [...layout.links, ...links] }),
+        JSON.stringify({ ...layout, notes, flow, links: [...layout.links, ...links] }),
       );
       this.push({ kind: 'changed', entity: 'layout', id: runId });
       const event = {
@@ -1113,9 +1159,11 @@ export class DesktopService {
         workerId: run.queenWorkerId,
         type: 'info' as const,
         level: 'info' as const,
-        message: command
-          ? `A Queen montou o fluxo: cada entrega passa por "${command}", falhas voltam ao agente, e o que passar espera a sua aprovação.`
-          : 'A Queen montou o fluxo: cada entrega espera a sua aprovação.',
+        message: !command
+          ? 'A Queen montou o fluxo: cada entrega espera a sua aprovação.'
+          : existing
+            ? `A Queen montou o fluxo: cada entrega passa por "${command}", falhas voltam ao agente, e o que passar espera a sua aprovação.`
+            : `A Queen montou o fluxo: o projeto começa do zero, então a integração final passa por "${command}"; falhas voltam ao agente, e o que passar espera a sua aprovação.`,
         data: { source: 'flow' },
       };
       this.repos.appendEvent(event);
@@ -2156,7 +2204,10 @@ export class DesktopService {
       case 'canvas.autopilot.apply': {
         const { runId, planId, start } = parse(channel);
         const applied = await this.nexusAutopilot.apply(runId, planId, start);
-        await this.scaffoldFlow(runId);
+        await this.scaffoldFlow(runId, {
+          notes: applied.plan.draft.objective,
+          verify: applied.plan.draft.verify,
+        });
         return applied;
       }
       case 'canvas.autopilot.recovery.apply': {

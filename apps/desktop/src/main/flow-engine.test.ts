@@ -173,3 +173,20 @@ describe('FlowEngine', () => {
     expect(engine.state('run_1')['flow:c']?.detail).toContain('não permitido');
   });
 });
+
+describe('instalação antes da verificação', () => {
+  it('instala só quando um projeto Node não tem dependências, com o gerenciador do lockfile', async () => {
+    const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { installCommand } = await import('./flow-engine');
+    const folder = await mkdtemp(path.join(os.tmpdir(), 'hive-install-'));
+    expect(await installCommand(folder)).toBeNull();
+    await writeFile(path.join(folder, 'package.json'), '{}');
+    expect(await installCommand(folder)).toBe('npm install --no-audit --no-fund');
+    await writeFile(path.join(folder, 'pnpm-lock.yaml'), '');
+    expect(await installCommand(folder)).toBe('pnpm install');
+    await mkdir(path.join(folder, 'node_modules'));
+    expect(await installCommand(folder)).toBeNull();
+  });
+});

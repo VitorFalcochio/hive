@@ -239,6 +239,90 @@ describe('NativeAgentRuntime provider trouble', () => {
     expect(events).toContain('waiting_provider');
     expect(events.some((text) => text.includes('Nova tentativa'))).toBe(true);
   });
+
+  it('tells a model that invented a tool which tools exist, and goes on', async () => {
+    const requests: ChatRequest[] = [];
+    const chat = {
+      async chat(request: ChatRequest): Promise<ChatResponse> {
+        requests.push(request);
+        if (requests.length === 1)
+          throw new ProviderError(
+            "Provider error 400. Tool call validation failed: tool call validation failed: attempted to call tool 'repo_browser.print_tree' which was not in request.tools",
+            400,
+          );
+        return {
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: 'c1',
+                type: 'function',
+                function: { name: 'finish', arguments: JSON.stringify({ summary: 'Feito.' }) },
+              },
+            ],
+          },
+          reasoning: null,
+          finishReason: 'tool_calls',
+          usage: null,
+          latencyMs: 1,
+        };
+      },
+    } as ChatClient;
+    const worktree = await mkdtemp(path.join(os.tmpdir(), 'hive-phantom-'));
+    const session = await new NativeAgentRuntime().start({
+      sessionId: 'phantom-test',
+      task: { title: 'Ler', description: 'Termine.', acceptanceCriteria: [], upstream: [] },
+      worker,
+      model: 'test-model',
+      chat,
+      worktreePath: worktree,
+      skills: [],
+      limits,
+      requestApproval: async () => false,
+    });
+    const outcome = await session.done;
+
+    expect(outcome.status).toBe('completed');
+    expect(requests).toHaveLength(2);
+    const note = JSON.stringify(
+      requests[1]!.messages.find(
+        (message) =>
+          typeof message.content === 'string' && message.content.includes('does not exist'),
+      ),
+    );
+    expect(note).toContain('repo_browser.print_tree');
+    expect(note).toContain('read_file');
+  });
+
+  it('fails the task when the model keeps inventing tools', async () => {
+    let calls = 0;
+    const chat = {
+      async chat(): Promise<ChatResponse> {
+        calls++;
+        throw new ProviderError(
+          "Tool call validation failed: attempted to call tool 'browser.search' which was not in request.tools",
+          400,
+        );
+      },
+    } as ChatClient;
+    const worktree = await mkdtemp(path.join(os.tmpdir(), 'hive-phantom-'));
+    const session = await new NativeAgentRuntime().start({
+      sessionId: 'phantom-limit-test',
+      task: { title: 'Ler', description: 'Termine.', acceptanceCriteria: [], upstream: [] },
+      worker,
+      model: 'test-model',
+      chat,
+      worktreePath: worktree,
+      skills: [],
+      limits,
+      requestApproval: async () => false,
+    });
+    const outcome = await session.done;
+
+    expect(outcome.status).toBe('failed');
+    expect(calls).toBe(4);
+  });
 });
 
 describe('NativeAgentRuntime token savings', () => {

@@ -482,11 +482,19 @@ export function NexusAutopilot({
                 </ul>
               </div>
             </section>
-            {(plan.draft.approvalSteps.length > 0 || plan.draft.warnings.length > 0) && (
+            {(plan.draft.approvalSteps.length > 0 ||
+              plan.draft.warnings.length > 0 ||
+              !!plan.draft.verify?.length) && (
               <section className="nc-autopilot-warnings">
                 <h3>Aprovações e avisos</h3>
                 <ul>
-                  {[...plan.draft.approvalSteps, ...plan.draft.warnings].map((line, index) => (
+                  {[
+                    ...(plan.draft.verify?.length
+                      ? [`Precisa passar no fim: ${plan.draft.verify.join(' · ')}`]
+                      : []),
+                    ...plan.draft.approvalSteps,
+                    ...plan.draft.warnings,
+                  ].map((line, index) => (
                     <li key={`${index}:${line}`}>{line}</li>
                   ))}
                 </ul>

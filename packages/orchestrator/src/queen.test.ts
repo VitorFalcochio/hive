@@ -71,3 +71,36 @@ it('a Queen chama especialistas só quando a missão pede', async () => {
   ])
     expect(prompt).toContain(role);
 });
+
+it('pede contrato primeiro, esqueleto num projeto do zero, integração final e comandos de verificação', async () => {
+  const { buildPlanPrompt } = await import('./queen');
+  const messages = buildPlanPrompt({
+    objective: 'Criar um app desktop do zero',
+    title: 'App',
+    workers: [],
+    projectContext: '',
+    chat: {} as never,
+    model: 'm',
+    queen: { systemPrompt: 'Você é a Queen.' } as never,
+  });
+  const system = String(messages[0]!.content);
+  expect(system).toContain('Contract first');
+  expect(system).toContain('started from scratch');
+  expect(system).toContain('The last task integrates');
+  expect(String(messages[1]!.content)).toContain('"verify"');
+  // "verify" is optional: older plans stay valid, and a plan with it keeps it.
+  const tasks = [
+    {
+      key: 'a',
+      title: 'A',
+      description: 'A',
+      workerId: null,
+      dependsOn: [],
+      acceptanceCriteria: ['ok'],
+    },
+  ];
+  expect(validatePlan({ notes: 'n', tasks }, new Set()).plan).not.toBeNull();
+  expect(
+    validatePlan({ notes: 'n', tasks, verify: ['npm run build'] }, new Set()).plan?.verify,
+  ).toEqual(['npm run build']);
+});

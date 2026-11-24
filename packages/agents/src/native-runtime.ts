@@ -446,6 +446,8 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
     error,
   });
   let textOnlyReplies = 0;
+  /** Replies the provider rejected because the model called a tool it was not given. */
+  let phantomTools = 0;
   // The prompt is resent in full on every step, so the budget is close when the next step
   // would pass it. Then the agent is asked for its final summary without tools.
   let wrappingUp = false;
@@ -519,23 +521,41 @@ async function runLoop(env: LoopEnv, loop: LoopOptions): Promise<LoopResult> {
       }
       return response;
     };
-    let response;
-    try {
-      response = await request();
-    } catch (error) {
-      // A model without vision rejects the request outright. The images are taken out and
-      // the step is retried once; from then on images are described instead of sent.
-      if (!ctx.vision || !hasImages(messages) || !isRejection(error)) throw error;
-      ctx.vision = false;
-      dropImages(messages, 0, 'The image could not be shown: your model does not accept images.');
-      emit({
-        type: 'info',
-        level: 'warn',
-        message: `O modelo ${loop.model} não aceita imagens; seguindo sem elas.`,
-        data: { error: excerpt(errorMessage(error), 300) },
-      });
-      response = await request();
-    }
+    const respond = async (): Promise<Awaited<ReturnType<typeof request>>> => {
+      try {
+        return await request();
+      } catch (error) {
+        // Some models (gpt-oss among them) call tools they were trained with but never given,
+        // and the provider rejects the whole reply. The model is told which tools exist and
+        // the step is tried again, a few times per loop, instead of failing the task.
+        const phantom = phantomTool(error);
+        if (phantom !== null && phantomTools < MAX_PHANTOM_TOOLS) {
+          phantomTools++;
+          const names = wrappingUp ? [] : tools.map((tool) => tool.function.name);
+          messages.push({ role: 'user', content: phantomToolNote(phantom, names) });
+          emit({
+            type: 'info',
+            level: 'warn',
+            message: `O modelo tentou usar a ferramenta “${phantom || 'desconhecida'}”, que não existe no Hive; avisado das ferramentas certas, tentando de novo.`,
+            data: { error: excerpt(errorMessage(error), 300) },
+          });
+          return respond();
+        }
+        // A model without vision rejects the request outright. The images are taken out and
+        // the step is retried once; from then on images are described instead of sent.
+        if (!ctx.vision || !hasImages(messages) || !isRejection(error)) throw error;
+        ctx.vision = false;
+        dropImages(messages, 0, 'The image could not be shown: your model does not accept images.');
+        emit({
+          type: 'info',
+          level: 'warn',
+          message: `O modelo ${loop.model} não aceita imagens; seguindo sem elas.`,
+          data: { error: excerpt(errorMessage(error), 300) },
+        });
+        return respond();
+      }
+    };
+    const response = await respond();
     ledger.modelCall(loop.agent, loop.model, response.usage, response.latencyMs);
     if (response.usage) {
       usage.promptTokens += response.usage.promptTokens;
@@ -1125,6 +1145,35 @@ function isRejection(error: unknown): boolean {
   return (
     error.status >= 400 && error.status < 500 && ![401, 403, 404, 408, 429].includes(error.status)
   );
+}
+
+/** Rejected replies with an invented tool tried again in one loop before the task fails. */
+const MAX_PHANTOM_TOOLS = 3;
+
+/**
+ * The tool a model called without being given it, when the provider rejected the reply for that
+ * ("attempted to call tool 'repo_browser.print_tree' which was not in request.tools"); an empty
+ * string when the name is not in the message; null for any other error.
+ */
+export function phantomTool(error: unknown): string | null {
+  if (!(error instanceof ProviderError) || error.status !== 400) return null;
+  const text = errorMessage(error);
+  if (
+    !/tool call validation failed|not in request\.tools|tool .* (?:not found|does not exist)/i.test(
+      text,
+    )
+  )
+    return null;
+  return /tool ['"`]([^'"`]{1,120})['"`]/i.exec(text)?.[1] ?? '';
+}
+
+function phantomToolNote(name: string, tools: string[]): string {
+  const called = name
+    ? `The tool "${name}" does not exist here.`
+    : 'You called a tool that does not exist here.';
+  return tools.length
+    ? `${called} Call only these tools, with exactly these names: ${tools.join(', ')}.`
+    : `${called} Do not call any tool now; reply with plain text.`;
 }
 
 /** What is wrong with the provider, in the words the task card shows. */

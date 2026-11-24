@@ -36,7 +36,8 @@ const shape = `{
       "dependsOn": ["keys of tasks that must finish first"],
       "acceptanceCriteria": ["verifiable statement", "..."]
     }
-  ]
+  ],
+  "verify": ["project commands that must pass when the plan is done, e.g. npm run build"]
 }`;
 
 export function buildPlanPrompt(request: PlanRequest): ChatMessage[] {
@@ -61,6 +62,10 @@ export function buildPlanPrompt(request: PlanRequest): ChatMessage[] {
         '- Assign workerId only from the provided list; match the worker role to the work.',
         '- Specialists (explorer, debugger, security, database, performance, integration, requirements) get a task only when the mission needs that specialty, never just because they exist: an ambiguous request → a requirements task first; an unfamiliar module → an explorer task the coders depend on; a bug to fix → a debugger diagnosis before the fix; a schema change → database; authentication, secrets or permissions → a security review after the change; several parallel tasks sharing a contract → an integration task that depends on them; a slowness complaint → performance.',
         "- Ground the plan in the project context: name the real folders and files involved, follow its README and agent notes, and use the project's own test, lint and build commands in acceptance criteria.",
+        '- Contract first: when two or more tasks build parts of one program in parallel and those parts call each other (shared types, IPC channels, API routes, events, function or method names, file locations), the first task writes that contract as code (a shared types/interfaces file naming every channel, method and data shape) and every task that implements or tests those parts depends on it. Their descriptions say to use exactly the names in that contract and never invent others; tests are written against the contract and the real code, not an imagined API.',
+        '- A project started from scratch: the first task (it may also be the contract task) creates the project skeleton with its manifest, scripts for build, typecheck and test, the entry point of every part the mission needs (e.g. main, preload and renderer of a desktop app) and installed dependencies, so every later task can build.',
+        '- The last task integrates: it depends on every task that writes code, runs the build, typecheck and tests, and fixes what does not fit. Do not end a plan on parallel pieces nobody has put together.',
+        '- "verify": 1 to 3 project commands that must pass when the plan is done, in the order to run them (build or typecheck first, then tests), such as "npm run build" or "npm test". Use the project\'s own commands; for a project started from scratch, the ones its skeleton task creates. Only package-manager scripts or test runners; never servers, watchers or anything that keeps running (dev, start, watch). Hive runs the first one on the agents\' work and sends failures back to them.',
         ...(request.teams
           ? [
               '- Hive Teams is on. For work too big for one session, add "lead": true to the task whose worker should lead it as technical lead: that worker defines the approach, creates its own team members (on other providers too), delegates, asks for reviews and reports back. At most one lead task per plan; leave "lead" out on the others. Tasks that check the final result (QA) depend on the lead task.',
