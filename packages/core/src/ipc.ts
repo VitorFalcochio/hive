@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { LiveResult, MissionNote, ResultEventPage } from './live-result';
+import { guardianActionSchema, type GuardianSnapshot, type RecoveryRecord } from './guardian';
 import {
   canvasQueenRequestSchema,
   type CanvasQueenApplied,
@@ -58,6 +59,7 @@ import {
   type SkillSummary,
   type SkillValidation,
   type Task,
+  type Requirement,
   type Worker,
   type WorkerState,
   type Workspace,
@@ -130,6 +132,44 @@ export interface RunDetail {
   mission: Mission;
   tasks: Task[];
   approvals: Approval[];
+  /** What the plan said the mission must deliver; empty for plans made before requirements. */
+  requirements?: Requirement[];
+  /** The delivery gate's verdict once the run ended; null before. */
+  delivery?: RunDelivery | null;
+}
+
+/** Where one requirement stands when the run ends, and why, in words for the user. */
+export interface DeliveryRequirement {
+  id: string;
+  text: string;
+  /**
+   * met: every task covering it finished and the final check passed. unverified: they finished
+   * but the final check failed or could not run. pending: a task covering it did not finish.
+   * uncovered: no task in the plan covered it.
+   */
+  status: 'met' | 'unverified' | 'pending' | 'uncovered';
+  tasks: { key: string; title: string; status: Task['status'] }[];
+  reason: string;
+}
+
+/**
+ * The delivery gate: when a run ends, the work of every finished task is merged as one project,
+ * on top of where the run started, and the plan's commands (build, tests) run on it. A mission
+ * is "verified" only when they all pass and every requirement is met.
+ */
+export interface RunDelivery {
+  status: 'checking' | 'verified' | 'pending';
+  at: string;
+  /** The integrated commit the commands ran on; null when it could not be made. */
+  commit: string | null;
+  checks: { command: string; ok: boolean; output: string }[];
+  /** Why the commands could not run at all (parts that do not merge, no command), if so. */
+  problem: string | null;
+  requirements: DeliveryRequirement[];
+  /** One line for the user: what was proven and what is missing. */
+  summary: string;
+  /** The finished work this verdict is about, so a new result is checked again. */
+  fingerprint: string;
 }
 
 export interface TaskDiff {
@@ -462,6 +502,19 @@ export const canvasLayoutSchema = z.object({
     .max(10)
     .default([]),
   /**
+   * Dialogue blocks: the run's conversation between the Queen and the agents, built from what
+   * really happened (tasks handed out, started, delivered or failed, Hive Teams, checks, replans).
+   */
+  dialogues: z
+    .array(z.object({ id: layoutKey, x: coordinate, y: coordinate }))
+    .max(5)
+    .default([]),
+  /** Delivery blocks: each requirement of the mission and the final check of the merged work. */
+  deliveries: z
+    .array(z.object({ id: layoutKey, x: coordinate, y: coordinate }))
+    .max(5)
+    .default([]),
+  /**
    * Provider blocks. A line from one to an agent makes the agent use that provider; the lines
    * drawn are the agents that use it now, so the canvas never shows a stale link.
    */
@@ -557,6 +610,8 @@ export const emptyCanvasLayout: CanvasLayout = {
   notes: [],
   frames: [],
   meters: [],
+  dialogues: [],
+  deliveries: [],
   providers: [],
   terminals: [],
   flow: [],
@@ -602,6 +657,14 @@ export const ipcContract = {
   'backup.overview': channel<BackupOverview>()(none),
   /** A copy now, in the backups folder. */
   'backup.create': channel<BackupInfo>()(none),
+  /** Hive Guardian: the last health check, incidents, agents, resources and recent log. */
+  'guardian.snapshot': channel<GuardianSnapshot>()(none),
+  /** Runs every health check now (manual diagnosis). */
+  'guardian.diagnose': channel<GuardianSnapshot>()(none),
+  /** Starts a recovery; the page confirms the ones that remove or stop something first. */
+  'guardian.recover': channel<RecoveryRecord>()(guardianActionSchema),
+  /** Saves the report, with credentials and personal paths removed, where the user picks. */
+  'guardian.export': channel<string | null>()(none),
   /** A copy saved where the user picks; null when cancelled. */
   'backup.export': channel<string | null>()(none),
   /**
@@ -1153,7 +1216,9 @@ export type HivePush =
         | 'missionNote'
         | 'cortex'
         /** The main process changed a run's canvas layout (the Queen built its flow). */
-        | 'layout';
+        | 'layout'
+        /** Hive Guardian checked the hive again. */
+        | 'guardian';
       id: string | null;
     };
 

@@ -513,6 +513,8 @@ export const taskSchema = z.object({
   bestOf: taskBestOfSchema.optional(),
   /** This task is one of those attempts, of the task in `parentTaskId`. */
   candidateOf: taskCandidateSchema.optional(),
+  /** Ids of the mission's requirements (R1, R2…) this task delivers; absent on older plans. */
+  covers: z.array(z.string().max(8)).max(10).optional(),
 });
 export type Task = z.infer<typeof taskSchema>;
 
@@ -530,11 +532,25 @@ export const planTaskSchema = z.object({
   acceptanceCriteria: z.array(z.string().min(1).max(400)).min(1).max(10),
   /** Hive Teams: the task's agent leads a team for it (creates members, delegates, reviews). */
   lead: z.boolean().optional(),
+  /** Ids of the plan's requirements this task delivers. */
+  covers: z.array(z.string().max(8)).max(10).optional(),
 });
 export type PlanTask = z.infer<typeof planTaskSchema>;
 
+/**
+ * One thing the mission must deliver, taken from what the user asked ("R1: lista de processos
+ * com pesquisa"). Each is traced to the tasks that cover it, and checked when the run ends.
+ */
+export const requirementSchema = z.object({
+  id: z.string().regex(/^R\d{1,2}$/, 'Use R1, R2, …'),
+  text: z.string().trim().min(1).max(400),
+});
+export type Requirement = z.infer<typeof requirementSchema>;
+
 export const planSchema = z.object({
   notes: z.string().max(4_000),
+  /** What the mission must deliver, numbered; every one should be covered by some task. */
+  requirements: z.array(requirementSchema).max(20).optional(),
   tasks: z.array(planTaskSchema).min(1).max(12),
   /**
    * The project commands that must pass once the plan is done ("npm run build", "npm test"),

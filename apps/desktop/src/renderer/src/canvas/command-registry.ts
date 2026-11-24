@@ -17,6 +17,8 @@ export type CommandIcon =
   | 'pin'
   | 'cortex'
   | 'tokens'
+  | 'dialogue'
+  | 'delivery'
   | 'provider'
   | 'terminal'
   | 'claude'
@@ -46,6 +48,8 @@ export type PaletteOperation =
   | 'group-selection'
   | 'new-cortex'
   | 'new-tokens'
+  | 'new-dialogue'
+  | 'new-delivery'
   | 'new-provider'
   | 'new-terminal'
   | 'new-claude'
@@ -269,6 +273,24 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
     'tokens',
     'new-tokens',
     ['criar', 'bloco', 'tokens', 'uso', 'consumo', 'orçamento', 'limite', 'monitoramento'],
+  );
+  command(
+    'create.dialogue',
+    'Diálogo',
+    'Bloco com a conversa da equipe: a Queen entregando tarefas e os agentes passando o resultado adiante.',
+    'Criar',
+    'dialogue',
+    'new-dialogue',
+    ['criar', 'bloco', 'diálogo', 'dialogo', 'chat', 'conversa', 'mensagens', 'comunicação'],
+  );
+  command(
+    'create.delivery',
+    'Entrega',
+    'Bloco com os requisitos da missão e a verificação final: o que foi entregue e provado, e o que falta.',
+    'Criar',
+    'delivery',
+    'new-delivery',
+    ['criar', 'bloco', 'entrega', 'requisitos', 'verificação', 'pronto', 'confiança', 'checklist'],
   );
   command(
     'create.schedule',

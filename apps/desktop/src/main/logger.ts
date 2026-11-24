@@ -14,6 +14,26 @@ let file: string | null = null;
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
+/** One line as the Guardian sees it, already bounded and with secrets removed. */
+export interface LogEntry {
+  at: string;
+  level: LogLevel;
+  scope: string;
+  text: string;
+}
+
+type LogListener = (entry: LogEntry) => void;
+const listeners = new Set<LogListener>();
+
+/**
+ * Hears every line written from now on (Hive Guardian follows frozen windows and crashes this
+ * way instead of detecting them a second time). Returns how to stop listening.
+ */
+export function onLog(listener: LogListener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function logFile(): string | null {
   return file;
 }
@@ -34,7 +54,14 @@ function describe(value: unknown): string {
 export function log(level: LogLevel, scope: string, ...parts: unknown[]): void {
   if (!file) return;
   const text = secretRedactor.redact(clipText(parts.map(describe).join(' '), MAX_LINE));
-  const line = `${new Date().toISOString()} ${level.toUpperCase().padEnd(5)} [${scope}] ${text}\n`;
+  const at = new Date().toISOString();
+  const line = `${at} ${level.toUpperCase().padEnd(5)} [${scope}] ${text}\n`;
+  for (const listener of listeners)
+    try {
+      listener({ at, level, scope, text });
+    } catch {
+      // A listener never breaks logging.
+    }
   try {
     // One older file is kept, so the log never grows without bound.
     if ((statSync(file, { throwIfNoEntry: false })?.size ?? 0) > MAX_FILE) {

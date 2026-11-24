@@ -7,6 +7,8 @@ type Size = { width: number; height: number };
 export type Note = CanvasLayout['notes'][number];
 export type Frame = CanvasLayout['frames'][number];
 export type Meter = CanvasLayout['meters'][number];
+export type DialogueBlock = CanvasLayout['dialogues'][number];
+export type DeliveryBlock = CanvasLayout['deliveries'][number];
 export type ProviderBlock = CanvasLayout['providers'][number];
 export type TerminalBlock = CanvasLayout['terminals'][number];
 export type FlowBlock = CanvasLayout['flow'][number];
@@ -38,6 +40,8 @@ export interface LayoutApi {
   addFrame: (frame: Frame) => void;
   updateFrame: (id: string, patch: Partial<Frame>) => void;
   addMeter: (meter: Meter) => void;
+  addDialogue: (block: DialogueBlock) => void;
+  addDelivery: (block: DeliveryBlock) => void;
   addProviderBlock: (block: ProviderBlock) => void;
   addTerminalBlock: (block: TerminalBlock) => void;
   addFlowBlock: (block: FlowBlock) => void;
@@ -163,6 +167,12 @@ export function useLayout(runId: string): LayoutApi {
           const meters = current.meters.map((meter) =>
             positions[meter.id] ? { ...meter, ...round(positions[meter.id]!) } : meter,
           );
+          const dialogues = current.dialogues.map((block) =>
+            positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
+          );
+          const deliveries = current.deliveries.map((block) =>
+            positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
+          );
           const providers = current.providers.map((block) =>
             positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
           );
@@ -173,9 +183,16 @@ export function useLayout(runId: string): LayoutApi {
             positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
           );
           const own = new Set(
-            [...notes, ...frames, ...meters, ...providers, ...terminals, ...flow].map(
-              (item) => item.id,
-            ),
+            [
+              ...notes,
+              ...frames,
+              ...meters,
+              ...dialogues,
+              ...deliveries,
+              ...providers,
+              ...terminals,
+              ...flow,
+            ].map((item) => item.id),
           );
           const pinned = { ...current.pinned[mode] };
           for (const [id, point] of Object.entries(positions))
@@ -185,6 +202,8 @@ export function useLayout(runId: string): LayoutApi {
             notes,
             frames,
             meters,
+            dialogues,
+            deliveries,
             providers,
             terminals,
             flow,
@@ -246,6 +265,10 @@ export function useLayout(runId: string): LayoutApi {
         })),
       addMeter: (meter) =>
         change((current) => ({ ...current, meters: [...current.meters, meter] })),
+      addDialogue: (block) =>
+        change((current) => ({ ...current, dialogues: [...current.dialogues, block] })),
+      addDelivery: (block) =>
+        change((current) => ({ ...current, deliveries: [...current.deliveries, block] })),
       addProviderBlock: (block) =>
         change((current) => ({ ...current, providers: [...current.providers, block] })),
       addTerminalBlock: (block) =>
@@ -285,6 +308,8 @@ export function useLayout(runId: string): LayoutApi {
             !current.notes.some((n) => gone.has(n.id)) &&
             !current.frames.some((f) => gone.has(f.id)) &&
             !current.meters.some((m) => gone.has(m.id)) &&
+            !current.dialogues.some((d) => gone.has(d.id)) &&
+            !current.deliveries.some((d) => gone.has(d.id)) &&
             !current.providers.some((p) => gone.has(p.id)) &&
             !current.terminals.some((t) => gone.has(t.id)) &&
             !current.flow.some((f) => gone.has(f.id))
@@ -298,6 +323,8 @@ export function useLayout(runId: string): LayoutApi {
             notes: current.notes.filter((note) => !gone.has(note.id)),
             frames: current.frames.filter((frame) => !gone.has(frame.id)),
             meters: current.meters.filter((meter) => !gone.has(meter.id)),
+            dialogues: current.dialogues.filter((block) => !gone.has(block.id)),
+            deliveries: current.deliveries.filter((block) => !gone.has(block.id)),
             providers: current.providers.filter((block) => !gone.has(block.id)),
             terminals: current.terminals.filter((block) => !gone.has(block.id)),
             flow: current.flow.filter((block) => !gone.has(block.id)),
@@ -314,5 +341,14 @@ const round = (point: Point): Point => ({ x: Math.round(point.x), y: Math.round(
 
 /** A short id for notes, frames and meters; they live only in the layout. */
 export const localId = (
-  prefix: 'note' | 'frame' | 'tokens' | 'provider' | 'terminal' | 'flow' | 'link',
+  prefix:
+    | 'note'
+    | 'frame'
+    | 'tokens'
+    | 'dialogue'
+    | 'delivery'
+    | 'provider'
+    | 'terminal'
+    | 'flow'
+    | 'link',
 ) => `${prefix}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;

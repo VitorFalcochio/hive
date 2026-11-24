@@ -2,6 +2,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 're
 import {
   Bot,
   Gauge,
+  MessagesSquare,
+  ShieldCheck,
   Plug,
   CheckSquare,
   FileText,
@@ -48,6 +50,8 @@ const icons: Record<CommandIcon, ComponentType<{ size?: number }>> = {
   pin: MapPin,
   cortex: PixelDrop,
   tokens: Gauge,
+  dialogue: MessagesSquare,
+  delivery: ShieldCheck,
   provider: Plug,
   terminal: SquareTerminal,
   claude: ClaudeLogo,

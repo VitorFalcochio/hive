@@ -36,6 +36,7 @@ import {
   git,
   hiveCommitFlags,
   inspectRepository,
+  isEnvironmentFailure,
   isHiveBranch,
   statusPorcelain,
   taskBranchName,
@@ -303,31 +304,76 @@ export class Scheduler {
   }
 
   /**
-   * Removes worktrees in Hive's folder that no task owns: what a crash left behind. A check
-   * worktree of the Flow may be in use right now, so only old ones are removed.
+   * Worktrees in Hive's folder that no task owns: what a crash left behind. A check or delivery
+   * worktree may be in use right now, so only old ones count. One with changes nobody committed
+   * is marked `dirty`: it is never removed, since that work exists nowhere else.
    */
-  private async removeLeftoverWorktrees(): Promise<void> {
+  async leftoverWorktrees(): Promise<{ workspaceId: string; path: string; dirty: boolean }[]> {
     const owned = new Set(
       this.repos.tasks
         .list()
         .filter((task) => task.worktreePath)
         .map((task) => path.resolve(task.worktreePath!)),
     );
+    const found: { workspaceId: string; path: string; dirty: boolean }[] = [];
     for (const workspace of this.repos.workspaces.list()) {
       const root = this.options.worktreeRoot(workspace);
       const names = await readdir(root).catch(() => [] as string[]);
-      if (!names.length) continue;
-      const manager = new WorktreeManager(workspace.path, root);
       for (const name of names) {
         const target = path.join(root, name);
         if (owned.has(path.resolve(target))) continue;
-        if (name.startsWith('check-')) {
+        if (name.startsWith('check-') || name.startsWith('delivery-')) {
           const info = await stat(target).catch(() => null);
           if (!info || Date.now() - info.mtimeMs < 60 * 60_000) continue;
         }
-        await manager.remove(target, null).catch(() => undefined);
+        // Only a folder that is a worktree itself has changes of its own to keep. A plain or
+        // half-created one would make git answer for whatever repository is around it.
+        const top = await git(target, ['rev-parse', '--show-toplevel'], {
+          allowFailure: true,
+          timeoutMs: 30_000,
+        }).catch(() => null);
+        const own =
+          !!top &&
+          top.code === 0 &&
+          path.resolve(top.stdout.trim()).toLowerCase() === path.resolve(target).toLowerCase();
+        const status = own
+          ? await git(target, ['status', '--porcelain'], {
+              allowFailure: true,
+              timeoutMs: 30_000,
+            }).catch(() => null)
+          : null;
+        found.push({
+          workspaceId: workspace.id,
+          path: target,
+          dirty: !!status && status.code === 0 && status.stdout.trim() !== '',
+        });
       }
     }
+    return found;
+  }
+
+  /** Removes the leftover worktrees that hold no uncommitted work; how many were removed. */
+  async pruneWorktrees(): Promise<{ removed: number; kept: number }> {
+    let removed = 0;
+    let kept = 0;
+    for (const leftover of await this.leftoverWorktrees()) {
+      if (leftover.dirty) {
+        kept++;
+        continue;
+      }
+      const workspace = this.repos.workspaces.get(leftover.workspaceId);
+      if (!workspace) continue;
+      const manager = new WorktreeManager(workspace.path, this.options.worktreeRoot(workspace));
+      await manager.remove(leftover.path, null).then(
+        () => removed++,
+        () => undefined,
+      );
+    }
+    return { removed, kept };
+  }
+
+  private async removeLeftoverWorktrees(): Promise<void> {
+    await this.pruneWorktrees();
   }
 
   /** Start (or resume) a run: unfinished tasks are reset and scheduled. */
@@ -1513,6 +1559,8 @@ export class Scheduler {
     error: string | null,
   ): boolean {
     if (!this.options.unattended?.(run.id)) return false;
+    // Git missing or the project folder broken: another attempt would fail the same way.
+    if (isEnvironmentFailure(error)) return false;
     const max = this.repos.getSettings().autopilot.maxAttempts;
     if (attempt >= max || this.repos.runs.get(run.id)?.status !== 'running') return false;
     const reason = error?.trim() || 'erro sem descrição';

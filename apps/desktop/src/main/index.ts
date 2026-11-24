@@ -109,7 +109,10 @@ const windows = new WindowManager({
   loadValue: (key) => desktopService?.repos.getValue(key) ?? null,
   // The canvas sees the output of its own terminals only, and no file-watch noise.
   canvasReceives: (push) =>
-    push.kind === 'files' || push.kind === 'update' || push.kind === 'agentChat'
+    push.kind === 'files' ||
+    push.kind === 'update' ||
+    push.kind === 'agentChat' ||
+    (push.kind === 'changed' && push.entity === 'guardian')
       ? false
       : push.kind === 'terminal'
         ? !!desktopService?.isCanvasTerminal(

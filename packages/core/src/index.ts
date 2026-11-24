@@ -13,3 +13,4 @@ export * from './nexus-autopilot';
 export * from './cortex';
 export * from './teams';
 export * from './agent-chat';
+export * from './guardian';

@@ -1024,3 +1024,28 @@ describe('Scheduler com várias tentativas', { timeout: 120_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
 });
+
+describe('cópias sobrando (worktrees órfãs)', { timeout: 60_000 }, () => {
+  it('remove só as limpas: uma com alterações não salvas nunca é apagada', async () => {
+    const { repo, scheduler, worktreeRoot, git } = await setup(async () => ({}), []);
+    await mkdir(worktreeRoot, { recursive: true });
+    const clean = path.join(worktreeRoot, 'sobra-limpa');
+    const dirty = path.join(worktreeRoot, 'sobra-suja');
+    git('worktree', 'add', '--detach', clean, 'HEAD');
+    git('worktree', 'add', '--detach', dirty, 'HEAD');
+    await writeFile(path.join(dirty, 'trabalho.txt'), 'algo que ninguém salvou');
+    const found = await scheduler.leftoverWorktrees();
+    expect(found.map((item) => [path.basename(item.path), item.dirty]).sort()).toEqual([
+      ['sobra-limpa', false],
+      ['sobra-suja', true],
+    ]);
+    expect(await scheduler.pruneWorktrees()).toEqual({ removed: 1, kept: 1 });
+    expect(existsSync(clean)).toBe(false);
+    expect(await readFile(path.join(dirty, 'trabalho.txt'), 'utf8')).toBe(
+      'algo que ninguém salvou',
+    );
+    // Repeating it changes nothing more.
+    expect(await scheduler.pruneWorktrees()).toEqual({ removed: 0, kept: 1 });
+    expect(existsSync(repo)).toBe(true);
+  });
+});

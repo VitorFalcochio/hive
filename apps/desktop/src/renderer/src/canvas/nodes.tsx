@@ -1,9 +1,20 @@
-import { createContext, memo, useContext, useEffect, useState, type CSSProperties } from 'react';
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
 import { FULL_AT, NectarDrips, PixelDrop } from './cortex/nectar-art';
 import {
   ArrowUpRight,
+  Bot,
   ChevronDown,
+  MessagesSquare,
   ChevronRight,
   GitBranch,
   Pin,
@@ -22,6 +33,9 @@ import {
   Play,
   Stamp,
   X,
+  Loader2,
+  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import type {
   AgentEvent,
@@ -29,6 +43,7 @@ import type {
   CanvasSnapshot,
   CanvasTerminal,
   CanvasWorker,
+  DeliveryRequirement,
   FlowBlockState,
   Task,
   TerminalEvent,
@@ -44,6 +59,7 @@ import { HoneyJar } from '../honey';
 import { ClaudeLogo, ProviderLogo, providerColor } from '../provider-logo';
 import { TerminalView } from '../terminal-view';
 import { AgentWindow, RestoreButton, type AgentTab } from './agent-window';
+import { buildDialogue } from './dialogue';
 import {
   UNASSIGNED,
   isLive,
@@ -133,6 +149,8 @@ export type CanvasNode = Node<
   | 'result'
   | 'cortex'
   | 'tokens'
+  | 'dialogue'
+  | 'delivery'
   | 'provider'
   | 'terminal'
   | 'flow'
@@ -1323,7 +1341,242 @@ export const FlowNode = memo(function FlowNode({ id, selected }: NodeProps<Canva
   );
 });
 
+const dialogueTime = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+/**
+ * The Dialogue block: the team's conversation in this run, as a chat. Each line is something
+ * that really happened (see `buildDialogue`); it follows the newest line unless the user
+ * scrolled up to read.
+ */
+export const DialogueNode = memo(function DialogueNode({ id, selected }: NodeProps<CanvasNode>) {
+  const view = useView();
+  const { tasks, run } = view.snapshot.detail;
+  const messages = useMemo(
+    () => buildDialogue({ tasks, events: view.events, queenWorkerId: run.queenWorkerId }),
+    [tasks, view.events, run.queenWorkerId],
+  );
+  const list = useRef<HTMLOListElement>(null);
+  const following = useRef(true);
+  useEffect(() => {
+    const element = list.current;
+    if (element && following.current) element.scrollTop = element.scrollHeight;
+  }, [messages.length]);
+  const name = (workerId: string | null) =>
+    workerId ? (view.workers.get(workerId)?.name ?? 'Agente') : 'Hive';
+  return (
+    <>
+      <NodeResizer
+        isVisible={selected}
+        minWidth={300}
+        minHeight={240}
+        lineClassName="nc-resize-line"
+        handleClassName="nc-resize-handle"
+        onResizeEnd={(_, size) => view.setSize(id, { width: size.width, height: size.height })}
+      />
+      <div className={`nc-dialogue${selected ? ' selected' : ''}`}>
+        <header>
+          <MessagesSquare size={14} /> <strong>Diálogo</strong>
+          <span className="nc-dialogue-count">
+            {messages.length ? `${messages.length} mensagens` : 'aguardando'}
+          </span>
+        </header>
+        {!messages.length ? (
+          <p className="nc-dialogue-empty">
+            A conversa da equipe aparece aqui: a Queen entregando as tarefas, cada agente começando
+            com o que recebeu e passando o resultado adiante.
+          </p>
+        ) : (
+          <ol
+            ref={list}
+            className="nc-dialogue-list nowheel nodrag"
+            aria-label="Conversa da equipe"
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              following.current =
+                element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+            }}
+          >
+            {messages.map((message) => {
+              const worker = message.from ? view.workers.get(message.from) : undefined;
+              return (
+                <li key={message.id} className={`nc-dialogue-line kind-${message.kind}`}>
+                  <span className="nc-dialogue-avatar" aria-hidden>
+                    {worker ? (
+                      <AgentBee worker={worker} size={22} mood="still" />
+                    ) : (
+                      <Bot size={16} />
+                    )}
+                  </span>
+                  <div className="nc-dialogue-body">
+                    <div className="nc-dialogue-meta">
+                      <strong className="truncate">{name(message.from)}</strong>
+                      {message.to.length > 0 && (
+                        <span className="nc-dialogue-to truncate">
+                          → {message.to.map((to) => name(to)).join(', ')}
+                        </span>
+                      )}
+                      <time dateTime={message.at}>{dialogueTime.format(new Date(message.at))}</time>
+                    </div>
+                    <p>{message.text}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
+    </>
+  );
+});
+
+const requirementLabels: Record<DeliveryRequirement['status'], string> = {
+  met: 'Entregue e verificado',
+  unverified: 'Feito, sem prova',
+  pending: 'Não terminou',
+  uncovered: 'Ninguém cobriu',
+};
+
+/**
+ * The Delivery block: what the mission must deliver (the plan's requirements) and where each
+ * stands, then the delivery gate's verdict on the merged work. While the run goes, each
+ * requirement shows how many of its tasks are done; nothing is called delivered without the
+ * final check.
+ */
+export const DeliveryNode = memo(function DeliveryNode({ id, selected }: NodeProps<CanvasNode>) {
+  const view = useView();
+  const { tasks, requirements = [], delivery = null } = view.snapshot.detail;
+  const verdict = delivery?.status ?? null;
+  const badge =
+    verdict === 'verified'
+      ? { tone: 'ok', text: 'Pronta e verificada', icon: <ShieldCheck size={13} /> }
+      : verdict === 'pending'
+        ? { tone: 'warn', text: 'Com pendências', icon: <ShieldAlert size={13} /> }
+        : verdict === 'checking'
+          ? { tone: 'busy', text: 'Verificando…', icon: <Loader2 size={13} className="spin" /> }
+          : { tone: 'idle', text: 'Em andamento', icon: null };
+  // Before the verdict: progress from the tasks that cover each requirement.
+  const live = (requirementId: string) => {
+    const covering = tasks.filter(
+      (task) => !task.candidateOf && task.covers?.includes(requirementId),
+    );
+    const done = covering.filter((task) => ['completed', 'approved'].includes(task.status));
+    return { covering, done };
+  };
+  const rows: {
+    id: string;
+    text: string;
+    tone: string;
+    label: string;
+    reason: string;
+  }[] = delivery
+    ? delivery.requirements.map((item) => ({
+        id: item.id,
+        text: item.text,
+        tone: item.status,
+        label: requirementLabels[item.status],
+        reason: item.reason,
+      }))
+    : requirements.map((item) => {
+        const { covering, done } = live(item.id);
+        return {
+          id: item.id,
+          text: item.text,
+          tone: !covering.length ? 'uncovered' : 'progress',
+          label: !covering.length
+            ? requirementLabels.uncovered
+            : `${done.length}/${covering.length} tarefa(s)`,
+          reason: covering.map((task) => `“${task.title}”`).join(', '),
+        };
+      });
+  const met = delivery?.requirements.filter((item) => item.status === 'met').length ?? 0;
+  return (
+    <>
+      <NodeResizer
+        isVisible={selected}
+        minWidth={300}
+        minHeight={220}
+        lineClassName="nc-resize-line"
+        handleClassName="nc-resize-handle"
+        onResizeEnd={(_, size) => view.setSize(id, { width: size.width, height: size.height })}
+      />
+      <div className={`nc-delivery verdict-${badge.tone}${selected ? ' selected' : ''}`}>
+        <header>
+          <ShieldCheck size={14} /> <strong>Entrega</strong>
+          <span className={`nc-delivery-badge tone-${badge.tone}`}>
+            {badge.icon}
+            {badge.text}
+          </span>
+        </header>
+        {delivery && <p className="nc-delivery-summary">{delivery.summary}</p>}
+        {delivery && delivery.requirements.length > 0 && (
+          <div
+            className="nc-delivery-meter"
+            role="meter"
+            aria-label="Requisitos entregues e verificados"
+            aria-valuemin={0}
+            aria-valuemax={delivery.requirements.length}
+            aria-valuenow={met}
+          >
+            <span style={{ width: `${(met / delivery.requirements.length) * 100}%` }} />
+          </div>
+        )}
+        <div className="nc-delivery-scroll nowheel nodrag">
+          {delivery && (delivery.checks.length > 0 || delivery.problem) && (
+            <section>
+              <h4>Verificação final</h4>
+              {delivery.problem && <p className="nc-delivery-problem">{delivery.problem}</p>}
+              <ul className="nc-delivery-checks">
+                {delivery.checks.map((check) => (
+                  <li key={check.command} className={check.ok ? 'ok' : 'fail'}>
+                    <details>
+                      <summary>
+                        {check.ok ? <Check size={12} /> : <X size={12} />}
+                        <code>{check.command}</code>
+                        <span>{check.ok ? 'passou' : 'falhou'}</span>
+                      </summary>
+                      <pre>{check.output || '(sem saída)'}</pre>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {rows.length > 0 ? (
+            <section>
+              <h4>Requisitos</h4>
+              <ol className="nc-delivery-requirements">
+                {rows.map((row) => (
+                  <li key={row.id} className={`tone-${row.tone}`} title={row.reason}>
+                    <span className="nc-delivery-id">{row.id}</span>
+                    <div>
+                      <p>{row.text}</p>
+                      <span className="nc-delivery-status">
+                        {row.label}
+                        {row.reason && <> · {row.reason}</>}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : (
+            !delivery && (
+              <p className="nc-delivery-empty">
+                Os requisitos da missão aparecem aqui depois que a Queen planejar. Quando a equipe
+                terminar, o Hive junta o trabalho de todos, roda a verificação final e diz o que foi
+                entregue e o que falta.
+              </p>
+            )
+          )}
+        </div>
+      </div>
+    </>
+  );
+});
+
 export const nodeTypes = {
+  dialogue: DialogueNode,
+  delivery: DeliveryNode,
   cortex: CortexNode,
   result: LiveResultNode,
   agent: AgentNode,

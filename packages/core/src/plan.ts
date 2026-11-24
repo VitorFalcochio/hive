@@ -33,6 +33,22 @@ export function checkPlanGraph(plan: Plan, knownWorkerIds?: ReadonlySet<string>)
   });
   const cycle = findCycle(plan.tasks);
   if (cycle) issues.push({ path: 'tasks', message: `Dependency cycle: ${cycle.join(' → ')}` });
+  // Requirements: unique ids, and tasks may only cover ones that exist. One no task covers is
+  // allowed here (a weak model must not fail planning for it) and shows as uncovered at the end.
+  const requirementIds = new Set<string>();
+  plan.requirements?.forEach((requirement, index) => {
+    if (requirementIds.has(requirement.id))
+      issues.push({
+        path: `requirements.${index}.id`,
+        message: `Duplicate requirement "${requirement.id}".`,
+      });
+    requirementIds.add(requirement.id);
+  });
+  plan.tasks.forEach((task, index) => {
+    for (const id of task.covers ?? [])
+      if (!requirementIds.has(id))
+        issues.push({ path: `tasks.${index}.covers`, message: `Unknown requirement "${id}".` });
+  });
   return issues;
 }
 

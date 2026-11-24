@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -260,11 +260,15 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
                     content: JSON.stringify({
                       notes: 'Contrato primeiro, depois a interface, depois a integração.',
                       tasks: [
-                        task('contract', backend.id, []),
+                        { ...task('contract', backend.id, []), covers: ['R1'] },
                         task('ui', frontend.id, ['contract']),
                         task('integrate', backend.id, ['ui']),
                       ],
                       verify: ['rm -rf /', 'npm run build', 'npm test'],
+                      requirements: [
+                        { id: 'R1', text: 'Canais IPC tipados' },
+                        { id: 'R2', text: 'README com instalação' },
+                      ],
                     }),
                   },
                 },
@@ -280,6 +284,8 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
       flow: { id: string; kind: string; command?: string; retries?: number }[];
       links: { source: string; target: string; port: string }[];
       notes: { text: string }[];
+      dialogues: { id: string }[];
+      deliveries: { id: string }[];
     };
     let layout: Layout | null = null;
     for (let i = 0; i < 100 && !layout?.flow.length; i++) {
@@ -304,6 +310,68 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
     expect(note.text).toContain('Contrato primeiro');
     expect(note.text).toContain('npm run build · npm test');
     expect(note.text).not.toContain('rm -rf');
+    // The team's conversation is on the canvas from the start.
+    expect(layout!.dialogues).toHaveLength(1);
+    expect(layout!.deliveries).toHaveLength(1);
+    // The requirements reach the screen, and each agent reads the ones its task delivers.
+    const detail = (await service.invoke('run.get', created.runId)) as RunDetail;
+    expect(detail.requirements?.map((item) => item.id)).toEqual(['R1', 'R2']);
+    const contract = detail.tasks.find((item) => item.key === 'contract')!;
+    expect(contract.covers).toEqual(['R1']);
+    expect(contract.description).toContain('R1: Canais IPC tipados');
+    expect(contract.description).not.toContain('R2');
+    expect(detail.delivery).toBeNull();
+  });
+
+  it('sem um repositório Git usável, nem planeja nem executa, e diz o que fazer', async () => {
+    const repo = await mkdtemp(path.join(os.tmpdir(), 'hive-semgit-'));
+    const git = (args: string[]) => execFileSync('git', args, { cwd: repo, windowsHide: true });
+    git(['init', '-b', 'main']);
+    await writeFile(path.join(repo, 'README.md'), '# Sem git\n');
+    git(['add', 'README.md']);
+    git([
+      '-c',
+      'user.name=T',
+      '-c',
+      'user.email=t@hive.local',
+      '-c',
+      'core.hooksPath=',
+      'commit',
+      '-m',
+      'i',
+    ]);
+    mocks.selected = repo;
+    const { service } = setup();
+    await service.invoke('workspace.pick', undefined);
+    const provider = (await service.invoke('provider.save', {
+      kind: 'openai-compatible',
+      name: 'Local',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      enabled: true,
+    })) as ProviderConfig;
+    const queen = ((await service.invoke('worker.list', undefined)) as Worker[]).find(
+      (worker) => worker.role === 'queen',
+    )!;
+    await service.invoke('worker.save', { ...queen, providerId: provider.id, modelId: 'm' });
+    const created = (await service.invoke('mission.create', {
+      title: 'Sem Git',
+      objective: 'Qualquer coisa.',
+    })) as MissionDetail & { runId: string };
+    // The project stops being a repository after it was opened.
+    await rm(path.join(repo, '.git'), { recursive: true, force: true });
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    await expect(
+      service.invoke('run.plan', { runId: created.runId, queenWorkerId: queen.id }),
+    ).rejects.toThrow('não é um repositório Git');
+    await expect(service.invoke('run.start', created.runId)).rejects.toThrow(
+      'não é um repositório Git',
+    );
+    // Nothing was spent and the mission is left as it was, ready once Git works.
+    expect(fetch).not.toHaveBeenCalled();
+    expect(((await service.invoke('run.get', created.runId)) as RunDetail).run.status).toBe(
+      'draft',
+    );
   });
 
   it('no Modo Turno, planeja a missão da fila sozinho e registra por que não pôde executar', async () => {

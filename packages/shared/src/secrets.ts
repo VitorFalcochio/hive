@@ -9,6 +9,9 @@ export function maskSecret(secret: string): string {
  * Every secret loaded from the secret store is registered here, and `redact` replaces any
  * occurrence before text is persisted or sent to the renderer.
  */
+const KEY_SHAPES =
+  /\b(?:sk-(?:ant-|or-|proj-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|gsk_[A-Za-z0-9]{30,}|AIza[A-Za-z0-9_-]{30,}|nvapi-[A-Za-z0-9_-]{30,}|xox[abposr]-[A-Za-z0-9-]{20,})/g;
+
 class SecretRedactor {
   private readonly values = new Set<string>();
 
@@ -26,7 +29,10 @@ class SecretRedactor {
       if (result.includes(value)) result = result.split(value).join('[REDACTED]');
     }
     // Common bearer token shapes, in case a provider echoes a header back.
-    return result.replace(/(Bearer\s+)[A-Za-z0-9._-]{12,}/g, '$1[REDACTED]');
+    result = result.replace(/(Bearer\s+)[A-Za-z0-9._-]{12,}/g, '$1[REDACTED]');
+    // Keys Hive was never told about (pasted in a prompt, printed by a command) still have a
+    // known shape: OpenAI/Anthropic/OpenRouter (sk-…), GitHub, Groq, Google, NVIDIA, Slack.
+    return result.replace(KEY_SHAPES, '[REDACTED]');
   }
 
   redactDeep<T>(value: T): T {

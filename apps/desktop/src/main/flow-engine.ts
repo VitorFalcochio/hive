@@ -470,7 +470,10 @@ async function exists(target: string): Promise<boolean> {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Runs a command in a shell, with a time limit; returns the exit code and the output. */
-function runCommand(command: string, cwd: string): Promise<{ code: number; output: string }> {
+export function runCommand(
+  command: string,
+  cwd: string,
+): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
     const env: NodeJS.ProcessEnv = { ...process.env, CI: '1', FORCE_COLOR: '0' };
     delete env.ELECTRON_RUN_AS_NODE;

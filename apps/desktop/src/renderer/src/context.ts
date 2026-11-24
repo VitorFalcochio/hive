@@ -26,6 +26,8 @@ export type View =
   | 'agentChat'
   | 'providers'
   | 'skills'
+  /** Hive Guardian: health, incidents and recoveries of the hive. */
+  | 'guardian'
   | 'settings'
   | 'about';
 

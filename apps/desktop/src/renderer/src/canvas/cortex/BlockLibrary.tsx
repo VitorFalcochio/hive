@@ -7,6 +7,8 @@ import {
   Frame,
   Gauge,
   GripVertical,
+  MessagesSquare,
+  ShieldCheck,
   Plug,
   SquareTerminal,
   StickyNote,
@@ -21,6 +23,8 @@ export type BlockKind =
   | 'frame'
   | 'cortex'
   | 'tokens'
+  | 'dialogue'
+  | 'delivery'
   | 'provider'
   | 'terminal'
   | 'claude'
@@ -116,6 +120,18 @@ const categories: {
         title: 'Tokens',
         description: 'Uso de hoje em % do orçamento diário, ao vivo.',
         icon: Gauge,
+      },
+      {
+        kind: 'dialogue',
+        title: 'Diálogo',
+        description: 'A conversa da equipe: quem entregou o quê a quem, ao vivo.',
+        icon: MessagesSquare,
+      },
+      {
+        kind: 'delivery',
+        title: 'Entrega',
+        description: 'Cada requisito da missão e a verificação final do projeto integrado.',
+        icon: ShieldCheck,
       },
     ],
   },

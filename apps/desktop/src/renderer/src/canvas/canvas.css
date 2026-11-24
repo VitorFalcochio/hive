@@ -4387,3 +4387,295 @@ button.nc-flow-action.primary {
 .nc-chip.verdict-changes_requested {
   --tone: var(--warning);
 }
+
+/* Dialogue block: the team's conversation, as a chat. */
+.nc-dialogue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 12px 10px 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+.nc-dialogue.selected {
+  border-color: rgb(255 255 255 / 50%);
+}
+.nc-dialogue header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.nc-dialogue-count {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.nc-dialogue-empty {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.nc-dialogue-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  margin: 0;
+  padding: 0 4px 0 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+.nc-dialogue-line {
+  display: flex;
+  gap: 8px;
+  padding-left: 8px;
+  border-left: 2px solid transparent;
+  animation: nc-dialogue-in 220ms ease-out;
+}
+.nc-dialogue-line.kind-assign {
+  border-left-color: #f5b544;
+}
+.nc-dialogue-line.kind-deliver {
+  border-left-color: #4ade80;
+}
+.nc-dialogue-line.kind-fail {
+  border-left-color: #f87185;
+}
+.nc-dialogue-line.kind-team,
+.nc-dialogue-line.kind-replan {
+  border-left-color: #a78bfa;
+}
+.nc-dialogue-line.kind-flow {
+  border-left-color: #5ccfe6;
+}
+.nc-dialogue-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--muted-foreground);
+}
+.nc-dialogue-body {
+  min-width: 0;
+  flex: 1;
+}
+.nc-dialogue-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+.nc-dialogue-to {
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+.nc-dialogue-meta time {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.nc-dialogue-body p {
+  margin: 2px 0 0;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+@keyframes nc-dialogue-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nc-dialogue-line {
+    animation: none;
+  }
+}
+
+/* Delivery block: the mission's requirements and the final check of the merged work. */
+.nc-delivery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 12px 10px 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+.nc-delivery.verdict-ok {
+  border-color: rgb(74 222 128 / 55%);
+}
+.nc-delivery.verdict-warn {
+  border-color: rgb(245 181 68 / 55%);
+}
+.nc-delivery.selected {
+  border-color: rgb(255 255 255 / 50%);
+}
+.nc-delivery header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.nc-delivery-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgb(255 255 255 / 8%);
+  color: var(--muted-foreground);
+}
+.nc-delivery-badge.tone-ok {
+  background: rgb(74 222 128 / 15%);
+  color: #4ade80;
+}
+.nc-delivery-badge.tone-warn {
+  background: rgb(245 181 68 / 15%);
+  color: #f5b544;
+}
+.nc-delivery-badge.tone-busy {
+  color: #5ccfe6;
+}
+.nc-delivery-summary,
+.nc-delivery-empty,
+.nc-delivery-problem {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.nc-delivery-empty {
+  color: var(--muted-foreground);
+}
+.nc-delivery-problem {
+  color: #f87185;
+}
+.nc-delivery-meter {
+  flex: none;
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+  overflow: hidden;
+}
+.nc-delivery-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #4ade80;
+  transition: width 300ms ease;
+}
+.nc-delivery-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding-right: 4px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.nc-delivery h4 {
+  margin: 0 0 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.nc-delivery-checks,
+.nc-delivery-requirements {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.nc-delivery-checks summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.nc-delivery-checks li.ok summary {
+  color: #4ade80;
+}
+.nc-delivery-checks li.fail summary {
+  color: #f87185;
+}
+.nc-delivery-checks code {
+  color: var(--foreground);
+}
+.nc-delivery-checks summary span {
+  margin-left: auto;
+  font-size: 11px;
+}
+.nc-delivery-checks pre {
+  max-height: 160px;
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 30%);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+.nc-delivery-requirements li {
+  display: flex;
+  gap: 8px;
+  padding-left: 8px;
+  border-left: 2px solid rgb(255 255 255 / 12%);
+}
+.nc-delivery-requirements li.tone-met {
+  border-left-color: #4ade80;
+}
+.nc-delivery-requirements li.tone-unverified {
+  border-left-color: #f5b544;
+}
+.nc-delivery-requirements li.tone-pending,
+.nc-delivery-requirements li.tone-uncovered {
+  border-left-color: #f87185;
+}
+.nc-delivery-requirements li.tone-progress {
+  border-left-color: #5ccfe6;
+}
+.nc-delivery-id {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.nc-delivery-requirements p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.nc-delivery-status {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}

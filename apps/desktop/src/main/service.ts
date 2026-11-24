@@ -1,7 +1,7 @@
-import { app, dialog, Notification, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, dialog, Notification, safeStorage, shell } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   ipcContract,
@@ -34,6 +34,10 @@ import {
 } from '@hive/core';
 import { HiveDatabase, Repositories, SCHEMA_VERSION } from '@hive/persistence';
 import { FlowEngine, allowedCheckCommand } from './flow-engine';
+import { DeliveryGate } from './delivery';
+import { Guardian } from './guardian/guardian';
+import { collectResources } from './guardian/resources';
+import { logFile, onLog } from './logger';
 import {
   ChatGPTPlanClient,
   ChatGPTSession,
@@ -50,6 +54,7 @@ import {
 import { newId, nowIso, maskSecret, secretRedactor, HiveError, errorMessage } from '@hive/shared';
 import {
   git,
+  gitPreflight,
   hiveCommitFlags,
   inspectRepository,
   listWorktrees,
@@ -127,6 +132,11 @@ export class DesktopService {
   /** Hive Teams: leaders' requests for agents, delegations and reviews (off unless enabled). */
   readonly teams: HiveTeams;
   private readonly flow: FlowEngine;
+  /** Checks the merged work of a run when it ends, and where each requirement stands. */
+  private readonly delivery: DeliveryGate;
+  /** Hive Guardian: health checks, incidents and recoveries, with no model involved. */
+  private readonly guardian: Guardian;
+  private readonly stopListening: () => void;
   readonly autopilot: Autopilot;
   readonly terminals: TerminalManager;
   /** Direct Agent Chat: conversations with one agent, without a mission or the Queen. */
@@ -313,7 +323,7 @@ export class DesktopService {
         if (run.status === 'running' || run.status === 'planning') return;
         // Without a plan, the shift plans it first and then runs it.
         if (!this.repos.tasks.list('run_id = ?', runId).length) this.autopilot.enqueue(runId);
-        else this.scheduler.start(runId);
+        else await this.startRun(runId);
       },
       notify: (title, body) => {
         if (Notification.isSupported()) new Notification({ title, body }).show();
@@ -339,6 +349,65 @@ export class DesktopService {
       },
     });
     this.flow.start();
+    this.delivery = new DeliveryGate({
+      repos: this.repos,
+      worktreeRoot: (workspaceId) => path.join(this.dataDir, 'worktrees', workspaceId),
+      commands: (folder) => this.flow.verificationCommands(folder),
+      onChange: (runId) => this.push({ kind: 'changed', entity: 'run', id: runId }),
+      log: (runId, message, level) => {
+        const run = this.repos.runs.get(runId);
+        if (!run) return;
+        const event = {
+          id: newId('event'),
+          ts: nowIso(),
+          workspaceId: run.workspaceId,
+          runId,
+          taskId: null,
+          workerId: null,
+          type: 'info' as const,
+          level,
+          message,
+          data: { source: 'delivery' },
+        };
+        this.repos.appendEvent(event);
+        this.push({ kind: 'event', event });
+      },
+      notify: (title, body) => {
+        if (Notification.isSupported()) new Notification({ title, body }).show();
+      },
+    });
+    this.guardian = new Guardian({
+      repos: this.repos,
+      routes: {
+        resting: () => this.router.health.snapshot(),
+        reset: () => this.router.health.clear(),
+      },
+      scheduler: this.scheduler,
+      resources: () => collectResources(this.dataDir),
+      backup: () => this.backup('manual'),
+      // Only Hive's own windows that are shown; hidden helpers (page viewers) are left alone.
+      reloadWindows: () => {
+        const shown = BrowserWindow.getAllWindows().filter(
+          (window) => !window.isDestroyed() && window.isVisible(),
+        );
+        for (const window of shown) window.webContents.reload();
+        return shown.length;
+      },
+      save: async (defaultName, content) => {
+        const selected = await dialog.showSaveDialog({
+          title: 'Exportar relatório do Guardian',
+          defaultPath: path.join(app.getPath('documents'), defaultName),
+          filters: [{ name: 'Markdown', extensions: ['md'] }],
+        });
+        if (selected.canceled || !selected.filePath) return null;
+        await writeFile(selected.filePath, content, 'utf8');
+        return selected.filePath;
+      },
+      onChange: () => this.push({ kind: 'changed', entity: 'guardian', id: null }),
+    });
+    this.stopListening = onLog((entry) => this.guardian.record(entry));
+    void this.seedGuardianLog();
+    this.guardian.start();
     this.autopilot = new Autopilot({
       repos: this.repos,
       plan: async (runId) => {
@@ -355,7 +424,7 @@ export class DesktopService {
           );
         await this.planRun(runId, queen.id);
       },
-      start: (runId) => this.scheduler.start(runId),
+      start: (runId) => this.startRun(runId),
       onChange: () => this.changed('autopilot'),
       onFinished: (item) => this.onShiftFinished?.(item),
     });
@@ -746,6 +815,8 @@ export class DesktopService {
     if (stopped) console.warn(`Encerrando: ${stopped} sessão(ões) de agente interrompida(s).`);
     void this.claudePermissions.close();
     this.flow.dispose();
+    this.guardian.dispose();
+    this.stopListening();
     this.canvasQueen.dispose();
     this.nexusAutopilot.dispose();
     this.liveResults.dispose();
@@ -857,7 +928,10 @@ export class DesktopService {
     if (id && entity === 'run') {
       this.liveResults.schedule(id);
       const run = this.repos.runs.get(id);
-      if (run) this.flow.onRun(run);
+      if (run) {
+        this.flow.onRun(run);
+        this.delivery.onRun(run);
+      }
     }
     if (id && entity === 'task') {
       const task = this.repos.tasks.get(id);
@@ -904,10 +978,54 @@ export class DesktopService {
     };
   }
 
+  /**
+   * Git must work in the project before a mission plans or runs: every task gets its own
+   * worktree from it. Checked up front so the Queen spends nothing on a mission that cannot run,
+   * and the user reads what to fix instead of tasks failing and being tried again one by one.
+   */
+  private async requireGit(runId: string): Promise<void> {
+    const run = this.repos.runs.require(runId, 'Execução');
+    const workspace = this.repos.workspaces.require(run.workspaceId, 'Projeto');
+    const problem = await gitPreflight(workspace.path);
+    if (problem) throw new HiveError('GIT', problem);
+  }
+
+  /** Starts (or resumes) a planned run once git is known to work. */
+  private async startRun(runId: string): Promise<void> {
+    await this.requireGit(runId);
+    this.scheduler.start(runId);
+  }
+
+  /**
+   * The Guardian starts with the end of the log written before this start (a freeze or a crash
+   * that made the user restart is exactly what it should see), then hears every new line.
+   */
+  private async seedGuardianLog(): Promise<void> {
+    const file = logFile();
+    if (!file) return;
+    try {
+      const text = await readFile(file, 'utf8');
+      const pattern = /^(\S+) (INFO|WARN|ERROR)\s+\[([^\]]+)\] (.*)$/;
+      for (const line of text.split('\n').slice(-300)) {
+        const match = pattern.exec(line);
+        if (match)
+          this.guardian.record({
+            at: match[1]!,
+            level: match[2]!.toLowerCase() as 'info' | 'warn' | 'error',
+            scope: match[3]!,
+            text: match[4]!,
+          });
+      }
+    } catch {
+      // No log yet: the Guardian starts from the lines written from now on.
+    }
+  }
+
   /** Asks the Queen for a plan; used by the mission page and by the shift. */
   private async planRun(runId: string, queenWorkerId: string): Promise<RunDetail> {
     if (this.planning.has(runId))
       throw new HiveError('CONFLICT', 'Esta execução já está sendo planejada.');
+    await this.requireGit(runId);
     const { run, mission } = this.runDetail(runId);
     if (run.status === 'running')
       throw new HiveError('CONFLICT', 'Cancele a execução antes de gerar um novo plano.');
@@ -965,9 +1083,9 @@ export class DesktopService {
   /**
    * After the Queen plans, the blocks every mission wants on its canvas without asking: the
    * project's Nectar (created with the team if the project has none yet), a Tokens card above
-   * the agent windows, and a card for each provider the team uses, left of the Queen, so the
-   * lines show who runs on what. A canvas that already has a Tokens card or provider cards keeps
-   * its own.
+   * the agent windows, a card for each provider the team uses, left of the Queen, so the lines
+   * show who runs on what, and the Dialogue with the team's conversation. A canvas that already
+   * has any of them keeps its own.
    */
   private scaffoldBlocks(runId: string): void {
     try {
@@ -980,10 +1098,24 @@ export class DesktopService {
         ? layout.meters
         : [{ id: `tokens:auto-${runId}`, x: 326, y: -250 }];
       const providers = layout.providers.length ? layout.providers : this.teamProviders(run);
-      if (meters === layout.meters && providers === layout.providers) return;
+      // The team's conversation, left of the provider cards.
+      const dialogues = layout.dialogues.length
+        ? layout.dialogues
+        : [{ id: `dialogue:auto-${runId}`, x: -820, y: -60 }];
+      // What the mission must deliver and the final verdict, under the conversation.
+      const deliveries = layout.deliveries.length
+        ? layout.deliveries
+        : [{ id: `delivery:auto-${runId}`, x: -820, y: 430 }];
+      if (
+        meters === layout.meters &&
+        providers === layout.providers &&
+        dialogues === layout.dialogues &&
+        deliveries === layout.deliveries
+      )
+        return;
       this.repos.setValue(
         `canvasLayout:${runId}`,
-        JSON.stringify({ ...layout, meters, providers }),
+        JSON.stringify({ ...layout, meters, providers, dialogues, deliveries }),
       );
       this.push({ kind: 'changed', entity: 'layout', id: runId });
     } catch {
@@ -1366,6 +1498,8 @@ export class DesktopService {
       mission: this.repos.missions.require(run.missionId, 'Missão'),
       tasks: this.repos.tasks.list('run_id = ?', id),
       approvals: this.repos.approvals.list('run_id = ?', id),
+      requirements: this.delivery.extras(id).requirements,
+      delivery: this.delivery.get(id),
     };
   }
 
@@ -1376,12 +1510,21 @@ export class DesktopService {
       new Set(this.repos.workers.list().map((worker) => worker.id)),
     );
     if (!plan) throw new HiveError('VALIDATION', errors.join('\n'));
+    const requirements = plan.requirements ?? [];
     this.repos.transaction(() => {
       for (const task of detail.tasks) this.repos.tasks.delete(task.id);
       for (const { lead, ...task } of plan.tasks) {
         const id = newId('task');
+        // The agent reads the requirements its task delivers, in the user's own words.
+        const covered = requirements.filter((item) => task.covers?.includes(item.id));
+        const description = covered.length
+          ? `${task.description}\n\nRequisitos da missão que esta tarefa entrega:\n${covered
+              .map((item) => `- ${item.id}: ${item.text}`)
+              .join('\n')}`.slice(0, 4_000)
+          : task.description;
         this.repos.tasks.put({
           ...task,
+          description,
           // Hive Teams: the Queen made this task's agent the leader of a team.
           ...(lead ? { team: { role: 'lead' as const, leadTaskId: id, requestId: null } } : {}),
           id,
@@ -1405,6 +1548,7 @@ export class DesktopService {
         planNotes: plan.notes,
         error: null,
       });
+      this.delivery.saveExtras(runId, { requirements, verify: plan.verify ?? [] });
     });
     this.changed('run', runId);
     return this.runDetail(runId);
@@ -1451,6 +1595,14 @@ export class DesktopService {
       }
       case 'backup.create':
         return this.backup('manual');
+      case 'guardian.snapshot':
+        return this.guardian.snapshot();
+      case 'guardian.diagnose':
+        return this.guardian.diagnose();
+      case 'guardian.recover':
+        return this.guardian.recover(parse(channel));
+      case 'guardian.export':
+        return this.guardian.export();
       case 'backup.export': {
         const selected = await dialog.showSaveDialog({
           title: 'Exportar backup do Hive',
@@ -1943,7 +2095,7 @@ export class DesktopService {
         return this.planRun(runId, queenWorkerId);
       }
       case 'run.start':
-        this.scheduler.start(parse(channel));
+        await this.startRun(parse(channel));
         return this.runDetail(parse(channel));
       case 'run.cancel':
         this.scheduler.cancelRun(parse(channel));

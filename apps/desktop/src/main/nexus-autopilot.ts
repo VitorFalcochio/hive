@@ -24,6 +24,7 @@ import { extractJson, MAX_RUN_TASKS } from '@hive/orchestrator';
 import type { Repositories } from '@hive/persistence';
 import type { ChatClient } from '@hive/providers';
 import { HiveError, errorMessage, newId, nowIso } from '@hive/shared';
+import { isEnvironmentFailure } from '@hive/workspace';
 import type { CortexService } from './cortex';
 
 interface Options {
@@ -674,8 +675,9 @@ export class NexusAutopilot {
     const error = (task.error?.trim() || 'Falha sem descrição.').slice(0, 2_000);
     const signature = failureSignature(error);
     const asked = all.filter((recovery) => recovery.state !== 'exhausted').length;
-    const reason =
-      chain.length >= limits.maxPerTask
+    const reason = isEnvironmentFailure(error)
+      ? 'O problema está no computador (Git ou pasta do projeto), não no plano: outro plano falharia do mesmo jeito. Corrija o que a mensagem diz e use Repetir tarefa.'
+      : chain.length >= limits.maxPerTask
         ? `Limite de ${limits.maxPerTask} replanejamento(s) para “${rootTaskKey}” atingido. Decida como seguir.`
         : chain.some((recovery) => recovery.signature === signature)
           ? 'O mesmo erro voltou depois de um replanejamento; propor de novo não deve resolver.'

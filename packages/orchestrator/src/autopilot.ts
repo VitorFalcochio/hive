@@ -16,8 +16,8 @@ export interface AutopilotOptions {
   repos: Repositories;
   /** Asks the Queen for a plan; the run ends in `awaiting_plan_approval` or throws. */
   plan: (runId: string) => Promise<void>;
-  /** Starts or resumes a planned run (Scheduler.start). */
-  start: (runId: string) => void;
+  /** Starts or resumes a planned run (Scheduler.start, after any check it needs). */
+  start: (runId: string) => void | Promise<void>;
   onChange: () => void;
   /** Called once per mission the shift finished, for notifications. */
   onFinished?: (item: AutopilotHistoryItem) => void;
@@ -162,7 +162,7 @@ export class Autopilot {
     }
     // A fresh plan, or a run a restart interrupted: the scheduler resumes unfinished tasks.
     this.startedHere.add(run.id);
-    this.options.start(run.id);
+    await this.options.start(run.id);
     this.options.onChange();
   }
 

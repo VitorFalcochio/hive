@@ -22,6 +22,7 @@ import {
   SquareTerminal,
   Timer,
   X,
+  ShieldCheck,
 } from 'lucide-react';
 import type {
   AgentEvent,
@@ -58,6 +59,7 @@ import { HoneyMeter } from './honey';
 import { AboutPage, OverviewPage, ProvidersPage } from './pages';
 import { HiveField } from './home-field';
 import { SkillsPage } from './skills';
+import { GuardianPage } from './guardian';
 import { Dot } from './ui';
 
 const navigation: { view: View; label: string; icon: typeof Bot }[] = [
@@ -69,6 +71,7 @@ const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   // 'agents' is drawn on its own, as the Agentes accordion, between these two.
   { view: 'providers', label: 'Provedores', icon: Plug },
   { view: 'skills', label: 'Skills', icon: BookOpen },
+  { view: 'guardian', label: 'Guardian', icon: ShieldCheck },
 ];
 /** A sidebar layout choice remembered on this machine; storage may be unavailable. */
 function useRemembered(key: string): [boolean, (value: boolean) => void] {
@@ -104,6 +107,7 @@ const viewTitles: Record<View, string> = {
   agentChat: 'Agentes',
   providers: 'Provedores',
   skills: 'Skills',
+  guardian: 'Guardian',
   about: 'Sobre',
   settings: 'Configurações',
 };
@@ -793,6 +797,7 @@ export function App() {
               )}
               {page === 'providers' && <ProvidersPage />}
               {page === 'skills' && <SkillsPage />}
+              {page === 'guardian' && <GuardianPage />}
               {page === 'about' && <AboutPage />}
               {page === 'settings' && <SettingsPage settings={settings} onSaved={refresh} />}
               {page === 'shift' && <ShiftPage settings={settings} onSaved={refresh} />}

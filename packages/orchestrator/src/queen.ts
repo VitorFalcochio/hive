@@ -27,6 +27,7 @@ export interface PlanResult {
 
 const shape = `{
   "notes": "short rationale for the decomposition",
+  "requirements": [{ "id": "R1", "text": "one thing the mission must deliver" }],
   "tasks": [
     {
       "key": "short-kebab-id",
@@ -34,7 +35,8 @@ const shape = `{
       "description": "what to do, which files or areas, and constraints",
       "workerId": "<one of the worker ids above, or null>",
       "dependsOn": ["keys of tasks that must finish first"],
-      "acceptanceCriteria": ["verifiable statement", "..."]
+      "acceptanceCriteria": ["verifiable statement", "..."],
+      "covers": ["ids of the requirements this task delivers, e.g. R1"]
     }
   ],
   "verify": ["project commands that must pass when the plan is done, e.g. npm run build"]
@@ -59,6 +61,7 @@ export function buildPlanPrompt(request: PlanRequest): ChatMessage[] {
         '- Tasks that touch different files should not depend on each other, so they can run in parallel.',
         "- Use dependsOn only when a task needs another task's output.",
         '- Every task needs 1-5 concrete, verifiable acceptance criteria.',
+        '- "requirements": first list, numbered R1, R2… (at most 20), every distinct thing the mission asks to deliver, in the user\'s own terms: each feature, screen, behaviour and technical demand ("tests for the main features", "README with setup steps", "real data, nothing simulated"). Do not merge two demands into one or drop the ones that look small. Then give every task "covers" with the ids it delivers, so that every requirement is covered by at least one task. Hive checks each requirement when the run ends and shows the user which ones were delivered.',
         '- Assign workerId only from the provided list; match the worker role to the work.',
         '- Specialists (explorer, debugger, security, database, performance, integration, requirements) get a task only when the mission needs that specialty, never just because they exist: an ambiguous request → a requirements task first; an unfamiliar module → an explorer task the coders depend on; a bug to fix → a debugger diagnosis before the fix; a schema change → database; authentication, secrets or permissions → a security review after the change; several parallel tasks sharing a contract → an integration task that depends on them; a slowness complaint → performance.',
         "- Ground the plan in the project context: name the real folders and files involved, follow its README and agent notes, and use the project's own test, lint and build commands in acceptance criteria.",

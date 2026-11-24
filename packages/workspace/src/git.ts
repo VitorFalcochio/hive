@@ -1,4 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
+import { realpath, stat } from 'node:fs/promises';
+import path from 'node:path';
 import { HiveError, clipText, errorMessage } from '@hive/shared';
 
 /** Most git output read into memory at once; bounded reads use `gitCapped` instead. */
@@ -25,6 +27,66 @@ function failureMessage(args: string[], error: unknown, stdout: string, stderr: 
     return `git ${args[0]} produziu mais de ${MAX_GIT_OUTPUT / 1024 / 1024} MB de saída e foi interrompido. Isso costuma indicar arquivos gerados ou dependências (node_modules, dist) entrando no Git.`;
   const detail = (stderr.trim() || stdout.trim() || errorMessage(error)).trim();
   return `git ${args[0]} failed: ${clipText(detail, 4_000)}`;
+}
+
+/** What a missing git says, everywhere Hive calls it. */
+export const GIT_MISSING =
+  'O Git não está instalado ou não está no PATH. O Hive precisa dele para dar a cada agente a própria cópia do projeto. Instale o Git (git-scm.com/downloads), reinicie o Hive e tente de novo.';
+
+/**
+ * Whether a failure comes from the computer rather than the work: git missing, or the project
+ * folder not being a usable repository. Trying again, or asking the Queen for another plan,
+ * cannot fix it; only the user can.
+ */
+export function isEnvironmentFailure(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return (
+    text.includes(GIT_MISSING) ||
+    /git is not installed|not a git repository|não é um repositório git|ainda não tem nenhum commit/i.test(
+      text,
+    )
+  );
+}
+
+/**
+ * What stops a mission from running in `repoPath`, in words the user can act on; null when git
+ * is installed and the folder is a repository with at least one commit (task worktrees branch
+ * from it). Checked before planning and before starting, so nothing is spent on a mission that
+ * cannot run.
+ */
+export async function gitPreflight(repoPath: string): Promise<string | null> {
+  // A folder that is gone fails like a missing git (ENOENT), so it is told apart first.
+  const folder = await stat(repoPath).catch(() => null);
+  if (!folder?.isDirectory())
+    return `A pasta do projeto não existe mais (${repoPath}). Abra o projeto de novo pelo Hive.`;
+  try {
+    await git(repoPath, ['--version'], { timeoutMs: 15_000 });
+  } catch (error) {
+    if (error instanceof HiveError && error.message === GIT_MISSING) return GIT_MISSING;
+    return `Não foi possível rodar o Git na pasta do projeto (${repoPath}): ${errorMessage(error)}`;
+  }
+  // The folder must be the repository itself, not a folder inside another one: otherwise the
+  // agents' copies would be made from (and merged into) the repository around it.
+  const top = await git(repoPath, ['rev-parse', '--show-toplevel'], {
+    allowFailure: true,
+    timeoutMs: 15_000,
+  });
+  if (top.code !== 0 || !(await samePath(top.stdout.trim(), repoPath)))
+    return `A pasta do projeto (${repoPath}) não é um repositório Git. Abra-a pelo Hive para ele preparar o repositório, ou rode "git init" e faça um primeiro commit.`;
+  const head = await git(repoPath, ['rev-parse', '--verify', 'HEAD'], {
+    allowFailure: true,
+    timeoutMs: 15_000,
+  });
+  if (head.code !== 0)
+    return 'O repositório do projeto ainda não tem nenhum commit. Os agentes trabalham em cópias criadas a partir dele: faça um primeiro commit (pode ser só um README) e tente de novo.';
+  return null;
+}
+
+/** Whether two paths are the same folder, past links, short names and letter case on Windows. */
+async function samePath(a: string, b: string): Promise<boolean> {
+  const real = (value: string) => realpath(path.resolve(value)).catch(() => path.resolve(value));
+  const [left, right] = await Promise.all([real(a), real(b)]);
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
 export interface GitResult {
@@ -71,7 +133,7 @@ export function git(
       (error, stdout, stderr) => {
         const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
         if (error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
-          reject(new HiveError('GIT', 'Git is not installed or not on PATH.'));
+          reject(new HiveError('GIT', GIT_MISSING));
           return;
         }
         if (error && (error.name === 'AbortError' || options.signal?.aborted)) {
@@ -140,7 +202,7 @@ export function gitCapped(
       finish(() =>
         reject(
           (error as NodeJS.ErrnoException).code === 'ENOENT'
-            ? new HiveError('GIT', 'Git is not installed or not on PATH.')
+            ? new HiveError('GIT', GIT_MISSING)
             : new HiveError('GIT', failureMessage(args, error, '', stderr)),
         ),
       ),

@@ -80,7 +80,9 @@ function setup() {
     addTask(runId, 'pending');
     setStatus(runId, 'awaiting_plan_approval');
   });
-  const start = vi.fn((runId: string) => setStatus(runId, 'running'));
+  const start = vi.fn((runId: string) => {
+    setStatus(runId, 'running');
+  });
   const finished: AutopilotHistoryItem[] = [];
   const pilot = new Autopilot({
     repos,

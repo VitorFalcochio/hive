@@ -1,4 +1,11 @@
-export { git, hiveCommitFlags, type GitResult } from './git';
+export {
+  git,
+  gitPreflight,
+  GIT_MISSING,
+  hiveCommitFlags,
+  isEnvironmentFailure,
+  type GitResult,
+} from './git';
 export {
   WorktreeManager,
   diffRefs,

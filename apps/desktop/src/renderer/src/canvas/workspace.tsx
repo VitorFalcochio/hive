@@ -78,6 +78,8 @@ export const toneColors: Record<Tone, string> = {
 const NOTE_SIZE = { width: 240, height: 150 };
 const FRAME_SIZE = { width: 560, height: 380 };
 const METER_SIZE = { width: 280, height: 210 };
+const DIALOGUE_SIZE = { width: 380, height: 460 };
+const DELIVERY_SIZE = { width: 380, height: 420 };
 const PROVIDER_SIZE = { width: 320, height: 216 };
 /** A provider block folded to its logo. */
 const PROVIDER_CHIP = { width: 76, height: 76 };
@@ -542,6 +544,32 @@ export function Workspace({
         className: 'nc-flow-tokens',
       });
     }
+    for (const block of layout.dialogues) {
+      const size = layout.sizes[block.id] ?? DIALOGUE_SIZE;
+      placed.push({
+        id: block.id,
+        type: 'dialogue',
+        position: { x: block.x, y: block.y },
+        data: { ref: block.id },
+        width: size.width,
+        height: size.height,
+        zIndex: 2,
+        className: 'nc-flow-dialogue',
+      });
+    }
+    for (const block of layout.deliveries) {
+      const size = layout.sizes[block.id] ?? DELIVERY_SIZE;
+      placed.push({
+        id: block.id,
+        type: 'delivery',
+        position: { x: block.x, y: block.y },
+        data: { ref: block.id },
+        width: size.width,
+        height: size.height,
+        zIndex: 2,
+        className: 'nc-flow-delivery',
+      });
+    }
     for (const note of layout.notes) {
       const size = layout.sizes[note.id] ?? NOTE_SIZE;
       placed.push({
@@ -561,6 +589,8 @@ export function Workspace({
     layout.frames,
     layout.notes,
     layout.meters,
+    layout.dialogues,
+    layout.deliveries,
     layout.providers,
     layout.terminals,
     layout.flow,
@@ -955,6 +985,22 @@ export function Workspace({
     },
     [layoutApi, select],
   );
+  const addDialogue = useCallback(
+    (at: { x: number; y: number }) => {
+      const id = localId('dialogue');
+      layoutApi.addDialogue({ id, x: Math.round(at.x), y: Math.round(at.y) });
+      select({ kind: 'node', id });
+    },
+    [layoutApi, select],
+  );
+  const addDelivery = useCallback(
+    (at: { x: number; y: number }) => {
+      const id = localId('delivery');
+      layoutApi.addDelivery({ id, x: Math.round(at.x), y: Math.round(at.y) });
+      select({ kind: 'node', id });
+    },
+    [layoutApi, select],
+  );
   const addProviderBlock = useCallback(
     (at: { x: number; y: number }) => {
       const id = localId('provider');
@@ -1001,12 +1047,24 @@ export function Workspace({
       else if (kind === 'note') addNote(at);
       else if (kind === 'frame') addFrame(at);
       else if (kind === 'tokens') addMeter(at);
+      else if (kind === 'dialogue') addDialogue(at);
+      else if (kind === 'delivery') addDelivery(at);
       else if (kind === 'provider') addProviderBlock(at);
       else if (kind === 'terminal') addTerminalBlock(at, 'shell');
       else if (kind === 'claude') addTerminalBlock(at, 'claude');
       else addCortex(at);
     },
-    [addNote, addFrame, addMeter, addProviderBlock, addTerminalBlock, addFlowBlock, addCortex],
+    [
+      addNote,
+      addFrame,
+      addMeter,
+      addDialogue,
+      addDelivery,
+      addProviderBlock,
+      addTerminalBlock,
+      addFlowBlock,
+      addCortex,
+    ],
   );
 
   /** A frame around the selected nodes (Ctrl+G). */
@@ -1041,6 +1099,8 @@ export function Workspace({
           (node.type === 'note' ||
             node.type === 'frame' ||
             node.type === 'tokens' ||
+            node.type === 'dialogue' ||
+            node.type === 'delivery' ||
             node.type === 'provider' ||
             node.type === 'terminal' ||
             node.type === 'flow'),
@@ -1203,9 +1263,19 @@ export function Workspace({
         ],
       };
     }
-    if (node.type === 'tokens' || node.type === 'provider')
+    if (
+      node.type === 'tokens' ||
+      node.type === 'provider' ||
+      node.type === 'dialogue' ||
+      node.type === 'delivery'
+    )
       return {
-        title: node.type === 'tokens' ? 'Tokens' : 'Provedor',
+        title: {
+          tokens: 'Tokens',
+          provider: 'Provedor',
+          dialogue: 'Diálogo',
+          delivery: 'Entrega',
+        }[node.type],
         items: [{ label: 'Excluir bloco', run: () => layoutApi.remove([node.id]) }],
       };
     if (node.type === 'note') {
@@ -1533,6 +1603,14 @@ export function Workspace({
     'new-tokens': () => {
       const at = center();
       addMeter({ x: at.x - METER_SIZE.width / 2, y: at.y - METER_SIZE.height / 2 });
+    },
+    'new-delivery': () => {
+      const at = center();
+      addDelivery({ x: at.x - DELIVERY_SIZE.width / 2, y: at.y - DELIVERY_SIZE.height / 2 });
+    },
+    'new-dialogue': () => {
+      const at = center();
+      addDialogue({ x: at.x - DIALOGUE_SIZE.width / 2, y: at.y - DIALOGUE_SIZE.height / 2 });
     },
     'new-provider': () => {
       const at = center();

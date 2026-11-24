@@ -7844,3 +7844,201 @@ nav.compact .nav-chevron,
 .markdown .md-copy:focus-visible {
   opacity: 1;
 }
+
+/* Hive Guardian page. */
+.guardian {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1100px;
+}
+.guardian-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.guardian-hero.tone-ok {
+  border-color: rgb(74 222 128 / 40%);
+}
+.guardian-hero.tone-warn {
+  border-color: rgb(245 181 68 / 45%);
+}
+.guardian-hero.tone-fail {
+  border-color: rgb(248 113 133 / 50%);
+}
+.guardian-hero-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 5%);
+}
+.guardian-hero.tone-ok .guardian-hero-icon {
+  color: #4ade80;
+}
+.guardian-hero.tone-warn .guardian-hero-icon {
+  color: #f5b544;
+}
+.guardian-hero.tone-fail .guardian-hero-icon {
+  color: #f87185;
+}
+.guardian-hero-body {
+  flex: 1;
+  min-width: 0;
+}
+.guardian-hero-body h1 {
+  margin: 2px 0 6px;
+  font-size: 20px;
+}
+.guardian-hero-body p {
+  margin: 0;
+  font-size: 13px;
+}
+.guardian-eyebrow {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.guardian-hero-actions,
+.guardian-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.guardian-hero-actions button,
+.guardian-actions button,
+.guardian-incidents button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.guardian-note {
+  margin: 0;
+  color: #4ade80;
+  font-size: 13px;
+}
+.guardian-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.guardian-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+.guardian-incidents,
+.guardian-checks,
+.guardian-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.guardian-incidents li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.guardian-incidents li.severity-info {
+  border-left-color: #5ccfe6;
+}
+.guardian-incidents li.severity-warning {
+  border-left-color: #f5b544;
+}
+.guardian-incidents li.severity-critical {
+  border-left-color: #f87185;
+}
+.guardian-incidents p,
+.guardian-checks p {
+  margin: 3px 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.guardian-incidents span {
+  font-size: 12px;
+}
+.guardian-checks li,
+.guardian-history li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.guardian-checks li > div,
+.guardian-history li > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}
+.guardian-checks li > .muted,
+.guardian-history li > .muted {
+  flex: none;
+  font-size: 12px;
+}
+.guardian-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.guardian-stats div {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.guardian-stats dt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.guardian-stats dd {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.guardian-details {
+  font-size: 12px;
+}
+.guardian-details summary {
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.guardian-details ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.guardian-log {
+  max-height: 320px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 35%);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -86,6 +86,14 @@ export class RouteHealth {
     this.routes.delete(routeKey(route));
   }
 
+  /** Lets every resting route and paused provider be tried again now; how many routes rested. */
+  clear(): number {
+    const resting = this.snapshot().length;
+    this.routes.clear();
+    this.providers.clear();
+    return resting;
+  }
+
   /** Routes resting right now, for the UI and the logs. */
   snapshot(): { key: string; untilMs: number }[] {
     return [...this.routes.entries()]

@@ -104,3 +104,38 @@ it('pede contrato primeiro, esqueleto num projeto do zero, integração final e 
     validatePlan({ notes: 'n', tasks, verify: ['npm run build'] }, new Set()).plan?.verify,
   ).toEqual(['npm run build']);
 });
+
+it('requisitos: ids únicos e tarefas só cobrem requisitos que existem', () => {
+  const tasks = (covers: string[]) => [
+    {
+      key: 'a',
+      title: 'A',
+      description: 'A',
+      workerId: null,
+      dependsOn: [],
+      acceptanceCriteria: ['ok'],
+      covers,
+    },
+  ];
+  const requirements = [
+    { id: 'R1', text: 'Dashboard' },
+    { id: 'R2', text: 'README' },
+  ];
+  // A requirement nobody covers is allowed: it shows as uncovered at the end.
+  expect(
+    validatePlan({ notes: 'n', requirements, tasks: tasks(['R1']) }, new Set()).plan,
+  ).not.toBeNull();
+  expect(
+    validatePlan({ notes: 'n', requirements, tasks: tasks(['R9']) }, new Set()).errors.join(),
+  ).toContain('Unknown requirement "R9"');
+  expect(
+    validatePlan(
+      {
+        notes: 'n',
+        requirements: [...requirements, { id: 'R1', text: 'de novo' }],
+        tasks: tasks([]),
+      },
+      new Set(),
+    ).errors.join(),
+  ).toContain('Duplicate requirement "R1"');
+});
