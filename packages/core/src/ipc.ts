@@ -2,6 +2,12 @@ import { z } from 'zod';
 import type { LiveResult, MissionNote, ResultEventPage } from './live-result';
 import { guardianActionSchema, type GuardianSnapshot, type RecoveryRecord } from './guardian';
 import {
+  marketplaceExportSchema,
+  type MarketplaceCatalog,
+  type MarketplaceInstalled,
+  type MarketplacePreview,
+} from './marketplace';
+import {
   canvasQueenRequestSchema,
   type CanvasQueenApplied,
   type CanvasQueenProposal,
@@ -698,6 +704,29 @@ export const ipcContract = {
   'guardian.recover': channel<RecoveryRecord>()(guardianActionSchema),
   /** Saves the report, with credentials and personal paths removed, where the user picks. */
   'guardian.export': channel<string | null>()(none),
+  /** Hive Marketplace: every source's packages; refresh reads the sources again. */
+  'marketplace.catalog': channel<MarketplaceCatalog>()(z.object({ refresh: z.boolean() })),
+  /** The community catalog's https address (its index.json is read from there); null removes it. */
+  'marketplace.setRegistry': channel<MarketplaceCatalog>()(z.url().max(500).nullable()),
+  'marketplace.preview': channel<MarketplacePreview>()(
+    z.object({ source: z.string().min(1).max(60), id: z.string().min(1).max(64) }),
+  ),
+  'marketplace.install': channel<MarketplaceInstalled>()(
+    z.object({ source: z.string().min(1).max(60), id: z.string().min(1).max(64) }),
+  ),
+  /** Opens a package file and checks it; nothing is installed yet. */
+  'marketplace.import': channel<{ token: string; preview: MarketplacePreview } | null>()(none),
+  'marketplace.installImported': channel<MarketplaceInstalled>()(z.string().min(1).max(100)),
+  'marketplace.installed': channel<MarketplaceInstalled[]>()(none),
+  'marketplace.update': channel<{ installed: MarketplaceInstalled; kept: string[] }>()(
+    z.string().min(1).max(64),
+  ),
+  'marketplace.restore': channel<{ installed: MarketplaceInstalled; kept: string[] }>()(
+    z.string().min(1).max(64),
+  ),
+  'marketplace.uninstall': channel<void>()(z.string().min(1).max(64)),
+  /** Saves agents as a package where the user picks, without anything personal. */
+  'marketplace.export': channel<string | null>()(marketplaceExportSchema),
   /** Hive Browser: every open tab, the user's and the agents'. */
   'browser.list': channel<BrowserTabState[]>()(none),
   /** Opens a tab of the user's own (isolated: no personal cookies). */

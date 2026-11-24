@@ -14,3 +14,4 @@ export * from './cortex';
 export * from './teams';
 export * from './agent-chat';
 export * from './guardian';
+export * from './marketplace';

@@ -38,6 +38,8 @@ import { FlowEngine, allowedCheckCommand } from './flow-engine';
 import { DeliveryGate } from './delivery';
 import { Guardian } from './guardian/guardian';
 import { BrowserManager, USER_OWNER } from './browser/manager';
+import { Marketplace } from './marketplace/marketplace';
+import { BuiltinRegistry, RemoteRegistry } from './marketplace/registry';
 import { collectResources } from './guardian/resources';
 import { logFile, onLog } from './logger';
 import {
@@ -142,6 +144,8 @@ export class DesktopService {
   private readonly guardian: Guardian;
   /** Hive Browser: Chromium tabs the user and the agents drive. */
   private readonly browser: BrowserManager;
+  /** Hive Marketplace: agents, teams and skills to install, and agents to share. */
+  private readonly marketplace: Marketplace;
   private browserPush: ReturnType<typeof setTimeout> | undefined;
   private readonly stopListening: () => void;
   readonly autopilot: Autopilot;
@@ -423,6 +427,49 @@ export class DesktopService {
         return selected.filePath;
       },
       onChange: () => this.push({ kind: 'changed', entity: 'guardian', id: null }),
+    });
+    this.marketplace = new Marketplace({
+      repos: this.repos,
+      hiveVersion: () => app.getVersion(),
+      registries: () => {
+        const url = this.marketplace.registryUrl();
+        return [new BuiltinRegistry(), ...(url ? [new RemoteRegistry(url)] : [])];
+      },
+      skills: {
+        list: () => this.skills().list(),
+        save: (raw) => this.skills().saveLocal(raw),
+        raw: (name) =>
+          this.skills()
+            .get(name, 'local')
+            .then((detail) => detail.raw)
+            .catch(() => null),
+      },
+      connectWorker: (workerId) => this.cortex.connectNewWorker(workerId),
+      onChange: (workerIds) => {
+        for (const workerId of workerIds) this.changed('worker', workerId);
+      },
+      save: async (defaultName, content) => {
+        const selected = await dialog.showSaveDialog({
+          title: 'Exportar pacote do Marketplace',
+          defaultPath: path.join(app.getPath('documents'), defaultName),
+          filters: [{ name: 'Pacote do Hive', extensions: ['json'] }],
+        });
+        if (selected.canceled || !selected.filePath) return null;
+        await writeFile(selected.filePath, content, 'utf8');
+        return selected.filePath;
+      },
+      open: async () => {
+        const picked = await dialog.showOpenDialog({
+          title: 'Importar pacote do Marketplace',
+          properties: ['openFile'],
+          filters: [{ name: 'Pacote do Hive', extensions: ['json'] }],
+        });
+        const file = picked.canceled ? undefined : picked.filePaths[0];
+        if (!file) return null;
+        const info = await stat(file);
+        if (info.size > 1024 * 1024) throw new HiveError('LIMIT', 'O arquivo passa de 1 MB.');
+        return readFile(file, 'utf8');
+      },
     });
     this.stopListening = onLog((entry) => this.guardian.record(entry));
     void this.seedGuardianLog();
@@ -1659,6 +1706,38 @@ export class DesktopService {
         return this.guardian.recover(parse(channel));
       case 'guardian.export':
         return this.guardian.export();
+      case 'marketplace.catalog':
+        return this.marketplace.catalog(parse(channel).refresh);
+      case 'marketplace.setRegistry': {
+        const url = parse(channel);
+        // Checked before it is kept: only https, so the catalog cannot be swapped in transit.
+        if (url) new RemoteRegistry(url);
+        this.marketplace.setRegistryUrl(url);
+        return this.marketplace.catalog(true);
+      }
+      case 'marketplace.preview': {
+        const { source, id } = parse(channel);
+        return this.marketplace.preview(source, id);
+      }
+      case 'marketplace.install': {
+        const { source, id } = parse(channel);
+        return this.marketplace.install(source, id);
+      }
+      case 'marketplace.import':
+        return this.marketplace.importFile();
+      case 'marketplace.installImported':
+        return this.marketplace.installImported(parse(channel));
+      case 'marketplace.installed':
+        return this.marketplace.installed();
+      case 'marketplace.update':
+        return this.marketplace.update(parse(channel));
+      case 'marketplace.restore':
+        return this.marketplace.restore(parse(channel));
+      case 'marketplace.uninstall':
+        this.marketplace.uninstall(parse(channel));
+        return;
+      case 'marketplace.export':
+        return this.marketplace.export(parse(channel));
       case 'browser.list':
         return this.browser.list();
       case 'browser.open': {

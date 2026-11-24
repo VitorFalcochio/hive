@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "id": "esquadrao-web",
+      "version": "1.0.0",
+      "path": "packages/esquadrao-web.json",
+      "sha256": "5e62d13a141ea88e41077da74d59b009a5274f97a7bdda05b31e4fbf2b4e19d8"
+    },
+    {
+      "id": "qa-de-interface",
+      "version": "1.0.0",
+      "path": "packages/qa-de-interface.json",
+      "sha256": "a4af90e9f30461f88d7b565bc0b1af553c51df8a1c32e438c77a52ad274c8f58"
+    },
+    {
+      "id": "revisor-de-acessibilidade",
+      "version": "1.0.0",
+      "path": "packages/revisor-de-acessibilidade.json",
+      "sha256": "18c49af86300925185574ac3f06924bfdeb636d2b1ac353b487355ca848e6d7f"
+    }
+  ]
+}

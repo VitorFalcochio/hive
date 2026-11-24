@@ -30,6 +30,8 @@ export type View =
   | 'guardian'
   /** Hive Browser: tabs the user and the agents drive. */
   | 'browser'
+  /** Hive Marketplace: agents, teams and skills to install and share. */
+  | 'marketplace'
   | 'settings'
   | 'about';
 
