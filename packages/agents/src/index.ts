@@ -15,7 +15,16 @@ export {
   type NativeRuntimeOptions,
 } from './native-runtime';
 export { McpSession, probeMcpServer, qualifiedToolName, type McpTool } from './mcp';
-export { htmlToText, isLocalUrl, type PageView, type PageViewer } from './web';
+export { htmlToText, isLocalUrl, parseWebUrl, type PageView, type PageViewer } from './web';
+export {
+  browserHandlers,
+  browserToolDefinitions,
+  type BrowserDevice,
+  type BrowserDriver,
+  type BrowserOwner,
+  type BrowserShot,
+  type BrowserTabInfo,
+} from './browser';
 export { executeTool, toolDefinitions, type ToolContext } from './tools';
 export {
   runCommand,

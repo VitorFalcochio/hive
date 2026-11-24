@@ -48,6 +48,7 @@ import { SKILL_MARK } from './skill-mark';
 import { LOOP_NOTE, TokenSaver, readOutput, readOutputDefinition } from './token-saver';
 import { CAPTAIN, ContextLedger } from './context-shield/ledger';
 import type { PageViewer } from './web';
+import { browserHandlers, browserToolDefinitions, type BrowserDriver } from './browser';
 
 const MAX_SKILL_CHARS = 48_000;
 const MAX_TEXT_ONLY_REPLIES = 2;
@@ -199,6 +200,11 @@ export interface NativeRuntimeOptions {
   /** Opens local pages for view_page; the tool is left out without it. */
   viewPage?: PageViewer;
   /**
+   * Hive Browser: real tabs agents drive with the browser_* tools. Offered to agents that may
+   * view pages (the view_page tool); left out without a driver.
+   */
+  browser?: BrowserDriver;
+  /**
    * How tool outputs are cut down before they reach the prompt. 'legacy' (the default) is
    * Hive's token saver as it has always worked; 'off' sends them as produced, under the same
    * hard size cap, for comparison runs. 'shield' is refused until it exists.
@@ -333,11 +339,25 @@ export class NativeAgentRuntime implements AgentRuntime {
       mcp = await openMcp(this.options.mcpServers?.() ?? [], worker, root, signal, emit);
       const own = offeredTools(worker.tools, ctx);
       const memoryTools = input.memory?.tools ?? [];
+      // The tabs of this attempt; they close with the session.
+      const browser =
+        worker.tools.includes('view_page') && BROWSER_ROLES.has(worker.role)
+          ? this.options.browser
+          : undefined;
+      const browserOwner = {
+        key: input.sessionId,
+        label: worker.name,
+        workerId: worker.id,
+        // Session ids are "<task id>-a<attempt>".
+        taskId: input.sessionId.replace(/-a\d+$/, ''),
+        runId: null,
+      };
       const tools: ToolDefinition[] = [
         ...own.map((name) => toolDefinitions[name]),
         ...(squad.length ? [callSoldiersDefinition(squad.map(({ soldier }) => soldier.role))] : []),
         ...(mcp?.tools.map((tool) => tool.definition) ?? []),
         ...memoryTools.map((tool) => tool.definition),
+        ...(browser ? browserToolDefinitions : []),
         toolDefinitions.finish,
       ];
       emit({
@@ -373,6 +393,7 @@ export class NativeAgentRuntime implements AgentRuntime {
             : {}),
           ...(mcp ? mcpHandlers(mcp, ctx) : {}),
           ...memoryHandlers(memoryTools, ctx),
+          ...(browser ? browserHandlers(browser, ctx, browserOwner) : {}),
         },
       });
       return outcome(result.status, result.summary, result.error);
@@ -385,6 +406,7 @@ export class NativeAgentRuntime implements AgentRuntime {
     } finally {
       background.stopAll();
       await mcp?.close();
+      await this.options.browser?.closeOwner(input.sessionId).catch(() => undefined);
     }
   }
 }
@@ -1146,6 +1168,18 @@ function isRejection(error: unknown): boolean {
     error.status >= 400 && error.status < 500 && ![401, 403, 404, 408, 429].includes(error.status)
   );
 }
+
+/**
+ * Roles that test what runs on a screen get the Hive Browser tools. Thirteen more tool
+ * definitions in every request would cost each agent about 1.5k tokens a step, which free
+ * tiers with a tokens-per-minute limit cannot spare; the others keep view_page.
+ */
+const BROWSER_ROLES: ReadonlySet<Worker['role']> = new Set([
+  'qa',
+  'frontend',
+  'integration',
+  'custom',
+]);
 
 /** Rejected replies with an invented tool tried again in one loop before the task fails. */
 const MAX_PHANTOM_TOOLS = 3;

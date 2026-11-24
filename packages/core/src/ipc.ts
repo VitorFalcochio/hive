@@ -127,6 +127,37 @@ export interface MissionDetail {
   runs: Run[];
 }
 
+/** A tab of the Hive Browser as the Browser page shows it. */
+export interface BrowserTabState {
+  id: string;
+  url: string;
+  title: string;
+  device: 'desktop' | 'tablet' | 'mobile';
+  width: number;
+  height: number;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  /** Who drives it: "user" for the user's own tabs, an agent's session otherwise. */
+  owner: { key: string; label: string; workerId: string | null; taskId: string | null };
+  /** The user stopped this owner's automation. */
+  paused: boolean;
+  /** Console errors since it opened. */
+  errors: number;
+  createdAt: string;
+}
+
+/** A screenshot an agent took while testing, kept as evidence of the run. */
+export interface BrowserEvidence {
+  taskId: string | null;
+  workerName: string;
+  url: string;
+  title: string;
+  /** Where the PNG was saved, in Hive's data folder. */
+  file: string;
+  at: string;
+}
+
 export interface RunDetail {
   run: Run;
   mission: Mission;
@@ -136,6 +167,8 @@ export interface RunDetail {
   requirements?: Requirement[];
   /** The delivery gate's verdict once the run ended; null before. */
   delivery?: RunDelivery | null;
+  /** Screenshots the agents took in the Hive Browser while testing, newest last. */
+  evidence?: BrowserEvidence[];
 }
 
 /** Where one requirement stands when the run ends, and why, in words for the user. */
@@ -665,6 +698,57 @@ export const ipcContract = {
   'guardian.recover': channel<RecoveryRecord>()(guardianActionSchema),
   /** Saves the report, with credentials and personal paths removed, where the user picks. */
   'guardian.export': channel<string | null>()(none),
+  /** Hive Browser: every open tab, the user's and the agents'. */
+  'browser.list': channel<BrowserTabState[]>()(none),
+  /** Opens a tab of the user's own (isolated: no personal cookies). */
+  'browser.open': channel<BrowserTabState[]>()(
+    z.object({
+      url: z.string().trim().min(1).max(2_000),
+      device: z.enum(['desktop', 'tablet', 'mobile']).optional(),
+    }),
+  ),
+  'browser.navigate': channel<BrowserTabState[]>()(
+    z.object({
+      tabId: z.string().min(1).max(100),
+      action: z.enum(['goto', 'back', 'forward', 'reload']),
+      url: z.string().trim().max(2_000).optional(),
+    }),
+  ),
+  /** A click at page coordinates, from the live view. */
+  'browser.click': channel<void>()(
+    z.object({
+      tabId: z.string().min(1).max(100),
+      x: z.number().min(0).max(4_000),
+      y: z.number().min(0).max(4_000),
+    }),
+  ),
+  /** Text typed into the page's focused element. */
+  'browser.type': channel<void>()(
+    z.object({
+      tabId: z.string().min(1).max(100),
+      text: z.string().max(5_000),
+      submit: z.boolean().optional(),
+    }),
+  ),
+  'browser.scroll': channel<void>()(
+    z.object({ tabId: z.string().min(1).max(100), dy: z.number().min(-20_000).max(20_000) }),
+  ),
+  'browser.resize': channel<BrowserTabState[]>()(
+    z.object({
+      tabId: z.string().min(1).max(100),
+      device: z.enum(['desktop', 'tablet', 'mobile']),
+    }),
+  ),
+  /** The live view: a fresh screenshot of a tab; null when it is gone. */
+  'browser.preview': channel<{ dataUrl: string; width: number; height: number } | null>()(
+    z.string().min(1).max(100),
+  ),
+  'browser.console': channel<string[]>()(z.string().min(1).max(100)),
+  'browser.close': channel<BrowserTabState[]>()(z.string().min(1).max(100)),
+  /** Stops (or lets go on) an agent's automation; its tabs stay open to look at. */
+  'browser.interrupt': channel<BrowserTabState[]>()(
+    z.object({ ownerKey: z.string().min(1).max(200), stopped: z.boolean() }),
+  ),
   /** A copy saved where the user picks; null when cancelled. */
   'backup.export': channel<string | null>()(none),
   /**
@@ -1218,7 +1302,9 @@ export type HivePush =
         /** The main process changed a run's canvas layout (the Queen built its flow). */
         | 'layout'
         /** Hive Guardian checked the hive again. */
-        | 'guardian';
+        | 'guardian'
+        /** A Hive Browser tab opened, closed, loaded or changed owner state. */
+        | 'browser';
       id: string | null;
     };
 

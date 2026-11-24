@@ -28,6 +28,8 @@ export type View =
   | 'skills'
   /** Hive Guardian: health, incidents and recoveries of the hive. */
   | 'guardian'
+  /** Hive Browser: tabs the user and the agents drive. */
+  | 'browser'
   | 'settings'
   | 'about';
 

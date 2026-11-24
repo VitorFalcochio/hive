@@ -36,6 +36,8 @@ export interface DeliveryGateOptions {
   onChange: (runId: string) => void;
   log: (runId: string, message: string, level: 'info' | 'warn') => void;
   notify: (title: string, body: string) => void;
+  /** How many screenshots the agents took of the app in the Hive Browser during the run. */
+  evidence?: (runId: string) => number;
 }
 
 /**
@@ -192,9 +194,12 @@ export class DeliveryGate {
         : failed.length
           ? `${failed.map((check) => check.command).join(', ')} falhou no projeto integrado`
           : 'não havia comando de verificação';
+    // What the agents saw of the app running, in the Hive Browser.
+    const shots = this.options.evidence?.(run.id) ?? 0;
+    const seen = shots ? ` Os agentes testaram o app no Hive Browser (${shots} print(s)).` : '';
     const summary = assessed.length
-      ? `${met} de ${assessed.length} requisitos entregues e verificados; ${proven}.`
-      : `Sem requisitos no plano; ${proven}.`;
+      ? `${met} de ${assessed.length} requisitos entregues e verificados; ${proven}.${seen}`
+      : `Sem requisitos no plano; ${proven}.${seen}`;
     const delivery: RunDelivery = {
       status: verified ? 'verified' : 'pending',
       at: nowIso(),

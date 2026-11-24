@@ -8042,3 +8042,156 @@ nav.compact .nav-chevron,
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Hive Browser page. */
+.hive-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.hive-browser-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.hive-browser-tab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px 8px 0 0;
+  background: var(--surface-2);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+.hive-browser-tab.selected {
+  border-color: rgb(255 255 255 / 30%);
+  color: var(--foreground);
+}
+.hive-browser-tab button {
+  padding: 2px;
+}
+.hive-browser-errors {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgb(248 113 133 / 20%);
+  color: #f87185;
+  font-size: 10px;
+  font-weight: 700;
+}
+.hive-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hive-browser-bar input {
+  flex: 1;
+  min-width: 0;
+}
+.hive-browser-devices {
+  display: flex;
+  gap: 2px;
+  margin-left: 6px;
+}
+.hive-browser-devices button.selected {
+  background: rgb(255 255 255 / 10%);
+  color: var(--foreground);
+}
+.hive-browser-owner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid rgb(167 139 250 / 45%);
+  border-radius: 8px;
+  background: rgb(167 139 250 / 10%);
+  font-size: 13px;
+}
+.hive-browser-owner.paused {
+  border-color: rgb(245 181 68 / 45%);
+  background: rgb(245 181 68 / 10%);
+}
+.hive-browser-owner span {
+  flex: 1;
+}
+.hive-browser-owner button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hive-browser-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
+  min-height: 0;
+}
+.hive-browser-view {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 300px;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 35%);
+}
+.hive-browser-view img {
+  display: block;
+  max-width: 100%;
+  max-height: 74vh;
+  border-radius: 4px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 45%);
+  cursor: crosshair;
+}
+.hive-browser-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.hive-browser-side h3,
+.hive-browser-type label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+}
+.hive-browser-type {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hive-browser-console {
+  flex: 1;
+  min-height: 200px;
+  max-height: 52vh;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 35%);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hive-browser-note {
+  margin: 0;
+  font-size: 11px;
+}
+@media (max-width: 900px) {
+  .hive-browser-body {
+    grid-template-columns: 1fr;
+  }
+}

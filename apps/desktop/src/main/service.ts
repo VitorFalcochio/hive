@@ -23,6 +23,7 @@ import {
   type ExecutionLimits,
   type RecommendedSetup,
   type BackupInfo,
+  type BrowserEvidence,
   type HivePush,
   type IpcChannel,
   type IpcInput,
@@ -36,6 +37,7 @@ import { HiveDatabase, Repositories, SCHEMA_VERSION } from '@hive/persistence';
 import { FlowEngine, allowedCheckCommand } from './flow-engine';
 import { DeliveryGate } from './delivery';
 import { Guardian } from './guardian/guardian';
+import { BrowserManager, USER_OWNER } from './browser/manager';
 import { collectResources } from './guardian/resources';
 import { logFile, onLog } from './logger';
 import {
@@ -77,6 +79,8 @@ import {
   NativeAgentRuntime,
   probeMcpServer,
   type AgentRuntime,
+  type BrowserOwner,
+  type BrowserShot,
   type PageViewer,
 } from '@hive/agents';
 import { SkillForgeAdapter, builtinSkillNames, retiredSkillReplacements } from '@hive/skills';
@@ -136,6 +140,9 @@ export class DesktopService {
   private readonly delivery: DeliveryGate;
   /** Hive Guardian: health checks, incidents and recoveries, with no model involved. */
   private readonly guardian: Guardian;
+  /** Hive Browser: Chromium tabs the user and the agents drive. */
+  private readonly browser: BrowserManager;
+  private browserPush: ReturnType<typeof setTimeout> | undefined;
   private readonly stopListening: () => void;
   readonly autopilot: Autopilot;
   readonly terminals: TerminalManager;
@@ -247,10 +254,21 @@ export class DesktopService {
       refresh: (runId) => this.scheduler.refresh(runId),
       onChange: (runId) => this.changed('autopilot', runId),
     });
+    this.browser = new BrowserManager({
+      // Loads and titles come in bursts; the Browser page reloads once for each burst.
+      onChange: () => {
+        this.browserPush ??= setTimeout(() => {
+          this.browserPush = undefined;
+          this.push({ kind: 'changed', entity: 'browser', id: null });
+        }, 150);
+      },
+      onEvidence: (owner, shot) => void this.saveEvidence(owner, shot),
+    });
     this.runtime =
       runtime ??
       new NativeAgentRuntime({
         mcpServers: () => this.repos.getSettings().mcpServers,
+        browser: this.browser,
         viewPage: (request) => {
           if (!this.viewPage)
             throw new HiveError('VALIDATION', 'view_page is not available right now.');
@@ -353,6 +371,7 @@ export class DesktopService {
       repos: this.repos,
       worktreeRoot: (workspaceId) => path.join(this.dataDir, 'worktrees', workspaceId),
       commands: (folder) => this.flow.verificationCommands(folder),
+      evidence: (runId) => this.evidence(runId).length,
       onChange: (runId) => this.push({ kind: 'changed', entity: 'run', id: runId }),
       log: (runId, message, level) => {
         const run = this.repos.runs.get(runId);
@@ -816,6 +835,8 @@ export class DesktopService {
     void this.claudePermissions.close();
     this.flow.dispose();
     this.guardian.dispose();
+    this.browser.dispose();
+    clearTimeout(this.browserPush);
     this.stopListening();
     this.canvasQueen.dispose();
     this.nexusAutopilot.dispose();
@@ -1018,6 +1039,40 @@ export class DesktopService {
       }
     } catch {
       // No log yet: the Guardian starts from the lines written from now on.
+    }
+  }
+
+  /** Screenshots the agents took while testing a run, oldest first. */
+  private evidence(runId: string): BrowserEvidence[] {
+    try {
+      const value: unknown = JSON.parse(this.repos.getValue(`browserEvidence:${runId}`) ?? '[]');
+      return Array.isArray(value) ? (value as BrowserEvidence[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * An agent's screenshot, saved as a PNG in the data folder and listed with its run: the proof
+   * of what was tested, which the delivery gate counts and the user can open.
+   */
+  private async saveEvidence(owner: BrowserOwner, shot: BrowserShot): Promise<void> {
+    try {
+      const task = owner.taskId ? this.repos.tasks.get(owner.taskId) : null;
+      if (!task) return;
+      const folder = path.join(this.dataDir, 'evidence', task.runId);
+      await mkdir(folder, { recursive: true });
+      const at = nowIso();
+      const file = path.join(folder, `${at.replace(/[:.]/g, '-')}-${task.key}.png`);
+      await writeFile(file, Buffer.from(shot.dataUrl.split(',')[1] ?? '', 'base64'));
+      const items = [
+        ...this.evidence(task.runId),
+        { taskId: task.id, workerName: owner.label, url: shot.url, title: shot.title, file, at },
+      ].slice(-50);
+      this.repos.setValue(`browserEvidence:${task.runId}`, JSON.stringify(items));
+      this.changed('run', task.runId);
+    } catch {
+      // Evidence is a help; a full disk must not break the agent's step.
     }
   }
 
@@ -1500,6 +1555,7 @@ export class DesktopService {
       approvals: this.repos.approvals.list('run_id = ?', id),
       requirements: this.delivery.extras(id).requirements,
       delivery: this.delivery.get(id),
+      evidence: this.evidence(id),
     };
   }
 
@@ -1603,6 +1659,51 @@ export class DesktopService {
         return this.guardian.recover(parse(channel));
       case 'guardian.export':
         return this.guardian.export();
+      case 'browser.list':
+        return this.browser.list();
+      case 'browser.open': {
+        const { url, device } = parse(channel);
+        await this.browser.open(USER_OWNER, withScheme(url), device);
+        return this.browser.list();
+      }
+      case 'browser.navigate': {
+        const { tabId, action, url } = parse(channel);
+        const target = url ? withScheme(url) : url;
+        await this.browser.navigate(USER_OWNER, tabId, action, target);
+        return this.browser.list();
+      }
+      case 'browser.click': {
+        const { tabId, x, y } = parse(channel);
+        await this.browser.click(USER_OWNER, tabId, { x, y });
+        return;
+      }
+      case 'browser.type': {
+        const { tabId, text, submit } = parse(channel);
+        await this.browser.type(USER_OWNER, tabId, { text, submit });
+        return;
+      }
+      case 'browser.scroll': {
+        const { tabId, dy } = parse(channel);
+        await this.browser.scroll(USER_OWNER, tabId, { dy });
+        return;
+      }
+      case 'browser.resize': {
+        const { tabId, device } = parse(channel);
+        await this.browser.resize(USER_OWNER, tabId, { device });
+        return this.browser.list();
+      }
+      case 'browser.preview':
+        return this.browser.preview(parse(channel));
+      case 'browser.console':
+        return this.browser.console(USER_OWNER, parse(channel));
+      case 'browser.close':
+        await this.browser.close(USER_OWNER, parse(channel));
+        return this.browser.list();
+      case 'browser.interrupt': {
+        const { ownerKey, stopped } = parse(channel);
+        this.browser.interrupt(ownerKey, stopped);
+        return this.browser.list();
+      }
       case 'backup.export': {
         const selected = await dialog.showSaveDialog({
           title: 'Exportar backup do Hive',
@@ -2891,4 +2992,16 @@ function commandExists(name: string): Promise<boolean> {
       (error) => resolve(!error),
     );
   });
+}
+
+/**
+ * What the user typed in the Browser's address bar, with http:// added when it names no scheme
+ * at all ("localhost:5173"). One with a scheme stays as typed, so file:// and others reach the
+ * browser's own check and are refused there instead of becoming an odd web address.
+ */
+export function withScheme(address: string): string {
+  const value = address.trim();
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(value) || /^[a-z][a-z\d+.-]*:(?!\d)/i.test(value)
+    ? value
+    : `http://${value}`;
 }

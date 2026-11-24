@@ -23,6 +23,7 @@ import {
   Timer,
   X,
   ShieldCheck,
+  Globe,
 } from 'lucide-react';
 import type {
   AgentEvent,
@@ -60,6 +61,7 @@ import { AboutPage, OverviewPage, ProvidersPage } from './pages';
 import { HiveField } from './home-field';
 import { SkillsPage } from './skills';
 import { GuardianPage } from './guardian';
+import { BrowserPage } from './browser';
 import { Dot } from './ui';
 
 const navigation: { view: View; label: string; icon: typeof Bot }[] = [
@@ -71,6 +73,7 @@ const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   // 'agents' is drawn on its own, as the Agentes accordion, between these two.
   { view: 'providers', label: 'Provedores', icon: Plug },
   { view: 'skills', label: 'Skills', icon: BookOpen },
+  { view: 'browser', label: 'Navegador', icon: Globe },
   { view: 'guardian', label: 'Guardian', icon: ShieldCheck },
 ];
 /** A sidebar layout choice remembered on this machine; storage may be unavailable. */
@@ -108,6 +111,7 @@ const viewTitles: Record<View, string> = {
   providers: 'Provedores',
   skills: 'Skills',
   guardian: 'Guardian',
+  browser: 'Navegador',
   about: 'Sobre',
   settings: 'Configurações',
 };
@@ -798,6 +802,7 @@ export function App() {
               {page === 'providers' && <ProvidersPage />}
               {page === 'skills' && <SkillsPage />}
               {page === 'guardian' && <GuardianPage />}
+              {page === 'browser' && <BrowserPage />}
               {page === 'about' && <AboutPage />}
               {page === 'settings' && <SettingsPage settings={settings} onSaved={refresh} />}
               {page === 'shift' && <ShiftPage settings={settings} onSaved={refresh} />}
