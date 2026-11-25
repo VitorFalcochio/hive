@@ -554,6 +554,14 @@ export const canvasLayoutSchema = z.object({
     .max(5)
     .default([]),
   /**
+   * Browser blocks: the Hive Browser on the canvas, with the tabs the user and the agents have
+   * open (a QA agent testing the app shows up here live). The tabs live in the main process.
+   */
+  browsers: z
+    .array(z.object({ id: layoutKey, x: coordinate, y: coordinate }))
+    .max(5)
+    .default([]),
+  /**
    * Provider blocks. A line from one to an agent makes the agent use that provider; the lines
    * drawn are the agents that use it now, so the canvas never shows a stale link.
    */
@@ -651,6 +659,7 @@ export const emptyCanvasLayout: CanvasLayout = {
   meters: [],
   dialogues: [],
   deliveries: [],
+  browsers: [],
   providers: [],
   terminals: [],
   flow: [],
@@ -1239,6 +1248,17 @@ export const canvasChannels: ReadonlySet<IpcChannel> = new Set<IpcChannel>([
   'canvas.worker.create',
   'canvas.worker.setModel',
   'canvas.terminal.open',
+  'browser.list',
+  'browser.open',
+  'browser.navigate',
+  'browser.click',
+  'browser.type',
+  'browser.scroll',
+  'browser.resize',
+  'browser.preview',
+  'browser.console',
+  'browser.close',
+  'browser.interrupt',
   'cortex.list',
   'cortex.create',
   'cortex.update',

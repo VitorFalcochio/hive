@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { defaultLimits, type SkillSummary, type Worker } from '@hive/core';
+import { defaultLimits, specialistRoles, type SkillSummary, type Worker } from '@hive/core';
 import { HiveDatabase, Repositories } from '@hive/persistence';
 import { Marketplace } from './marketplace';
 import { BuiltinRegistry, RemoteRegistry, sha256, type MarketplaceRegistry } from './registry';
@@ -74,11 +74,31 @@ describe('catálogo do Hive', () => {
     const catalog = await marketplace.catalog();
     expect(catalog.rejected).toEqual([]);
     expect(catalog.listings.map((item) => item.package.id).sort()).toEqual([
+      'analista-de-requisitos',
+      'detetive-de-bugs',
+      'dev-de-interface',
+      'engenheiro-de-banco-de-dados',
+      'engenheiro-de-integracao',
+      'engenheiro-de-performance',
+      'engenheiro-de-seguranca',
       'esquadrao-web',
+      'explorador-de-codigo',
       'qa-de-interface',
+      'qa-web',
       'revisor-de-acessibilidade',
     ]);
     expect(catalog.listings.every((item) => item.installable)).toBe(true);
+  });
+
+  it('cada especialista que saiu do Hive tem o seu pacote, e cada agente de equipe vende sozinho', async () => {
+    const { listings } = await hive().marketplace.catalog();
+    const single = listings.filter((item) => item.package.category === 'agent');
+    for (const role of specialistRoles)
+      expect(single.some((item) => item.package.agents[0]!.role === role)).toBe(true);
+    const teams = listings.filter((item) => item.package.category === 'team');
+    for (const team of teams)
+      for (const agent of team.package.agents)
+        expect(single.some((item) => item.package.agents[0]!.name === agent.name)).toBe(true);
   });
 });
 

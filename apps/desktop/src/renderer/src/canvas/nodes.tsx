@@ -36,6 +36,7 @@ import {
   Loader2,
   ShieldAlert,
   ShieldCheck,
+  Globe,
 } from 'lucide-react';
 import type {
   AgentEvent,
@@ -60,6 +61,7 @@ import { ClaudeLogo, ProviderLogo, providerColor } from '../provider-logo';
 import { TerminalView } from '../terminal-view';
 import { AgentWindow, RestoreButton, type AgentTab } from './agent-window';
 import { buildDialogue } from './dialogue';
+import { BrowserView } from '../browser';
 import {
   UNASSIGNED,
   isLive,
@@ -151,6 +153,7 @@ export type CanvasNode = Node<
   | 'tokens'
   | 'dialogue'
   | 'delivery'
+  | 'browser'
   | 'provider'
   | 'terminal'
   | 'flow'
@@ -1574,7 +1577,38 @@ export const DeliveryNode = memo(function DeliveryNode({ id, selected }: NodePro
   );
 });
 
+/**
+ * The Browser block: the Hive Browser on the canvas. Every tab the user or an agent has open is
+ * here; the page is a live picture of the tab, so a click on it clicks the page.
+ */
+export const BrowserNode = memo(function BrowserNode({ id, selected }: NodeProps<CanvasNode>) {
+  const view = useView();
+  return (
+    <>
+      <NodeResizer
+        isVisible={selected}
+        minWidth={420}
+        minHeight={320}
+        lineClassName="nc-resize-line"
+        handleClassName="nc-resize-handle"
+        onResizeEnd={(_, size) => view.setSize(id, { width: size.width, height: size.height })}
+      />
+      <div className={`nc-node nc-browser${selected ? ' selected' : ''}`}>
+        <header className="nc-window-head">
+          <Globe size={16} />
+          <strong>Navegador</strong>
+          <PinMark id={id} />
+        </header>
+        <div className="nc-browser-body nodrag nowheel">
+          <BrowserView compact />
+        </div>
+      </div>
+    </>
+  );
+});
+
 export const nodeTypes = {
+  browser: BrowserNode,
   dialogue: DialogueNode,
   delivery: DeliveryNode,
   cortex: CortexNode,

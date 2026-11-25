@@ -9,6 +9,7 @@ export type Frame = CanvasLayout['frames'][number];
 export type Meter = CanvasLayout['meters'][number];
 export type DialogueBlock = CanvasLayout['dialogues'][number];
 export type DeliveryBlock = CanvasLayout['deliveries'][number];
+export type BrowserBlock = CanvasLayout['browsers'][number];
 export type ProviderBlock = CanvasLayout['providers'][number];
 export type TerminalBlock = CanvasLayout['terminals'][number];
 export type FlowBlock = CanvasLayout['flow'][number];
@@ -42,6 +43,7 @@ export interface LayoutApi {
   addMeter: (meter: Meter) => void;
   addDialogue: (block: DialogueBlock) => void;
   addDelivery: (block: DeliveryBlock) => void;
+  addBrowser: (block: BrowserBlock) => void;
   addProviderBlock: (block: ProviderBlock) => void;
   addTerminalBlock: (block: TerminalBlock) => void;
   addFlowBlock: (block: FlowBlock) => void;
@@ -173,6 +175,9 @@ export function useLayout(runId: string): LayoutApi {
           const deliveries = current.deliveries.map((block) =>
             positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
           );
+          const browsers = current.browsers.map((block) =>
+            positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
+          );
           const providers = current.providers.map((block) =>
             positions[block.id] ? { ...block, ...round(positions[block.id]!) } : block,
           );
@@ -189,6 +194,7 @@ export function useLayout(runId: string): LayoutApi {
               ...meters,
               ...dialogues,
               ...deliveries,
+              ...browsers,
               ...providers,
               ...terminals,
               ...flow,
@@ -204,6 +210,7 @@ export function useLayout(runId: string): LayoutApi {
             meters,
             dialogues,
             deliveries,
+            browsers,
             providers,
             terminals,
             flow,
@@ -269,6 +276,8 @@ export function useLayout(runId: string): LayoutApi {
         change((current) => ({ ...current, dialogues: [...current.dialogues, block] })),
       addDelivery: (block) =>
         change((current) => ({ ...current, deliveries: [...current.deliveries, block] })),
+      addBrowser: (block) =>
+        change((current) => ({ ...current, browsers: [...current.browsers, block] })),
       addProviderBlock: (block) =>
         change((current) => ({ ...current, providers: [...current.providers, block] })),
       addTerminalBlock: (block) =>
@@ -310,6 +319,7 @@ export function useLayout(runId: string): LayoutApi {
             !current.meters.some((m) => gone.has(m.id)) &&
             !current.dialogues.some((d) => gone.has(d.id)) &&
             !current.deliveries.some((d) => gone.has(d.id)) &&
+            !current.browsers.some((b) => gone.has(b.id)) &&
             !current.providers.some((p) => gone.has(p.id)) &&
             !current.terminals.some((t) => gone.has(t.id)) &&
             !current.flow.some((f) => gone.has(f.id))
@@ -325,6 +335,7 @@ export function useLayout(runId: string): LayoutApi {
             meters: current.meters.filter((meter) => !gone.has(meter.id)),
             dialogues: current.dialogues.filter((block) => !gone.has(block.id)),
             deliveries: current.deliveries.filter((block) => !gone.has(block.id)),
+            browsers: current.browsers.filter((block) => !gone.has(block.id)),
             providers: current.providers.filter((block) => !gone.has(block.id)),
             terminals: current.terminals.filter((block) => !gone.has(block.id)),
             flow: current.flow.filter((block) => !gone.has(block.id)),
@@ -347,6 +358,7 @@ export const localId = (
     | 'tokens'
     | 'dialogue'
     | 'delivery'
+    | 'browser'
     | 'provider'
     | 'terminal'
     | 'flow'

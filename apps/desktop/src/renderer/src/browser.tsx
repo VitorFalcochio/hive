@@ -30,8 +30,10 @@ const devices = [
  * The Hive Browser: every tab the user or an agent has open, in the Chromium inside Hive. The
  * view is a live screenshot of the tab, so a click on it clicks the page and the wheel scrolls
  * it; agents' tabs show who drives them, and the user can stop that agent's automation.
+ * It lives as a block of the Workspace; there, compact keeps the console behind a button.
  */
-export function BrowserPage() {
+export function BrowserView({ compact = false }: { compact?: boolean }) {
+  const [sideOpen, setSideOpen] = useState(!compact);
   const [tabs, setTabs] = useState<BrowserTabState[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [address, setAddress] = useState('');
@@ -138,7 +140,7 @@ export function BrowserPage() {
   };
 
   return (
-    <div className="hive-browser">
+    <div className={compact ? 'hive-browser compact' : 'hive-browser'}>
       <div className="hive-browser-tabs" role="tablist" aria-label="Abas do Hive Browser">
         {tabs.map((item) => (
           <div
@@ -233,6 +235,20 @@ export function BrowserPage() {
             </button>
           ))}
         </div>
+        {compact && (
+          <button
+            type="button"
+            className={sideOpen ? 'ghost selected' : 'ghost'}
+            aria-label="Console e digitação"
+            aria-pressed={sideOpen}
+            title="Console e digitação"
+            disabled={!tab}
+            onClick={() => setSideOpen(!sideOpen)}
+          >
+            <Terminal size={14} />
+            {tab && tab.errors > 0 && <span className="hive-browser-errors">{tab.errors}</span>}
+          </button>
+        )}
       </form>
 
       {agentTab && tab && (
@@ -294,39 +310,41 @@ export function BrowserPage() {
               <p className="muted">Carregando a tela…</p>
             )}
           </div>
-          <aside className="hive-browser-side">
-            <form
-              className="hive-browser-type"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!typing) return;
-                const text = typing;
-                setTyping('');
-                call(() =>
-                  window.hive.invoke('browser.type', { tabId: tab.id, text, submit: true }),
-                );
-              }}
-            >
-              <label>
-                <Keyboard size={12} /> Digitar no campo selecionado
-              </label>
-              <input
-                value={typing}
-                placeholder="Clique num campo da tela e digite aqui"
-                onChange={(event) => setTyping(event.target.value)}
-              />
-            </form>
-            <h3>
-              <Terminal size={12} /> Console {tab.errors > 0 && `· ${tab.errors} erro(s)`}
-            </h3>
-            <pre className="hive-browser-console" tabIndex={0} aria-label="Console da aba">
-              {lines.length ? lines.join('\n') : 'Nada no console.'}
-            </pre>
-            <p className="muted hive-browser-note">
-              {tab.width}×{tab.height} · {tab.device}. Clique na tela para clicar na página; a roda
-              do mouse rola.
-            </p>
-          </aside>
+          {sideOpen && (
+            <aside className="hive-browser-side">
+              <form
+                className="hive-browser-type"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!typing) return;
+                  const text = typing;
+                  setTyping('');
+                  call(() =>
+                    window.hive.invoke('browser.type', { tabId: tab.id, text, submit: true }),
+                  );
+                }}
+              >
+                <label>
+                  <Keyboard size={12} /> Digitar no campo selecionado
+                </label>
+                <input
+                  value={typing}
+                  placeholder="Clique num campo da tela e digite aqui"
+                  onChange={(event) => setTyping(event.target.value)}
+                />
+              </form>
+              <h3>
+                <Terminal size={12} /> Console {tab.errors > 0 && `· ${tab.errors} erro(s)`}
+              </h3>
+              <pre className="hive-browser-console" tabIndex={0} aria-label="Console da aba">
+                {lines.length ? lines.join('\n') : 'Nada no console.'}
+              </pre>
+              <p className="muted hive-browser-note">
+                {tab.width}×{tab.height} · {tab.device}. Clique na tela para clicar na página; a
+                roda do mouse rola.
+              </p>
+            </aside>
+          )}
         </div>
       )}
     </div>

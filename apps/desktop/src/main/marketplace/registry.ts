@@ -2,8 +2,17 @@ import { createHash } from 'node:crypto';
 import { marketplaceIndexSchema, type MarketplaceIndex } from '@hive/core';
 import { HiveError, errorMessage } from '@hive/shared';
 import index from '../../../../../marketplace/index.json?raw';
+import analistaDeRequisitos from '../../../../../marketplace/packages/analista-de-requisitos.json?raw';
+import detetiveDeBugs from '../../../../../marketplace/packages/detetive-de-bugs.json?raw';
+import devDeInterface from '../../../../../marketplace/packages/dev-de-interface.json?raw';
+import engenheiroDeBancoDeDados from '../../../../../marketplace/packages/engenheiro-de-banco-de-dados.json?raw';
+import engenheiroDeIntegracao from '../../../../../marketplace/packages/engenheiro-de-integracao.json?raw';
+import engenheiroDePerformance from '../../../../../marketplace/packages/engenheiro-de-performance.json?raw';
+import engenheiroDeSeguranca from '../../../../../marketplace/packages/engenheiro-de-seguranca.json?raw';
 import esquadraoWeb from '../../../../../marketplace/packages/esquadrao-web.json?raw';
+import exploradorDeCodigo from '../../../../../marketplace/packages/explorador-de-codigo.json?raw';
 import qaDeInterface from '../../../../../marketplace/packages/qa-de-interface.json?raw';
+import qaWeb from '../../../../../marketplace/packages/qa-web.json?raw';
 import revisorDeAcessibilidade from '../../../../../marketplace/packages/revisor-de-acessibilidade.json?raw';
 
 /** Where packages come from. The page lists them all; each says which source it came from. */
@@ -33,8 +42,17 @@ export class BuiltinRegistry implements MarketplaceRegistry {
   readonly id = 'hive';
   readonly label = 'Hive';
   private readonly files: Record<string, string> = {
+    'packages/analista-de-requisitos.json': analistaDeRequisitos,
+    'packages/detetive-de-bugs.json': detetiveDeBugs,
+    'packages/dev-de-interface.json': devDeInterface,
+    'packages/engenheiro-de-banco-de-dados.json': engenheiroDeBancoDeDados,
+    'packages/engenheiro-de-integracao.json': engenheiroDeIntegracao,
+    'packages/engenheiro-de-performance.json': engenheiroDePerformance,
+    'packages/engenheiro-de-seguranca.json': engenheiroDeSeguranca,
     'packages/esquadrao-web.json': esquadraoWeb,
+    'packages/explorador-de-codigo.json': exploradorDeCodigo,
     'packages/qa-de-interface.json': qaDeInterface,
+    'packages/qa-web.json': qaWeb,
     'packages/revisor-de-acessibilidade.json': revisorDeAcessibilidade,
   };
 

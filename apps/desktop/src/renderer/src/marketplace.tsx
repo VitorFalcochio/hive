@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
+  ArrowRight,
+  Check,
   Download,
   FileUp,
   History,
@@ -21,6 +23,15 @@ import type {
 } from '@hive/core';
 import { useHive } from './context';
 import { Empty, useTask } from './ui';
+import { toolLabels } from './agents';
+import {
+  AgentPortrait,
+  PackageAvatar,
+  PackageCover,
+  packageColor,
+  roleIcons,
+  roleName,
+} from './market-art';
 
 const categoryLabels: Record<MarketplaceCategory, string> = {
   agent: 'Agente',
@@ -31,6 +42,89 @@ const categoryLabels: Record<MarketplaceCategory, string> = {
   tool: 'Ferramenta',
 };
 type Tab = 'explore' | 'installed' | 'create';
+
+/** A tool's name and what it does, in Portuguese; a tool this page does not know shows as is. */
+const toolText = (tool: string) =>
+  tool === 'run_command'
+    ? { label: 'Rodar comandos', detail: 'Executa comandos no terminal, pedindo a sua aprovação.' }
+    : (toolLabels as Partial<Record<string, { label: string; detail: string }>>)[tool];
+
+/** With every category shown, teams come first and then single agents, each under a title. */
+function sections(
+  listings: MarketplaceListing[],
+  category: MarketplaceCategory | 'all',
+): { title: string; items: MarketplaceListing[] }[] {
+  if (category !== 'all') return [{ title: '', items: listings }];
+  const titles: Partial<Record<MarketplaceCategory, string>> = {
+    team: 'Equipes',
+    agent: 'Agentes avulsos',
+    skill: 'Skills',
+  };
+  const order: MarketplaceCategory[] = ['team', 'agent', 'skill', 'workflow', 'template', 'tool'];
+  return order
+    .map((item) => ({
+      title: titles[item] ?? `${categoryLabels[item]}s`,
+      items: listings.filter((listing) => listing.package.category === item),
+    }))
+    .filter((section) => section.items.length);
+}
+
+/** A package in the catalog: its picture, what it is, and whether it is already here. */
+function MarketCard({ item, onOpen }: { item: MarketplaceListing; onOpen: () => void }) {
+  const pkg = item.package;
+  const single = pkg.category === 'agent' ? pkg.agents[0] : undefined;
+  const RoleIcon = single ? roleIcons[single.role] : pkg.category === 'team' ? Users : Package;
+  return (
+    <button
+      className="market-card"
+      style={{ '--accent': packageColor(pkg) } as CSSProperties}
+      onClick={onOpen}
+    >
+      <span className="market-card-head">
+        <PackageAvatar pkg={pkg} />
+        <span className="market-card-title">
+          <strong className="market-card-name">{pkg.name}</strong>
+          <span className="market-card-meta">
+            por {pkg.author.name} · v{pkg.version}
+          </span>
+        </span>
+        <span className="market-chip">
+          <RoleIcon size={12} />
+          {single
+            ? roleName(single.role)
+            : pkg.category === 'team'
+              ? `Equipe de ${pkg.agents.length}`
+              : categoryLabels[pkg.category]}
+        </span>
+      </span>
+      <span className="market-card-body">
+        <span className="market-card-text">{pkg.description}</span>
+        <span className="market-card-tags">
+          {pkg.tags.slice(0, 3).map((tag) => (
+            <span key={tag} className="market-badge">
+              #{tag}
+            </span>
+          ))}
+        </span>
+      </span>
+      <span className="market-card-foot">
+        {item.installedVersion ? (
+          <span className="market-chip ok">
+            <Check size={12} />
+            {item.updateAvailable ? `Atualizar p/ v${pkg.version}` : 'Instalado'}
+          </span>
+        ) : !item.installable ? (
+          <span className="market-chip warn">Não instalável</span>
+        ) : (
+          <span>{pkg.permissions.length} ferramentas</span>
+        )}
+        <span className="market-card-cta">
+          Ver detalhes <ArrowRight size={13} />
+        </span>
+      </span>
+    </button>
+  );
+}
 
 /**
  * Hive Marketplace: agents, teams and skills to install and use in your projects, and your own
@@ -79,6 +173,14 @@ export function MarketplacePage() {
             .includes(words)),
     );
   }, [catalog, query, category]);
+  // Three bees of the catalog for the banner, of different roles.
+  const flock = useMemo(() => {
+    const seen = new Set<string>();
+    return (catalog?.listings ?? [])
+      .flatMap((item) => item.package.agents)
+      .filter((agent) => !seen.has(agent.role) && seen.add(agent.role))
+      .slice(0, 3);
+  }, [catalog]);
   const categories = useMemo(
     () => [...new Set((catalog?.listings ?? []).map((item) => item.package.category))],
     [catalog],
@@ -120,13 +222,22 @@ export function MarketplacePage() {
   return (
     <div className="market">
       <section className="market-hero">
-        <Store size={26} aria-hidden />
+        <span className="market-hero-flock" aria-hidden>
+          {flock.length ? (
+            flock.map((agent, index) => (
+              <AgentPortrait key={agent.key} agent={agent} size={index === 1 ? 60 : 48} animated />
+            ))
+          ) : (
+            <Store size={26} />
+          )}
+        </span>
         <div>
           <h1>Marketplace</h1>
           <p className="muted">
-            Agentes, equipes e skills para instalar e usar nos seus projetos. Cada pacote é
-            conferido antes de aparecer aqui e mostra o que pede antes de ser instalado; nenhum traz
-            chaves, modelos ou comandos que rodam sozinhos.
+            O Hive vem com a equipe padrão; os demais agentes ficam aqui, um por um ou em equipes,
+            para instalar e usar nos seus projetos. Cada pacote é conferido antes de aparecer aqui e
+            mostra o que pede antes de ser instalado; nenhum traz chaves, modelos ou comandos que
+            rodam sozinhos.
           </p>
         </div>
         <div className="market-hero-actions">
@@ -203,44 +314,22 @@ export function MarketplacePage() {
           {!catalog ? (
             <p className="muted">Carregando o catálogo…</p>
           ) : listings.length ? (
-            <ul className="market-grid">
-              {listings.map((item) => (
-                <li key={`${item.source}:${item.package.id}`}>
-                  <button className="market-card" onClick={() => open(item)}>
-                    <span className="market-card-head">
-                      {item.package.category === 'team' ? (
-                        <Users size={16} />
-                      ) : (
-                        <Package size={16} />
-                      )}
-                      <strong>{item.package.name}</strong>
-                    </span>
-                    <span className="market-card-meta">
-                      {categoryLabels[item.package.category]} · v{item.package.version} ·{' '}
-                      {item.package.author.name} · {item.source}
-                    </span>
-                    <span className="market-card-text">{item.package.description}</span>
-                    <span className="market-card-tags">
-                      {item.installedVersion && (
-                        <span className="market-badge ok">
-                          {item.updateAvailable
-                            ? `Atualização: v${item.package.version}`
-                            : 'Instalado'}
-                        </span>
-                      )}
-                      {!item.installable && (
-                        <span className="market-badge warn">Não instalável</span>
-                      )}
-                      {item.package.tags.slice(0, 4).map((tag) => (
-                        <span key={tag} className="market-badge">
-                          {tag}
-                        </span>
-                      ))}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            sections(listings, category).map((section) => (
+              <section key={section.title} className="market-section">
+                {section.title && (
+                  <h2 className="market-section-title">
+                    {section.title} <span>{section.items.length}</span>
+                  </h2>
+                )}
+                <ul className="market-grid">
+                  {section.items.map((item) => (
+                    <li key={`${item.source}:${item.package.id}`}>
+                      <MarketCard item={item} onOpen={() => open(item)} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))
           ) : (
             <Empty>Nada encontrado com esse filtro.</Empty>
           )}
@@ -301,6 +390,16 @@ export function MarketplacePage() {
               );
               return (
                 <li key={item.packageId}>
+                  {listing?.package.agents[0] ? (
+                    <AgentPortrait agent={listing.package.agents[0]} size={40} />
+                  ) : (
+                    <span
+                      className="market-portrait"
+                      style={{ '--portrait': '40px' } as CSSProperties}
+                    >
+                      <Package size={16} />
+                    </span>
+                  )}
                   <div>
                     <strong>{item.name}</strong>
                     <span className="muted">
@@ -395,12 +494,18 @@ export function MarketplacePage() {
           aria-label={preview.data.listing.package.name}
         >
           <div className="market-modal-body">
-            <h2>{preview.data.listing.package.name}</h2>
-            <p className="muted">
-              {categoryLabels[preview.data.listing.package.category]} · v
-              {preview.data.listing.package.version} · {preview.data.listing.package.author.name} ·
-              licença {preview.data.listing.package.license} · {preview.data.listing.source}
-            </p>
+            <div className="market-modal-hero">
+              <PackageCover pkg={preview.data.listing.package} large animated />
+              <div>
+                <h2>{preview.data.listing.package.name}</h2>
+                <p className="muted">
+                  {categoryLabels[preview.data.listing.package.category]} · v
+                  {preview.data.listing.package.version} · por{' '}
+                  {preview.data.listing.package.author.name} · licença{' '}
+                  {preview.data.listing.package.license}
+                </p>
+              </div>
+            </div>
             <p>{preview.data.listing.package.description}</p>
             {preview.data.listing.problem && (
               <p className="error-text">{preview.data.listing.problem}</p>
@@ -408,16 +513,20 @@ export function MarketplacePage() {
             {preview.data.listing.package.agents.length > 0 && (
               <>
                 <h3>Agentes</h3>
-                <ul>
+                <ul className="market-agents">
                   {preview.data.listing.package.agents.map((agent) => (
                     <li key={agent.key}>
-                      <strong>{agent.name}</strong> ({agent.role}): {agent.description}
-                      {agent.recommendedModels.length > 0 && (
-                        <span className="muted">
-                          {' '}
-                          Modelo sugerido: {agent.recommendedModels.join('; ')}.
-                        </span>
-                      )}
+                      <AgentPortrait agent={agent} size={44} />
+                      <div>
+                        <strong>{agent.name}</strong>
+                        <span className="market-role">{roleName(agent.role)}</span>
+                        <span>{agent.description}</span>
+                        {agent.recommendedModels.length > 0 && (
+                          <span className="muted">
+                            Modelo sugerido: {agent.recommendedModels.join('; ')}.
+                          </span>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -427,8 +536,11 @@ export function MarketplacePage() {
             <ul className="market-permissions">
               {preview.data.permissions.map((item) => (
                 <li key={item.tool} className={item.sensitive ? 'sensitive' : undefined}>
-                  <code>{item.tool}</code> {item.description}
-                  {item.sensitive && <strong> · altera o projeto ou executa comandos</strong>}
+                  <span>
+                    <b>{toolText(item.tool)?.label ?? item.tool}</b>
+                    {item.sensitive && <strong>altera o projeto ou executa comandos</strong>}
+                  </span>
+                  <small>{toolText(item.tool)?.detail ?? item.description}</small>
                 </li>
               ))}
             </ul>

@@ -1,6 +1,6 @@
 {
   "name": "hive",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Hive — your AI development team. A desktop workspace for coordinating multiple coding agents.",
   "type": "module",

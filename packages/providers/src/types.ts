@@ -4,6 +4,12 @@ export interface ToolCall {
   id: string;
   type: 'function';
   function: { name: string; arguments: string };
+  /**
+   * Provider data that must come back with the call. Gemini 3 puts each call's thought
+   * signature here (`extra_content.google.thought_signature`) and refuses the next request
+   * with a 400 when it is missing. Only sent back to the provider it came from.
+   */
+  extra_content?: Record<string, unknown>;
 }
 
 /** Part of a multimodal user message; images go as data URLs, which every vision API accepts. */

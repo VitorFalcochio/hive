@@ -9,6 +9,7 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  Store,
   Trash2,
 } from 'lucide-react';
 import {
@@ -43,7 +44,7 @@ import { FailoverSection } from './model-failover';
 
 const roleLabel = (role: WorkerRole) => roleInfo[role].label;
 
-const toolLabels: Record<ToolName, { label: string; detail: string }> = {
+export const toolLabels: Record<ToolName, { label: string; detail: string }> = {
   list_dir: { label: 'Listar pastas', detail: 'Vê os arquivos e pastas do projeto.' },
   read_file: { label: 'Ler arquivos', detail: 'Abre o conteúdo dos arquivos.' },
   search: { label: 'Buscar', detail: 'Procura texto em todo o projeto.' },
@@ -76,7 +77,7 @@ const sortWorkers = (workers: Worker[]) =>
 type Selection = string | 'new' | null;
 
 export function AgentsPage() {
-  const { workers, providers, openModal } = useHive();
+  const { workers, providers, openModal, go } = useHive();
   const usable = providers.filter(hasAccess);
   const sorted = sortWorkers(workers);
   const [selected, setSelected] = useState<Selection>(null);
@@ -109,6 +110,9 @@ export function AgentsPage() {
         title="Agentes"
         description="A Queen distribui as tarefas pela descrição de cada agente. Escolha o provedor na linha; o modelo é testado sozinho."
       >
+        <button className="secondary" onClick={() => go('marketplace')}>
+          <Store size={15} /> Marketplace
+        </button>
         <button
           className="secondary"
           disabled={!usable.length}

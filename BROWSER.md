@@ -2,12 +2,12 @@
 
 Um navegador dentro do Hive, que você e os agentes usam para abrir e testar aplicações web. Ele usa o **Chromium que já vem no Electron**: não baixa nenhum navegador e não tem custo.
 
-Para abrir: menu lateral → **Navegador**.
+Para abrir: no **Workspace** (canvas da missão), adicione o bloco **Navegador** pelo menu de blocos (seção Testar o app) ou pela paleta de comandos. Quando a missão tem um QA que testa no Hive Browser, o bloco já entra sozinho, à esquerda do Diálogo. Ele saiu do menu lateral: o lugar dele é ao lado dos agentes que o usam.
 
 ## Decisões de arquitetura
 
 1. **Sem Playwright, por segurança.** Para o Playwright controlar o Chromium do Hive, o app precisaria abrir uma porta de depuração na máquina. Qualquer programa local poderia usá-la para controlar **o próprio Hive**, inclusive a janela principal, que tem acesso a tudo. O Electron já oferece, de dentro do processo, o que é preciso: eventos reais de mouse e teclado (`sendInputEvent`, `insertText`), print (`capturePage`), console, rede e tamanho da tela. O Playwright continua sendo uma opção para scripts de teste dos próprios projetos, rodados por `run_command`.
-2. **Cada aba é uma janela invisível renderizada fora da tela**, a 10 quadros por segundo, para gastar pouca CPU. A página **Navegador** mostra a aba como uma imagem atualizada a cada 1,2 s. Um clique na imagem vira um clique na página, e a roda do mouse rola.
+2. **Cada aba é uma janela invisível renderizada fora da tela**, a 10 quadros por segundo, para gastar pouca CPU. O bloco **Navegador** mostra a aba como uma imagem atualizada a cada 1,2 s. Um clique na imagem vira um clique na página, e a roda do mouse rola.
 3. **O mesmo padrão do `view_page`.** O pacote de agentes define o contrato (`BrowserDriver`) e as ferramentas, e o app desktop injeta a implementação. Isso permite testar as ferramentas com um navegador falso.
 4. **Ferramentas só para quem testa interface.** As 13 ferramentas vão para agentes de **QA, frontend, integração** e personalizados que tenham a permissão `view_page`. Dar a todos custaria cerca de 1.500 tokens a mais por passo, o que estoura os limites por minuto das camadas grátis.
 
@@ -20,6 +20,7 @@ As abas de um agente fecham quando a tarefa dele termina.
 ## Testes de QA e evidências
 
 A Queen foi instruída a, num app com tela, dar à tarefa de QA ou de integração os passos:
+
 1. subir o servidor (`run_command` em segundo plano);
 2. abrir o app (`browser_open`);
 3. percorrer os critérios de aceitação;
@@ -56,7 +57,7 @@ Cada print que um agente tira é salvo como PNG em `<dados>/evidence/<missão>/`
 
 - `packages/agents/src/browser.ts`: contrato, ferramentas e regras de endereço.
 - `apps/desktop/src/main/browser/manager.ts`: as abas no Chromium do Electron.
-- `apps/desktop/src/renderer/src/browser.tsx`: página Navegador.
+- `apps/desktop/src/renderer/src/browser.tsx`: o Hive Browser (BrowserView), usado pelo bloco Navegador do canvas; o console e a digitação ficam atrás de um botão.
 - `packages/core/src/ipc.ts`: `BrowserTabState`, `BrowserEvidence` e os canais `browser.*`.
 - `apps/desktop/src/main/service.ts`: canais, evidências e `withScheme`.
 - `apps/desktop/src/main/delivery.ts`: prints no veredito.

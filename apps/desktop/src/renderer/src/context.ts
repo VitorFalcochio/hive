@@ -29,7 +29,6 @@ export type View =
   /** Hive Guardian: health, incidents and recoveries of the hive. */
   | 'guardian'
   /** Hive Browser: tabs the user and the agents drive. */
-  | 'browser'
   /** Hive Marketplace: agents, teams and skills to install and share. */
   | 'marketplace'
   | 'settings'

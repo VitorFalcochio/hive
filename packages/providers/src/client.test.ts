@@ -26,6 +26,90 @@ const json = (body: unknown, init: ResponseInit = {}) =>
 
 const request = { model: 'm', messages: [{ role: 'user' as const, content: 'oi' }] };
 
+describe('assinatura de pensamento do Gemini', () => {
+  const signed = {
+    choices: [
+      {
+        message: {
+          content: null,
+          tool_calls: [
+            {
+              id: 'c1',
+              function: { name: 'read_file', arguments: '{"path":"a"}' },
+              extra_content: { google: { thought_signature: 'assinatura-123' } },
+            },
+          ],
+        },
+        finish_reason: 'tool_calls',
+      },
+    ],
+  };
+  const sent = (init: RequestInit) =>
+    JSON.parse(String(init.body)).messages as { tool_calls?: Record<string, unknown>[] }[];
+
+  it('guarda a assinatura da chamada e a devolve ao Gemini no passo seguinte', async () => {
+    const calls: RequestInit[] = [];
+    const gemini = new OpenAICompatibleClient({ ...endpoint, kind: 'gemini' }, (async (
+      _url: string,
+      init: RequestInit,
+    ) => {
+      calls.push(init);
+      return json(signed);
+    }) as unknown as typeof fetch);
+    const first = await gemini.chat(request);
+    expect(first.message.tool_calls?.[0]?.extra_content).toEqual({
+      google: { thought_signature: 'assinatura-123' },
+    });
+    await gemini.chat({
+      model: 'm',
+      messages: [
+        ...request.messages,
+        first.message,
+        { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+      ],
+    });
+    expect(sent(calls[1]!)[1]!.tool_calls![0]!.extra_content).toEqual({
+      google: { thought_signature: 'assinatura-123' },
+    });
+  });
+
+  it('depois de trocar para o Gemini, chamadas de outros modelos levam a assinatura substituta', async () => {
+    const calls: RequestInit[] = [];
+    const gemini = new OpenAICompatibleClient({ ...endpoint, kind: 'gemini' }, (async (
+      _url: string,
+      init: RequestInit,
+    ) => {
+      calls.push(init);
+      return json(signed);
+    }) as unknown as typeof fetch);
+    await gemini.chat({
+      model: 'm',
+      messages: [
+        ...request.messages,
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'g1', type: 'function', function: { name: 'list_dir', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'g1', content: 'ok' },
+      ],
+    });
+    expect(sent(calls[0]!)[1]!.tool_calls![0]!.extra_content).toEqual({
+      google: { thought_signature: 'skip_thought_signature_validator' },
+    });
+  });
+
+  it('não manda a assinatura a outro provedor depois de uma troca de modelo', async () => {
+    const { api, calls } = client(() => json(signed));
+    const first = await new OpenAICompatibleClient({ ...endpoint, kind: 'gemini' }, (async () =>
+      json(signed)) as unknown as typeof fetch).chat(request);
+    await api.chat({ model: 'm', messages: [...request.messages, first.message] });
+    expect(sent(calls[0]!.init)[1]!.tool_calls![0]).not.toHaveProperty('extra_content');
+  });
+});
+
 describe('cliente de provedores compatíveis com OpenAI', () => {
   it('envia a chave, o modelo e as ferramentas, e lê a resposta com chamadas de ferramenta', async () => {
     const { api, calls } = client(() =>

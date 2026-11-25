@@ -8258,50 +8258,6 @@ nav.compact .nav-chevron,
   flex: 1;
   min-width: 220px;
 }
-.market-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.market-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-  height: 100%;
-  padding: 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface-2);
-  color: var(--foreground);
-  text-align: left;
-  cursor: pointer;
-}
-.market-card:hover {
-  border-color: rgb(255 255 255 / 30%);
-}
-.market-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.market-card-meta {
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-.market-card-text {
-  font-size: 13px;
-  line-height: 1.45;
-}
-.market-card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: auto;
-}
 .market-badge {
   padding: 2px 8px;
   border-radius: 999px;
@@ -8463,30 +8419,418 @@ nav.compact .nav-chevron,
   text-transform: none;
   color: var(--muted-foreground);
 }
-/* A card is a button: it gets its height from the content and wraps its text. */
-.market-card {
-  justify-content: flex-start;
+/* Catalog: sections of cards, each card with a picture of its bees on top. */
+.market-hero {
+  position: relative;
+  gap: 20px;
+  padding: 22px 24px;
+  overflow: hidden;
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgb(245 181 68 / 16%), transparent 55%),
+    radial-gradient(90% 120% at 100% 100%, rgb(110 168 254 / 10%), transparent 60%),
+    var(--surface-2);
+}
+.market-hero::after {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(255 255 255 / 5%) 1px, transparent 1px);
+  background-size: 14px 14px;
+  content: '';
+  mask-image: linear-gradient(90deg, black, transparent 70%);
+  pointer-events: none;
+}
+.market-hero > * {
+  position: relative;
+  z-index: 1;
+}
+.market-hero h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+}
+.market-hero-flock {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.market-hero-flock .market-portrait + .market-portrait {
+  margin-left: -12px;
+}
+.market-hero-flock .market-portrait:nth-child(2) {
+  z-index: 1;
+}
+.market-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.market-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.market-section-title span {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 7%);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+}
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.market-grid > li {
+  display: flex;
+}
+.market .market-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   align-items: stretch;
+  justify-content: flex-start;
+  width: 100%;
   height: auto;
   min-height: 0;
-  font-weight: 400;
-  white-space: normal;
-}
-.market-card-head {
-  justify-content: flex-start;
-  font-size: 14px;
-}
-.market-card-meta,
-.market-card-text {
-  display: block;
-  overflow-wrap: anywhere;
-}
-/* Not the light hover of the app's primary buttons: a card only lifts a little. */
-.market-card:hover:not(:disabled),
-.market-card:focus-visible {
-  border-color: rgb(255 255 255 / 30%);
-  background: rgb(255 255 255 / 4%);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface-2);
   color: var(--foreground);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+.market .market-card:hover:not(:disabled),
+.market .market-card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--surface-2);
+  color: var(--foreground);
+  box-shadow: 0 10px 30px -12px color-mix(in srgb, var(--accent) 45%, transparent);
+  transform: translateY(-2px);
+}
+.market-cover {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 116px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(
+      80% 120% at 50% 110%,
+      color-mix(in srgb, var(--accent) 38%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 14%, var(--surface)), var(--surface));
+}
+.market-cover.large {
+  flex: none;
+  width: 150px;
+  height: 120px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+}
+/* A faint honeycomb behind the bees. */
+.market-cover-comb {
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(
+      30deg,
+      transparent 47%,
+      color-mix(in srgb, var(--accent) 30%, transparent) 48%,
+      transparent 52%
+    ),
+    linear-gradient(
+      150deg,
+      transparent 47%,
+      color-mix(in srgb, var(--accent) 30%, transparent) 48%,
+      transparent 52%
+    ),
+    linear-gradient(
+      90deg,
+      transparent 47%,
+      color-mix(in srgb, var(--accent) 22%, transparent) 48%,
+      transparent 52%
+    );
+  background-size: 26px 45px;
+  mask-image: radial-gradient(circle at 50% 60%, black, transparent 75%);
+}
+.market .market-card:hover .market-portrait {
+  transform: translateY(-3px) scale(1.04);
+}
+.market-portrait {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--portrait, 64px);
+  height: var(--portrait, 64px);
+  border: 2px solid color-mix(in srgb, var(--accent, #f5b544) 70%, transparent);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    color-mix(in srgb, var(--accent, #f5b544) 30%, var(--surface-2)),
+    var(--surface) 75%
+  );
+  box-shadow:
+    0 0 0 4px var(--surface),
+    0 6px 18px -6px color-mix(in srgb, var(--accent, #f5b544) 60%, transparent);
+  color: var(--accent, #f5b544);
+  transition: transform 160ms ease;
+}
+.market-portrait-insignia {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  color: #111;
+}
+.market-team {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.market-team > * + * {
+  margin-left: -14px;
+}
+.market-team-more {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 10%);
+  font-size: 12px;
+}
+.market-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 999px;
+  background: rgb(8 9 10 / 70%);
+  backdrop-filter: blur(6px);
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 500;
+}
+.market-chip.ok {
+  border-color: rgb(76 214 160 / 35%);
+  color: var(--success);
+}
+.market-chip.warn {
+  color: var(--warning);
+}
+/* Card header: a small round portrait, the name, and what kind of package it is. */
+.market-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 0;
+}
+.market-card-head > .market-chip {
+  align-self: flex-start;
+  flex: none;
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  backdrop-filter: none;
+}
+.market-card-title {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.market-card-title .market-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.market-avatar {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+}
+.market-avatar .market-portrait {
+  box-shadow:
+    0 0 0 3px var(--surface-2),
+    0 4px 14px -6px color-mix(in srgb, var(--accent, #f5b544) 60%, transparent);
+}
+.market-avatar-count {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  padding: 1px 6px;
+  border: 2px solid var(--surface-2);
+  border-radius: 999px;
+  background: var(--accent);
+  color: #111;
+  font-size: 10px;
+  font-weight: 700;
+}
+.market .market-card:hover .market-avatar .market-portrait {
+  transform: scale(1.06);
+}
+.market-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 12px;
+}
+.market-card-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+.market-card-meta {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.market-card-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--foreground) 82%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.market-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.market-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.market-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-weight: 500;
+  transition: background 160ms ease;
+}
+.market .market-card:hover .market-card-cta {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+/* Preview: the package's picture next to its name, and a portrait per agent. */
+.market-modal-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.market-modal-body ul.market-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 0;
+  list-style: none;
+}
+.market-agents li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 2%);
+}
+.market-agents li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.market-role {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.market-installed li {
+  gap: 14px;
+}
+.market-modal-hero h2 {
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+/* What it can do: a grid of tools, the sensitive ones marked. */
+.market-modal-body ul.market-permissions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding-left: 0;
+  list-style: none;
+}
+.market-permissions li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.market-permissions li > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.market-permissions li small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.market-permissions li.sensitive {
+  border-color: rgb(245 181 68 / 30%);
+  background: rgb(245 181 68 / 5%);
+}
+.market-permissions li.sensitive strong {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(245 181 68 / 15%);
+  font-size: 10.5px;
 }
 
 /* Section titles of these pages: the icon sits next to its title, not at the other end. */
@@ -8494,4 +8838,36 @@ nav.compact .nav-chevron,
 .market .home-label {
   justify-content: flex-start;
   gap: 6px;
+}
+
+/* Projects in the sidebar: a bin shows on hover to take a project off the list. */
+.tree-root-row {
+  position: relative;
+}
+.tree-remove {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+}
+.tree-root-row:hover .tree-remove,
+.tree-remove:focus-visible {
+  opacity: 1;
+}
+.tree-root-row:hover .tree-root .count {
+  visibility: hidden;
+}
+.tree-remove:hover:not(:disabled) {
+  border-color: transparent;
+  background: rgb(248 113 133 / 14%);
+  color: var(--danger);
 }

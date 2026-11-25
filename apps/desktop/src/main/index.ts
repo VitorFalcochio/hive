@@ -112,7 +112,7 @@ const windows = new WindowManager({
     push.kind === 'files' ||
     push.kind === 'update' ||
     push.kind === 'agentChat' ||
-    (push.kind === 'changed' && (push.entity === 'guardian' || push.entity === 'browser'))
+    (push.kind === 'changed' && push.entity === 'guardian')
       ? false
       : push.kind === 'terminal'
         ? !!desktopService?.isCanvasTerminal(

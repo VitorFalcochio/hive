@@ -4679,3 +4679,58 @@ button.nc-flow-action.primary {
   color: var(--muted-foreground);
   font-size: 11px;
 }
+
+/* Browser block: the Hive Browser inside the canvas, filling the block. */
+.nc-browser {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.nc-browser-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px;
+  cursor: default;
+}
+.nc-browser-body .hive-browser {
+  flex: 1;
+  gap: 8px;
+}
+.hive-browser.compact .hive-browser-body {
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(0, 1fr) auto;
+}
+.hive-browser.compact .hive-browser-view {
+  min-height: 0;
+  padding: 6px;
+}
+.hive-browser.compact .hive-browser-view img {
+  max-height: 100%;
+  object-fit: contain;
+}
+.hive-browser.compact .hive-browser-side {
+  max-height: 190px;
+}
+.hive-browser.compact .hive-browser-console {
+  min-height: 60px;
+  max-height: 110px;
+}
+.hive-browser.compact .hive-browser-bar button {
+  position: relative;
+}
+.hive-browser.compact .hive-browser-bar .hive-browser-errors {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+}
+.nc-browser-body .hive-browser-type label,
+.nc-browser-body .hive-browser-side h3 {
+  flex-direction: row;
+  justify-content: flex-start;
+  text-align: left;
+}

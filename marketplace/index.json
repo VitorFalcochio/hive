@@ -2,16 +2,70 @@
   "schemaVersion": 1,
   "packages": [
     {
+      "id": "analista-de-requisitos",
+      "version": "1.0.0",
+      "path": "packages/analista-de-requisitos.json",
+      "sha256": "8b8a368a14aff1e6fae86651a3a46f7cca4e852e3785cccc2694a4efea54029d"
+    },
+    {
+      "id": "detetive-de-bugs",
+      "version": "1.0.0",
+      "path": "packages/detetive-de-bugs.json",
+      "sha256": "58296672f164f1e1d81fd58f192ff24c0c6a324fd5cbc142e153a7840bef5121"
+    },
+    {
+      "id": "dev-de-interface",
+      "version": "1.0.0",
+      "path": "packages/dev-de-interface.json",
+      "sha256": "a6ae437e0a6179e5b3689de8fed35db1033650525897c2bed783fc8d17c61846"
+    },
+    {
+      "id": "engenheiro-de-banco-de-dados",
+      "version": "1.0.0",
+      "path": "packages/engenheiro-de-banco-de-dados.json",
+      "sha256": "9329541b70803243353ece4376de43ed33b445eaf4b1acdb055892b4cad8971f"
+    },
+    {
+      "id": "engenheiro-de-integracao",
+      "version": "1.0.0",
+      "path": "packages/engenheiro-de-integracao.json",
+      "sha256": "0f59349ec0886134c38e8cff70e604fa731d0d186d8ed83ea44cb5ebcfab2da1"
+    },
+    {
+      "id": "engenheiro-de-performance",
+      "version": "1.0.0",
+      "path": "packages/engenheiro-de-performance.json",
+      "sha256": "9e6e76b0d67cd1fe00ff0f27805c57d3750516040ce002a7a9b0dc8a67e7d9fb"
+    },
+    {
+      "id": "engenheiro-de-seguranca",
+      "version": "1.0.0",
+      "path": "packages/engenheiro-de-seguranca.json",
+      "sha256": "e328249863819c5253355f24450a1d867e57e69394a8f88b7fcb835547b63983"
+    },
+    {
       "id": "esquadrao-web",
       "version": "1.0.0",
       "path": "packages/esquadrao-web.json",
       "sha256": "5e62d13a141ea88e41077da74d59b009a5274f97a7bdda05b31e4fbf2b4e19d8"
     },
     {
+      "id": "explorador-de-codigo",
+      "version": "1.0.0",
+      "path": "packages/explorador-de-codigo.json",
+      "sha256": "3cb709df073afcd4eaa2af451bd6283a7778efb7b5d477e490a8362b9647e28b"
+    },
+    {
       "id": "qa-de-interface",
       "version": "1.0.0",
       "path": "packages/qa-de-interface.json",
       "sha256": "a4af90e9f30461f88d7b565bc0b1af553c51df8a1c32e438c77a52ad274c8f58"
+    },
+    {
+      "id": "qa-web",
+      "version": "1.0.0",
+      "path": "packages/qa-web.json",
+      "sha256": "eaa5fe64abffbce57a5cf0f2d761d58b6cecdfc290e442324cba0f46e7dc356c"
     },
     {
       "id": "revisor-de-acessibilidade",

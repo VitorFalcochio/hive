@@ -19,6 +19,7 @@ export type CommandIcon =
   | 'tokens'
   | 'dialogue'
   | 'delivery'
+  | 'browser'
   | 'provider'
   | 'terminal'
   | 'claude'
@@ -50,6 +51,7 @@ export type PaletteOperation =
   | 'new-tokens'
   | 'new-dialogue'
   | 'new-delivery'
+  | 'new-browser'
   | 'new-provider'
   | 'new-terminal'
   | 'new-claude'
@@ -291,6 +293,26 @@ export function registerCanvasCommands(registry: CommandRegistry<CommandContext>
     'delivery',
     'new-delivery',
     ['criar', 'bloco', 'entrega', 'requisitos', 'verificação', 'pronto', 'confiança', 'checklist'],
+  );
+  command(
+    'create.browser',
+    'Navegador',
+    'Bloco com o Hive Browser: abra o app do projeto e veja ao vivo as abas que os agentes de QA usam para testar.',
+    'Criar',
+    'browser',
+    'new-browser',
+    [
+      'criar',
+      'bloco',
+      'navegador',
+      'browser',
+      'chromium',
+      'site',
+      'página',
+      'testar',
+      'qa',
+      'preview',
+    ],
   );
   command(
     'create.schedule',

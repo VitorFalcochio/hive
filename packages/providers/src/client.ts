@@ -15,6 +15,51 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 type FetchLike = typeof fetch;
 
 /**
+ * The history without Gemini's per-call data, for any other provider: after a failover the
+ * same conversation goes elsewhere, and a strict API may refuse a field it does not know.
+ */
+function withoutExtraContent(messages: ChatRequest['messages']): ChatRequest['messages'] {
+  return messages.map((message) =>
+    message.role === 'assistant' && message.tool_calls?.some((call) => call.extra_content)
+      ? {
+          ...message,
+          tool_calls: message.tool_calls.map(({ extra_content: _dropped, ...call }) => call),
+        }
+      : message,
+  );
+}
+
+/**
+ * Gemini's documented stand-in for a call it did not make. After a failover to Gemini, the
+ * history holds tool calls from other models, which never had a signature; Gemini 3 refuses
+ * the whole request (400) unless each of those carries this value.
+ */
+export const FOREIGN_CALL_SIGNATURE = 'skip_thought_signature_validator';
+
+/** The history for Gemini: its own calls keep their signature, every other call gets the stand-in. */
+function withGeminiSignatures(messages: ChatRequest['messages']): ChatRequest['messages'] {
+  return messages.map((message) =>
+    message.role === 'assistant' && message.tool_calls?.length
+      ? {
+          ...message,
+          tool_calls: message.tool_calls.map((call) => {
+            const google = call.extra_content?.google as
+              { thought_signature?: unknown } | undefined;
+            if (typeof google?.thought_signature === 'string') return call;
+            return {
+              ...call,
+              extra_content: {
+                ...call.extra_content,
+                google: { ...google, thought_signature: FOREIGN_CALL_SIGNATURE },
+              },
+            };
+          }),
+        }
+      : message,
+  );
+}
+
+/**
  * Client for OpenAI-compatible Chat Completions APIs (OpenAI, Groq, NVIDIA, DeepSeek,
  * OpenRouter and local servers). Error messages are redacted before they leave this class.
  */
@@ -138,7 +183,13 @@ export class OpenAICompatibleClient implements ChatClient {
   }
 
   async chat(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
-    const payload: Record<string, unknown> = { model: request.model, messages: request.messages };
+    const payload: Record<string, unknown> = {
+      model: request.model,
+      messages:
+        this.endpoint.kind === 'gemini'
+          ? withGeminiSignatures(request.messages)
+          : withoutExtraContent(request.messages),
+    };
     if (request.tools?.length) payload.tools = request.tools;
     if (request.temperature !== null && request.temperature !== undefined)
       payload.temperature = request.temperature;
@@ -191,6 +242,7 @@ export class OpenAICompatibleClient implements ChatClient {
                 id: call.id || `call_${index}`,
                 type: 'function' as const,
                 function: { name: call.function.name, arguments: call.function.arguments ?? '{}' },
+                ...(call.extra_content ? { extra_content: call.extra_content } : {}),
               })),
             }
           : {}),

@@ -21,6 +21,7 @@ import {
   CalendarClock,
   FlaskConical,
   Stamp,
+  Globe,
 } from 'lucide-react';
 import { PixelDrop } from './cortex/nectar-art';
 import type { ComponentType } from 'react';
@@ -52,6 +53,7 @@ const icons: Record<CommandIcon, ComponentType<{ size?: number }>> = {
   tokens: Gauge,
   dialogue: MessagesSquare,
   delivery: ShieldCheck,
+  browser: Globe,
   provider: Plug,
   terminal: SquareTerminal,
   claude: ClaudeLogo,

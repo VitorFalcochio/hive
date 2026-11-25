@@ -525,7 +525,7 @@ export class DesktopService {
       }
       this.repos.setValue('seeded', '1');
     }
-    this.installSpecialists();
+    this.retireBundledSpecialists();
     this.raiseLimits();
     this.detachWorkers();
     // Projects from before the default Nectar get theirs once; new ones get it when opened.
@@ -631,43 +631,29 @@ export class DesktopService {
    * Each skill only once: one the user deleted, or took off an agent, stays that way.
    */
   /**
-   * The specialist agents (Codebase Explorer, Debug Detective…), each once: new installs and
-   * existing ones get them, without a provider, for the user to configure. One the user deleted
-   * is not brought back, and a role that already has an agent of the user's gets no second one.
+   * Hive itself keeps only the default team; the specialists (Codebase Explorer, Debug
+   * Detective…) live in the Marketplace, one package each. Once: the specialists an earlier
+   * version put in by itself go away, but only those the user never touched (no model, same
+   * name, instructions and tools as shipped) and that never took a task. Anything the user
+   * configured or used stays.
    */
-  private installSpecialists(): void {
-    let done: string[] = [];
-    try {
-      done = JSON.parse(this.repos.getValue('specialistsInstalled') ?? '[]') as string[];
-    } catch {
-      // A damaged list installs again; a role that already has an agent is skipped below.
+  private retireBundledSpecialists(): void {
+    if (this.repos.getValue('specialistsRetired') === '1') return;
+    for (const worker of this.repos.workers.list()) {
+      if (!specialistRoles.includes(worker.role) || worker.team) continue;
+      const preset = rolePresets[worker.role];
+      const untouched =
+        !worker.providerId &&
+        !worker.modelId &&
+        worker.name === preset.label &&
+        worker.systemPrompt === preset.systemPrompt &&
+        worker.description === preset.description &&
+        worker.tools.join() === preset.tools.join();
+      if (!untouched) continue;
+      if (this.repos.tasks.list('worker_id = ?', worker.id).length) continue;
+      this.repos.workers.delete(worker.id);
     }
-    const fresh = specialistRoles.filter((role) => !done.includes(role));
-    if (!fresh.length) return;
-    const existing = this.repos.workers.list();
-    for (const role of fresh) {
-      if (existing.some((worker) => worker.role === role && !worker.team)) continue;
-      const preset = rolePresets[role];
-      this.repos.workers.put({
-        id: newId('worker'),
-        name: preset.label,
-        role,
-        beeColor: null,
-        squad: [],
-        description: preset.description,
-        providerId: null,
-        modelId: null,
-        skills: preset.skills,
-        tools: preset.tools,
-        autoApproveCommands: [],
-        mcpServers: [],
-        systemPrompt: preset.systemPrompt,
-        limits: { ...this.repos.getSettings().defaultLimits },
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
-      });
-    }
-    this.repos.setValue('specialistsInstalled', JSON.stringify([...done, ...fresh]));
+    this.repos.setValue('specialistsRetired', '1');
   }
 
   async installBuiltinSkills(): Promise<void> {
@@ -1186,8 +1172,8 @@ export class DesktopService {
    * After the Queen plans, the blocks every mission wants on its canvas without asking: the
    * project's Nectar (created with the team if the project has none yet), a Tokens card above
    * the agent windows, a card for each provider the team uses, left of the Queen, so the lines
-   * show who runs on what, and the Dialogue with the team's conversation. A canvas that already
-   * has any of them keeps its own.
+   * show who runs on what, the Dialogue with the team's conversation, and the Browser when a QA
+   * tests in the Hive Browser. A canvas that already has any of them keeps its own.
    */
   private scaffoldBlocks(runId: string): void {
     try {
@@ -1208,16 +1194,26 @@ export class DesktopService {
       const deliveries = layout.deliveries.length
         ? layout.deliveries
         : [{ id: `delivery:auto-${runId}`, x: -820, y: 430 }];
+      // A QA that tests in the Hive Browser: its tabs, live, left of the conversation.
+      const testsInBrowser = this.repos.tasks.list('run_id = ?', runId).some((task) => {
+        const worker = task.workerId ? this.repos.workers.get(task.workerId) : null;
+        return !!worker && worker.role === 'qa' && worker.tools.includes('view_page');
+      });
+      const browsers =
+        layout.browsers.length || !testsInBrowser
+          ? layout.browsers
+          : [{ id: `browser:auto-${runId}`, x: -1600, y: -60 }];
       if (
         meters === layout.meters &&
         providers === layout.providers &&
         dialogues === layout.dialogues &&
-        deliveries === layout.deliveries
+        deliveries === layout.deliveries &&
+        browsers === layout.browsers
       )
         return;
       this.repos.setValue(
         `canvasLayout:${runId}`,
-        JSON.stringify({ ...layout, meters, providers, dialogues, deliveries }),
+        JSON.stringify({ ...layout, meters, providers, dialogues, deliveries, browsers }),
       );
       this.push({ kind: 'changed', entity: 'layout', id: runId });
     } catch {
@@ -1901,7 +1897,18 @@ export class DesktopService {
         return;
       }
       case 'workspace.remove': {
+        // Takes the project off Hive's list; its folder and files on disk stay as they are.
         const id = parse(channel);
+        const busy = this.repos.runs
+          .list('workspace_id = ?', id)
+          .some((run) => run.status === 'planning' || run.status === 'running');
+        if (busy)
+          throw new HiveError(
+            'CONFLICT',
+            'Este projeto tem uma missão em andamento. Pare a missão antes de remover o projeto.',
+          );
+        // Its tab, terminals and preview close first, as when the tab is closed.
+        if (this.openedWorkspaceIds().includes(id)) await this.invoke('workspace.close', id);
         this.agentChats.cancelWorkspace(id);
         this.repos.workspaces.delete(id);
         if (this.repos.getValue('activeWorkspace') === id)

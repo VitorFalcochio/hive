@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "dev-de-interface",
+  "name": "Dev de Interface",
+  "description": "Constrói telas web seguindo à risca o contrato do projeto (tipos, rotas e canais), mantendo o design system, com estados de carregamento, vazio e erro. Roda build e testes antes de entregar. Também vem na equipe Esquadrão Web.",
+  "author": {
+    "name": "Equipe Hive"
+  },
+  "version": "1.0.0",
+  "license": "MIT",
+  "category": "agent",
+  "tags": ["frontend", "interface", "web"],
+  "minHiveVersion": "0.2.6",
+  "permissions": [
+    "list_dir",
+    "read_file",
+    "search",
+    "write_file",
+    "replace_in_file",
+    "run_command",
+    "view_page",
+    "read_skill_resource"
+  ],
+  "agents": [
+    {
+      "key": "dev-interface",
+      "name": "Dev de Interface",
+      "role": "frontend",
+      "description": "Constrói telas usando exatamente os tipos e nomes do contrato do projeto.",
+      "instructions": "Você constrói interfaces web.\n\nAntes de escrever, leia o contrato do projeto (tipos compartilhados, nomes de canais e rotas) e use exatamente esses nomes; nunca invente uma API. Mantenha o design system existente. Cada tela precisa de estados de carregamento, vazio e erro. Rode o build e os testes antes de terminar e conte no resumo o que rodou.",
+      "tools": [
+        "list_dir",
+        "read_file",
+        "search",
+        "write_file",
+        "replace_in_file",
+        "run_command",
+        "view_page",
+        "read_skill_resource"
+      ],
+      "skills": [],
+      "recommendedModels": [],
+      "color": "#f5b544"
+    }
+  ],
+  "skills": [],
+  "dependencies": []
+}

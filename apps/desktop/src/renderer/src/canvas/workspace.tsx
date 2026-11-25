@@ -80,6 +80,7 @@ const FRAME_SIZE = { width: 560, height: 380 };
 const METER_SIZE = { width: 280, height: 210 };
 const DIALOGUE_SIZE = { width: 380, height: 460 };
 const DELIVERY_SIZE = { width: 380, height: 420 };
+const BROWSER_SIZE = { width: 720, height: 560 };
 const PROVIDER_SIZE = { width: 320, height: 216 };
 /** A provider block folded to its logo. */
 const PROVIDER_CHIP = { width: 76, height: 76 };
@@ -570,6 +571,19 @@ export function Workspace({
         className: 'nc-flow-delivery',
       });
     }
+    for (const block of layout.browsers) {
+      const size = layout.sizes[block.id] ?? BROWSER_SIZE;
+      placed.push({
+        id: block.id,
+        type: 'browser',
+        position: { x: block.x, y: block.y },
+        data: { ref: block.id },
+        width: size.width,
+        height: size.height,
+        zIndex: 2,
+        className: 'nc-flow-browser',
+      });
+    }
     for (const note of layout.notes) {
       const size = layout.sizes[note.id] ?? NOTE_SIZE;
       placed.push({
@@ -591,6 +605,7 @@ export function Workspace({
     layout.meters,
     layout.dialogues,
     layout.deliveries,
+    layout.browsers,
     layout.providers,
     layout.terminals,
     layout.flow,
@@ -1001,6 +1016,14 @@ export function Workspace({
     },
     [layoutApi, select],
   );
+  const addBrowser = useCallback(
+    (at: { x: number; y: number }) => {
+      const id = localId('browser');
+      layoutApi.addBrowser({ id, x: Math.round(at.x), y: Math.round(at.y) });
+      select({ kind: 'node', id });
+    },
+    [layoutApi, select],
+  );
   const addProviderBlock = useCallback(
     (at: { x: number; y: number }) => {
       const id = localId('provider');
@@ -1049,6 +1072,7 @@ export function Workspace({
       else if (kind === 'tokens') addMeter(at);
       else if (kind === 'dialogue') addDialogue(at);
       else if (kind === 'delivery') addDelivery(at);
+      else if (kind === 'browser') addBrowser(at);
       else if (kind === 'provider') addProviderBlock(at);
       else if (kind === 'terminal') addTerminalBlock(at, 'shell');
       else if (kind === 'claude') addTerminalBlock(at, 'claude');
@@ -1060,6 +1084,7 @@ export function Workspace({
       addMeter,
       addDialogue,
       addDelivery,
+      addBrowser,
       addProviderBlock,
       addTerminalBlock,
       addFlowBlock,
@@ -1101,6 +1126,7 @@ export function Workspace({
             node.type === 'tokens' ||
             node.type === 'dialogue' ||
             node.type === 'delivery' ||
+            node.type === 'browser' ||
             node.type === 'provider' ||
             node.type === 'terminal' ||
             node.type === 'flow'),
@@ -1267,7 +1293,8 @@ export function Workspace({
       node.type === 'tokens' ||
       node.type === 'provider' ||
       node.type === 'dialogue' ||
-      node.type === 'delivery'
+      node.type === 'delivery' ||
+      node.type === 'browser'
     )
       return {
         title: {
@@ -1275,6 +1302,7 @@ export function Workspace({
           provider: 'Provedor',
           dialogue: 'Diálogo',
           delivery: 'Entrega',
+          browser: 'Navegador',
         }[node.type],
         items: [{ label: 'Excluir bloco', run: () => layoutApi.remove([node.id]) }],
       };
@@ -1607,6 +1635,10 @@ export function Workspace({
     'new-delivery': () => {
       const at = center();
       addDelivery({ x: at.x - DELIVERY_SIZE.width / 2, y: at.y - DELIVERY_SIZE.height / 2 });
+    },
+    'new-browser': () => {
+      const at = center();
+      addBrowser({ x: at.x - BROWSER_SIZE.width / 2, y: at.y - BROWSER_SIZE.height / 2 });
     },
     'new-dialogue': () => {
       const at = center();

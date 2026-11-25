@@ -21,9 +21,9 @@ import {
   ShieldQuestion,
   SquareTerminal,
   Timer,
+  Trash2,
   X,
   ShieldCheck,
-  Globe,
   Store,
 } from 'lucide-react';
 import type {
@@ -62,7 +62,6 @@ import { AboutPage, OverviewPage, ProvidersPage } from './pages';
 import { HiveField } from './home-field';
 import { SkillsPage } from './skills';
 import { GuardianPage } from './guardian';
-import { BrowserPage } from './browser';
 import { MarketplacePage } from './marketplace';
 import { Dot } from './ui';
 
@@ -75,8 +74,6 @@ const navigation: { view: View; label: string; icon: typeof Bot }[] = [
   // 'agents' is drawn on its own, as the Agentes accordion, between these two.
   { view: 'providers', label: 'Provedores', icon: Plug },
   { view: 'skills', label: 'Skills', icon: BookOpen },
-  { view: 'marketplace', label: 'Marketplace', icon: Store },
-  { view: 'browser', label: 'Navegador', icon: Globe },
   { view: 'guardian', label: 'Guardian', icon: ShieldCheck },
 ];
 /** A sidebar layout choice remembered on this machine; storage may be unavailable. */
@@ -114,7 +111,6 @@ const viewTitles: Record<View, string> = {
   providers: 'Provedores',
   skills: 'Skills',
   guardian: 'Guardian',
-  browser: 'Navegador',
   marketplace: 'Marketplace',
   about: 'Sobre',
   settings: 'Configurações',
@@ -505,6 +501,36 @@ export function App() {
     }
   }
 
+  /** Takes a project off the list; its folder and files on the computer stay as they are. */
+  async function removeProject(workspace: Workspace) {
+    if (projectHasUnsavedChanges(workspace.id)) {
+      context.fail(
+        new Error(
+          `Salve ou descarte as alterações de ${workspace.name} antes de remover o projeto.`,
+        ),
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `Remover o projeto "${workspace.name}" do Hive?\n\nEle sai da barra lateral com as missões dele. A pasta e os arquivos no seu computador não são apagados; dá para abrir de novo depois.`,
+      )
+    )
+      return;
+    try {
+      if (workspace.id === activeWorkspace?.id) setDetail(null);
+      lastPlace.current.delete(workspace.id);
+      await window.hive.invoke('workspace.remove', workspace.id);
+      await refresh();
+      const { disposeProjectDocs } = await import('./code/monaco');
+      disposeProjectDocs(workspace.id);
+      useCode.getState().dropProject(workspace.id);
+      context.notify(`${workspace.name} removido do Hive. A pasta continua no seu computador.`);
+    } catch (failure) {
+      context.fail(failure);
+    }
+  }
+
   // The splash keeps its place (second child) as the app appears under it, so its animation
   // carries on while it fades instead of starting over.
   if (splash === 'on')
@@ -580,7 +606,8 @@ export function App() {
                 it opens the team page. */}
               <button
                 className={
-                  (page === 'agents' || page === 'agentChat') && (agentsClosed || sidebarIcons)
+                  (page === 'agents' || page === 'agentChat' || page === 'marketplace') &&
+                  (agentsClosed || sidebarIcons)
                     ? 'nav-item selected'
                     : 'nav-item'
                 }
@@ -606,6 +633,14 @@ export function App() {
                   >
                     <SlidersHorizontal size={13} />
                     <span className="truncate">Gerenciar agentes</span>
+                  </button>
+                  <button
+                    className={page === 'marketplace' ? 'nav-subitem selected' : 'nav-subitem'}
+                    aria-current={page === 'marketplace' ? 'page' : undefined}
+                    onClick={() => setView('marketplace')}
+                  >
+                    <Store size={13} />
+                    <span className="truncate">Marketplace</span>
                   </button>
                   <span className="nav-sub-title">Chat com agentes</span>
                   {team.map((worker) => {
@@ -677,31 +712,43 @@ export function App() {
                   <div key={workspace.id} className={active ? 'tree-group active' : 'tree-group'}>
                     {/* One row: a click opens another project with its missions shown, and on
                       the open project it shows or hides the missions. */}
-                    <button
-                      className="tree-root"
-                      aria-expanded={open}
-                      title={
-                        railed
-                          ? workspace.name
-                          : open && active
-                            ? 'Recolher missões'
-                            : 'Abrir projeto e missões'
-                      }
-                      onClick={() => {
-                        const collapse = active && open;
-                        setCollapsedProjects((current) =>
-                          collapse
-                            ? [...current, workspace.id]
-                            : current.filter((id) => id !== workspace.id),
-                        );
-                        if (!active) void activate(workspace);
-                      }}
-                    >
-                      <ChevronDown size={13} className={open ? 'chevron open' : 'chevron'} />
-                      {active ? <FolderOpen size={14} /> : <Folder size={14} />}
-                      <span className="truncate">{workspace.name}</span>
-                      <span className="count">{missions.length}</span>
-                    </button>
+                    <div className="tree-root-row">
+                      <button
+                        className="tree-root"
+                        aria-expanded={open}
+                        title={
+                          railed
+                            ? workspace.name
+                            : open && active
+                              ? 'Recolher missões'
+                              : 'Abrir projeto e missões'
+                        }
+                        onClick={() => {
+                          const collapse = active && open;
+                          setCollapsedProjects((current) =>
+                            collapse
+                              ? [...current, workspace.id]
+                              : current.filter((id) => id !== workspace.id),
+                          );
+                          if (!active) void activate(workspace);
+                        }}
+                      >
+                        <ChevronDown size={13} className={open ? 'chevron open' : 'chevron'} />
+                        {active ? <FolderOpen size={14} /> : <Folder size={14} />}
+                        <span className="truncate">{workspace.name}</span>
+                        <span className="count">{missions.length}</span>
+                      </button>
+                      {!railed && (
+                        <button
+                          className="tree-remove"
+                          aria-label={`Remover ${workspace.name} do Hive`}
+                          title="Remover projeto do Hive (os arquivos ficam no computador)"
+                          onClick={() => void removeProject(workspace)}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
                     {open && !railed && (
                       <div className="tree-missions">
                         <MissionCards
@@ -806,7 +853,6 @@ export function App() {
               {page === 'providers' && <ProvidersPage />}
               {page === 'skills' && <SkillsPage />}
               {page === 'guardian' && <GuardianPage />}
-              {page === 'browser' && <BrowserPage />}
               {page === 'marketplace' && <MarketplacePage />}
               {page === 'about' && <AboutPage />}
               {page === 'settings' && <SettingsPage settings={settings} onSaved={refresh} />}

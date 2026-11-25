@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "explorador-de-codigo",
+  "name": "Codebase Explorer",
+  "description": "Mapeia o repositório antes do trabalho começar: estrutura, tecnologias, arquivos relevantes e pontos de integração. Só lê, não altera.",
+  "author": {
+    "name": "Equipe Hive"
+  },
+  "version": "1.0.0",
+  "license": "MIT",
+  "category": "agent",
+  "tags": ["exploração", "arquitetura", "leitura de código"],
+  "minHiveVersion": "0.2.6",
+  "permissions": ["list_dir", "read_file", "search", "read_skill_resource", "view_page"],
+  "agents": [
+    {
+      "key": "explorador-de-codigo",
+      "name": "Codebase Explorer",
+      "role": "explorer",
+      "description": "Mapeia o repositório antes do trabalho começar: estrutura, tecnologias, arquivos relevantes e pontos de integração. Só lê, não altera.",
+      "instructions": "You are a codebase explorer. Your job is to understand the repository so others can change it safely. You only read: never create, edit or delete files.\n\nMap the project structure, frameworks and tools, the files and modules relevant to the task, their dependencies, the conventions the code follows and the points where new work should plug in.\n\nBack every claim with evidence: relative file paths, and line numbers or short quotes where they matter. Say when something is a guess.\n\nFinish with a structured report: Summary; Relevant files (path: why it matters); Conventions; Integration points; Risks; Recommendations for whoever implements.",
+      "tools": ["list_dir", "read_file", "search", "read_skill_resource", "view_page"],
+      "skills": ["documentation-and-adrs", "api-and-interface-design"],
+      "recommendedModels": []
+    }
+  ],
+  "skills": [],
+  "dependencies": []
+}

@@ -2,7 +2,9 @@
 
 Instale agentes, equipes e skills feitos pela comunidade e use nos seus projetos. Também dá para compartilhar os seus agentes.
 
-Para abrir: menu lateral → **Marketplace**.
+Para abrir: menu lateral → **Agentes** → **Marketplace** (logo abaixo de Gerenciar agentes), ou o botão **Marketplace** no topo da página Agentes.
+
+**O Hive vem só com a equipe padrão**: Queen, Arquiteto, Frontend, Backend, QA e Revisor. Os demais agentes ficam no Marketplace, **um por um** ou em **equipes**, e cada agente de uma equipe também é vendido sozinho.
 
 ## Como usar
 
@@ -43,7 +45,13 @@ Para abrir: menu lateral → **Marketplace**.
 ## Catálogo e contribuição
 
 - `marketplace/index.json`: id, versão, arquivo e hash de cada pacote. É gerado com `node scripts/marketplace-index.mjs`.
-- `marketplace/packages/*.json`: três pacotes iniciais da Equipe Hive: **QA de Interface** (testa no Hive Browser), **Revisor de Acessibilidade** e a equipe **Esquadrão Web**.
+- `marketplace/packages/*.json`, 12 pacotes da Equipe Hive:
+  - os 7 especialistas que antes vinham instalados: Codebase Explorer, Debug Detective, Security Engineer, Database Engineer, Performance Engineer, Integration Engineer e Requirements Analyst;
+  - **QA de Interface**, que testa no Hive Browser;
+  - **Revisor de Acessibilidade**;
+  - a equipe **Esquadrão Web**;
+  - os dois agentes do Esquadrão Web vendidos sozinhos: **Dev de Interface** e **QA Web**.
+- Saída dos especialistas: na primeira abertura desta versão, o Hive remove os especialistas que ele mesmo instalou, mas só os que você **nunca configurou** (sem modelo, com nome, instruções e ferramentas originais) e que **nunca receberam tarefa**. Os que você usou ou mudou ficam. Para ter um de volta, instale pelo Marketplace.
 - `marketplace/CONTRIBUTING.md`: formato, regras e o processo por pull request.
 
 Os arquivos de `marketplace/` são o conteúdo pronto do futuro repositório `hive-marketplace`. **Nenhum repositório externo foi criado.** O catálogo **não tem avaliações nem downloads**: o Hive não inventa números.

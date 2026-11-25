@@ -6,6 +6,7 @@ import {
   Stamp,
   Frame,
   Gauge,
+  Globe,
   GripVertical,
   MessagesSquare,
   ShieldCheck,
@@ -25,6 +26,7 @@ export type BlockKind =
   | 'tokens'
   | 'dialogue'
   | 'delivery'
+  | 'browser'
   | 'provider'
   | 'terminal'
   | 'claude'
@@ -92,6 +94,17 @@ const categories: {
         title: 'Provedor',
         description: 'Escolha ou conecte um provedor e ligue-o a um agente.',
         icon: Plug,
+      },
+    ],
+  },
+  {
+    title: 'Testar o app',
+    blocks: [
+      {
+        kind: 'browser',
+        title: 'Navegador',
+        description: 'O Hive Browser: abra o app e veja ao vivo o QA testando.',
+        icon: Globe,
       },
     ],
   },

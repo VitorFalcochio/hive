@@ -61,8 +61,8 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
     const file = path.join(folder, 'test.sqlite');
     const first = setup(file);
     const workers = (await first.service.invoke('worker.list', undefined)) as Worker[];
-    // The six agents of the first version and the seven specialists.
-    expect(workers).toHaveLength(13);
+    // Only the default team: the specialists are in the Marketplace.
+    expect(workers).toHaveLength(6);
     const worker = workers[0]!;
     await first.service.invoke('worker.save', { ...worker, name: 'Minha equipe' });
     first.service.dispose();
@@ -71,11 +71,11 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
     databases.splice(databases.indexOf(first.db), 1);
     const second = setup(file);
     const reopened = (await second.service.invoke('worker.list', undefined)) as Worker[];
-    expect(reopened).toHaveLength(13);
+    expect(reopened).toHaveLength(6);
     expect(reopened.find((item) => item.id === worker.id)?.name).toBe('Minha equipe');
   });
 
-  it('uma instalação antiga recebe os especialistas uma vez; apagado não volta, e nada duplica', async () => {
+  it('especialistas postos pelo Hive saem uma vez, menos os configurados ou usados', async () => {
     const folder = await mkdtemp(path.join(os.tmpdir(), 'hive-service-'));
     const file = path.join(folder, 'test.sqlite');
     const reopen = async (prepare?: (repos: Repositories) => void) => {
@@ -88,39 +88,55 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
       databases.splice(databases.indexOf(db), 1);
       return workers;
     };
-    // As an install from before the specialists: six agents, one renamed and given a model.
+    // As an install from the version that put the seven specialists in by itself.
     await reopen((repos) => {
-      for (const worker of repos.workers.list())
-        if (specialistRoles.includes(worker.role)) repos.workers.delete(worker.id);
-      const backend = repos.workers.list().find((worker) => worker.role === 'backend')!;
-      repos.workers.put({ ...backend, name: 'Meu backend', providerId: null, modelId: 'x' });
-      // The user already made a security agent of their own.
-      repos.workers.put({ ...backend, id: 'w_sec', name: 'Segurança da casa', role: 'security' });
-      repos.setValue('specialistsInstalled', '');
+      const base = repos.workers.list().find((worker) => worker.role === 'backend')!;
+      for (const role of specialistRoles) {
+        const preset = rolePresets[role];
+        repos.workers.put({
+          ...base,
+          id: `w_${role}`,
+          role,
+          name: preset.label,
+          description: preset.description,
+          systemPrompt: preset.systemPrompt,
+          tools: preset.tools,
+          skills: preset.skills,
+          providerId: null,
+          modelId: null,
+        });
+      }
+      // The user gave one a model and renamed another; those are theirs now.
+      repos.workers.put({ ...repos.workers.require('w_security', 'a'), modelId: 'x' });
+      repos.workers.put({ ...repos.workers.require('w_database', 'a'), name: 'Meu banco' });
+      repos.setValue('specialistsRetired', '');
     });
-    const upgraded = await reopen((repos) => {
-      repos.workers.delete(repos.workers.list().find((worker) => worker.role === 'debugger')!.id);
-    });
-    // Six of the seven came: the user's own security agent stands for the seventh.
-    expect(upgraded.filter((worker) => specialistRoles.includes(worker.role))).toHaveLength(7);
-    expect(upgraded.filter((worker) => worker.role === 'security')).toHaveLength(1);
-    const backend = upgraded.find((worker) => worker.role === 'backend')!;
-    expect(backend.name).toBe('Meu backend');
-    expect(backend.modelId).toBe('x');
-    const explorer = upgraded.find((worker) => worker.role === 'explorer')!;
-    expect(explorer).toEqual(
-      expect.objectContaining({
-        name: 'Codebase Explorer',
+    const upgraded = await reopen();
+    expect(
+      upgraded
+        .filter((worker) => specialistRoles.includes(worker.role))
+        .map((w) => w.id)
+        .sort(),
+    ).toEqual(['w_database', 'w_security']);
+    expect(upgraded).toHaveLength(8);
+    // Once only: a specialist installed later (from the Marketplace) stays.
+    const later = await reopen((repos) => {
+      const preset = rolePresets.explorer;
+      const base = repos.workers.list()[0]!;
+      repos.workers.put({
+        ...base,
+        id: 'w_explorer',
+        role: 'explorer',
+        name: preset.label,
+        description: preset.description,
+        systemPrompt: preset.systemPrompt,
+        tools: preset.tools,
         providerId: null,
         modelId: null,
-        tools: rolePresets.explorer.tools,
-        skills: rolePresets.explorer.skills,
-      }),
-    );
-    // The Debug Detective the user deleted does not come back.
-    const after = await reopen();
-    expect(after.some((worker) => worker.role === 'debugger')).toBe(false);
-    expect(after).toHaveLength(upgraded.length - 1);
+      });
+    });
+    expect(later).toHaveLength(8);
+    expect((await reopen()).some((worker) => worker.id === 'w_explorer')).toBe(true);
   });
 
   it('cria missão de um repositório real, consulta API simulada e persiste o plano', async () => {
@@ -467,6 +483,29 @@ describe('desktop integrado aos serviços locais', { timeout: 30_000 }, () => {
     expect(log.toString().trim()).toBe('Projeto iniciado no Hive');
     const tracked = execFileSync('git', ['ls-files'], { cwd: folder, windowsHide: true });
     expect(tracked.toString()).toContain('index.html');
+  });
+
+  it('remover um projeto tira da lista e da aba, mantém os arquivos e recusa com missão rodando', async () => {
+    const folder = await mkdtemp(path.join(os.tmpdir(), 'hive-remove-'));
+    await writeFile(path.join(folder, 'index.html'), '<h1>Oi</h1>');
+    vi.stubEnv('GIT_CEILING_DIRECTORIES', path.dirname(folder));
+    const { service, db } = setup();
+    const workspace = (await service.invoke('workspace.initialize', { path: folder })) as Workspace;
+    const repos = new Repositories(db);
+    const { runId } = (await service.invoke('canvas.mission.create', {
+      workspaceId: workspace.id,
+      title: 'Pulse',
+      objective: 'Testar a remoção.',
+    })) as { runId: string };
+    repos.runs.put({ ...repos.runs.require(runId, 'Execução'), status: 'running' });
+    await expect(service.invoke('workspace.remove', workspace.id)).rejects.toThrow(
+      'missão em andamento',
+    );
+    repos.runs.put({ ...repos.runs.require(runId, 'Execução'), status: 'cancelled' });
+    await service.invoke('workspace.remove', workspace.id);
+    expect(await service.invoke('workspace.list', undefined)).toEqual([]);
+    expect(await service.invoke('workspace.tabs', undefined)).toEqual([]);
+    expect(await readFile(path.join(folder, 'index.html'), 'utf8')).toBe('<h1>Oi</h1>');
   });
 
   it('usa o agente configurado para propor uma edição sem alterar o arquivo', async () => {
